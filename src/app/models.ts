@@ -1,4 +1,6 @@
-export type TaskStatus = 'todo' | 'progress' | 'review' | 'done';
+export type TaskStatus = string;
+export type StatusKind = 'active' | 'done' | 'archived';
+export type TaskScope = 'all' | 'active' | 'done' | 'archived';
 export type Priority = 'high' | 'medium' | 'low';
 export type CategoryColor = 'violet' | 'blue' | 'green' | 'orange' | 'pink' | 'gray';
 
@@ -21,30 +23,47 @@ export interface Task {
   categoryId: string;
   status: TaskStatus;
   priority: Priority;
-  assignee: string;
+  startDate: string;
+  startTime: string;
   dueDate: string;
+  dueTime: string;
   subtasks: Subtask[];
 }
 
 export interface BoardState {
-  version: 1;
+  version: 3;
   projectName: string;
   categories: Category[];
+  statuses: BoardStatus[];
   tasks: Task[];
 }
 
-export const COLUMNS: {id: TaskStatus; label: string; subtitle: string}[] = [
-  {id: 'todo', label: '待辦事項', subtitle: '準備好，下一步就出發'},
-  {id: 'progress', label: '進行中', subtitle: '好點子正在成形'},
-  {id: 'review', label: '待審核', subtitle: '最後確認，更靠近完成'},
-  {id: 'done', label: '已完成', subtitle: '每一步，都值得記錄'}
-];
+export interface BoardStatus {
+  id: string;
+  label: string;
+  subtitle: string;
+  color: CategoryColor;
+  kind: StatusKind;
+  hidden?: boolean;
+}
 
-export const MEMBERS = [
-  {id: 'me', name: '我', initials: 'YC', color: 'sage'},
-  {id: 'mia', name: 'Mia Chen', initials: 'MC', color: 'peach'},
-  {id: 'alex', name: 'Alex Lin', initials: 'AL', color: 'lavender'},
-  {id: 'jamie', name: 'Jamie Wu', initials: 'JW', color: 'blue'}
+export interface Workspace extends BoardState {
+  id: string;
+  name: string;
+}
+
+export interface WorkspaceState {
+  version: 1;
+  activeWorkspaceId: string;
+  workspaces: Workspace[];
+}
+
+export const COLUMNS: BoardStatus[] = [
+  {id: 'todo', label: '待辦事項', subtitle: '準備好，下一步就出發', color: 'gray', kind: 'active', hidden: false},
+  {id: 'progress', label: '進行中', subtitle: '好點子正在成形', color: 'violet', kind: 'active', hidden: false},
+  {id: 'review', label: '待審核', subtitle: '最後確認，更靠近完成', color: 'orange', kind: 'active', hidden: false},
+  {id: 'done', label: '已完成', subtitle: '每一步，都值得記錄', color: 'green', kind: 'done', hidden: false},
+  {id: 'archived', label: '封存', subtitle: '保留紀錄，讓現在更專注', color: 'blue', kind: 'archived', hidden: true}
 ];
 
 export const PRIORITIES: {id: Priority; label: string}[] = [

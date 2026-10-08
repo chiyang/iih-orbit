@@ -3,13 +3,14 @@
     <button class="sidebar-scrim" aria-label="關閉側邊欄" (click)="sidebarOpen.set(false)"></button>
   }
   <aside class="sidebar" [class.is-open]="sidebarOpen()" [attr.inert]="modal() || (mobileViewport() && !sidebarOpen()) ? '' : null">
-    <a class="brand" href="/" aria-label="Orbit 首頁"><span class="brand-symbol"><app-icon name="leaf" /></span><span>orbit<span class="brand-dot">.</span></span></a>
-    <button class="workspace-switch" (click)="openProject()"><span class="workspace-icon">W</span><span><strong>我的工作空間</strong><small>把想法，變成進展</small></span><app-icon name="edit" /></button>
+    <a class="brand" href="/" aria-label="TMU IIH Orbit 首頁"><span class="brand-symbol"><app-icon name="leaf" /></span><span class="brand-wordmark"><span class="brand-institution">TMU</span><span class="brand-name">IIH Orbit</span></span></a>
+    <div class="workspace-switch"><span class="workspace-icon">W</span><label class="workspace-details"><span>工作空間</span><select aria-label="切換工作空間" [ngModel]="store.currentWorkspace().id" (ngModelChange)="selectWorkspace($event)">@for (workspace of store.workspaces(); track workspace.id) {<option [value]="workspace.id">{{ workspace.name }}</option>}</select></label><button class="tiny-icon" aria-label="管理工作空間" title="管理工作空間" (click)="openWorkspaces()"><app-icon name="edit" /></button></div>
     <div class="nav-label">工作空間</div>
     <nav aria-label="主要導覽" class="primary-nav">
       <button [class.active]="scope() === 'all' && categoryFilter() === 'all'" (click)="selectScope('all')"><app-icon name="board" /><span>專案看板</span><span class="nav-count">{{ store.tasks().length }}</span></button>
-      <button [class.active]="scope() === 'mine'" (click)="selectScope('mine')"><app-icon name="user" /><span>我的任務</span><span class="nav-count">{{ myTaskCount() }}</span></button>
+      <button [class.active]="scope() === 'active'" (click)="selectScope('active')"><app-icon name="clock" /><span>待完成任務</span><span class="nav-count">{{ activeTaskCount() }}</span></button>
       <button [class.active]="scope() === 'done'" (click)="selectScope('done')"><app-icon name="circleCheck" /><span>已完成任務</span></button>
+      <button [class.active]="scope() === 'archived'" (click)="selectScope('archived')"><app-icon name="archive" /><span>封存任務</span><span class="nav-count">{{ archivedTaskCount() }}</span></button>
     </nav>
     <div class="sidebar-divider"></div>
     <div class="nav-label category-heading"><span>任務分類</span><button class="tiny-icon" aria-label="管理任務分類" title="管理任務分類" (click)="openCategories()"><app-icon name="plus" /></button></div>
@@ -22,70 +23,111 @@
     <button class="manage-categories" (click)="openCategories()"><app-icon name="tag" />管理分類</button>
     <div class="sidebar-bottom">
       <div class="little-tip"><span class="tip-art"><app-icon name="spark" /></span><strong>小步前進，也是一種進展</strong><p>拖曳任務卡片，<br>讓每一步的進度清楚可見。</p><span class="tip-line"></span></div>
-      <div class="profile"><span class="avatar sage">YC</span><span><strong>我的工作台</strong><small>個人工作空間</small></span><span class="online-dot" title="本機工作空間"></span></div>
+      <div class="profile"><span class="personal-symbol"><app-icon name="leaf" /></span><span><strong>智慧醫療跨領域<br>學士學位學程<br>工作台</strong><small>單機・單人工作空間</small></span></div>
     </div>
   </aside>
 
   <main class="main" [attr.inert]="modal() || (mobileViewport() && sidebarOpen()) ? '' : null">
     <header class="topbar">
-      <div class="breadcrumb"><button class="icon-button mobile-menu" aria-label="開啟側邊欄" (click)="sidebarOpen.set(true)"><app-icon name="menu" /></button><span>工作空間</span><app-icon name="chevron" /><strong>專案看板</strong></div>
-      <div class="topbar-right"><span class="save-status" [class.warning]="store.storageWarning()"><span class="status-dot"></span>{{ store.storageWarning() ? '儲存需要留意' : '本機自動儲存' }}</span><span class="topbar-separator"></span><span class="avatar sage top-avatar" title="我的工作空間">YC</span></div>
+      <div class="breadcrumb"><button class="icon-button mobile-menu" aria-label="開啟側邊欄" (click)="sidebarOpen.set(true)"><app-icon name="menu" /></button><span class="mobile-wordmark" aria-label="TMU IIH Orbit"><span>TMU</span><strong>IIH Orbit</strong></span><span class="desktop-crumb workspace-crumb">{{ store.currentWorkspace().name }}</span><app-icon class="desktop-crumb" name="chevron" /><strong class="desktop-crumb navigation-crumb" [title]="navigationTitle()">{{ navigationTitle() }}</strong></div>
+      <div class="topbar-right"><label class="text-size-control"><span class="font-symbol" aria-hidden="true">Aa</span><span class="text-size-label">字體</span><select aria-label="字體大小" aria-describedby="text-size-help" [ngModel]="preferences.textSize()" (ngModelChange)="preferences.setTextSize($event)">@for (option of preferences.options; track option.id) {<option [value]="option.id">{{ option.label }}</option>}</select></label><span id="text-size-help" class="visually-hidden">即時調整所有視圖與表單的文字，設定會保存於此瀏覽器。</span><span class="save-status" [class.warning]="store.storageWarning()"><span class="status-dot"></span>{{ store.storageWarning() ? '儲存需要留意' : '本機自動儲存' }}</span><span class="local-mode"><app-icon name="panel" />單機版</span></div>
     </header>
 
     <section class="project-header" aria-labelledby="project-title">
-      <div class="project-heading-row"><div class="project-heading"><div class="project-icon"><app-icon name="leaf" /></div><div><div class="eyebrow">PROJECT WORKSPACE <span></span> 一起，穩步向前</div><div class="project-title-row"><h1 id="project-title">{{ store.state().projectName }}</h1><button class="title-edit" aria-label="修改專案名稱" (click)="openProject()"><app-icon name="edit" /></button></div></div></div><button class="button primary create-task" (click)="openTask()"><app-icon name="plus" />新增任務</button></div>
+      <div class="project-heading-row"><div class="project-heading"><div class="project-icon"><app-icon name="leaf" /></div><div><div class="eyebrow">PROJECT WORKSPACE <span></span> 讓日程，穩步向前</div><div class="project-title-row"><h1 id="project-title">{{ store.state().projectName }}</h1><button class="title-edit" aria-label="修改專案名稱" (click)="openProject()"><app-icon name="edit" /></button></div></div></div><button class="button primary create-task" (click)="openTask()"><app-icon name="plus" />新增任務</button></div>
       <p class="project-description">{{ projectDescription }}</p>
-      <div class="project-meta"><div class="team"><div class="avatar-stack">@for (member of members; track member.id) {<span class="avatar" [class]="'avatar ' + member.color" [title]="member.name">{{ member.initials }}</span>}</div><span>4 位範例成員</span></div><span class="meta-divider"></span><div class="project-progress"><span>專案進度</span><div class="progress-track" role="progressbar" aria-label="專案完成進度" [attr.aria-valuenow]="store.progress()" aria-valuemin="0" aria-valuemax="100"><span [style.width.%]="store.progress()"></span></div><strong>{{ store.progress() }}<small>%</small></strong></div><span class="meta-summary">已完成 {{ store.completed() }} / {{ store.tasks().length }} 個任務</span></div>
+      <div class="project-meta"><span class="personal-mode"><app-icon name="leaf" />個人專案</span><span class="meta-divider"></span><div class="project-progress"><span>專案進度</span><div class="progress-track" role="progressbar" aria-label="專案完成進度" [attr.aria-valuenow]="store.progress()" aria-valuemin="0" aria-valuemax="100"><span [style.width.%]="store.progress()"></span></div><strong>{{ store.progress() }}<small>%</small></strong></div><span class="meta-summary">已完成 {{ store.completed() }} / {{ store.activeTasks().length }} 個任務</span></div>
     </section>
 
     @if (store.storageWarning()) {<div class="storage-warning" role="alert"><app-icon name="save" />{{ store.storageWarning() }}</div>}
+    @if (preferences.storageWarning()) {<div class="storage-warning" role="status">{{ preferences.storageWarning() }}</div>}
 
     <section class="board-area" aria-label="任務工作區">
-      <div class="view-toolbar"><div class="view-tabs" role="group" aria-label="顯示方式"><button [class.active]="view() === 'board'" [attr.aria-pressed]="view() === 'board'" (click)="view.set('board')"><app-icon name="board" />看板視圖</button><button [class.active]="view() === 'list'" [attr.aria-pressed]="view() === 'list'" (click)="view.set('list')"><app-icon name="list" />清單視圖</button></div><div class="board-totals"><span><i class="total-dot"></i>{{ store.tasks().length }} 個任務</span><span><i class="progress-dot"></i>{{ inProgressCount() }} 個進行中</span></div></div>
-      <div class="filter-toolbar"><div class="search-box"><app-icon name="search" /><input aria-label="搜尋任務" placeholder="搜尋任務名稱或內容…" [ngModel]="query()" (ngModelChange)="query.set($event)">@if (query()) {<button class="tiny-icon" aria-label="清除搜尋" (click)="query.set('')"><app-icon name="close" /></button>}</div><div class="filter-actions"><div class="select-wrap"><app-icon name="tag" /><select aria-label="篩選分類" [ngModel]="categoryFilter()" (ngModelChange)="categoryFilter.set($event)"><option value="all">所有分類</option>@for (category of store.categories(); track category.id) {<option [value]="category.id">{{ category.name }}</option>}<option value="">未分類</option></select><app-icon name="down" /></div><div class="select-wrap priority-filter"><app-icon name="flag" /><select aria-label="篩選優先順序" [ngModel]="priorityFilter()" (ngModelChange)="priorityFilter.set($event)"><option value="all">所有優先順序</option>@for (priority of priorities; track priority.id) {<option [value]="priority.id">{{ priority.label }}</option>}</select><app-icon name="down" /></div><button class="filter-button" (click)="openCategories()"><app-icon name="filter" /><span>管理分類</span></button></div></div>
-      @if (hasFilters()) {<div class="filter-summary"><span>顯示 {{ visibleTasks().length }} 個任務@if (scope() === 'mine') { · 指派給我}@if (scope() === 'done') { · 已完成}</span><button (click)="clearFilters()">清除篩選<app-icon name="close" /></button></div>}
+      <div class="view-toolbar"><div class="view-tabs" role="group" aria-label="顯示方式"><button [class.active]="view() === 'board'" [attr.aria-pressed]="view() === 'board'" (click)="view.set('board')"><app-icon name="board" />看板視圖</button><button [class.active]="view() === 'list'" [attr.aria-pressed]="view() === 'list'" (click)="view.set('list')"><app-icon name="list" />清單視圖</button><button [class.active]="view() === 'month'" [attr.aria-pressed]="view() === 'month'" (click)="view.set('month')"><app-icon name="calendar" />月曆視圖</button><button [class.active]="view() === 'week'" [attr.aria-pressed]="view() === 'week'" (click)="view.set('week')"><app-icon name="week" />週視圖</button></div><div class="board-totals"><span><i class="total-dot"></i>{{ store.tasks().length }} 個任務</span><span><i class="progress-dot"></i>{{ activeTaskCount() }} 個待完成</span></div></div>
+      <div class="filter-toolbar"><div class="search-box"><app-icon name="search" /><input aria-label="搜尋任務" placeholder="搜尋任務名稱或內容…" [ngModel]="query()" (ngModelChange)="query.set($event)">@if (query()) {<button class="tiny-icon" aria-label="清除搜尋" (click)="query.set('')"><app-icon name="close" /></button>}</div><div class="filter-actions"><div class="select-wrap"><app-icon name="tag" /><select aria-label="篩選分類" [ngModel]="categoryFilter()" (ngModelChange)="categoryFilter.set($event)"><option value="all">所有分類</option>@for (category of store.categories(); track category.id) {<option [value]="category.id">{{ category.name }}</option>}<option value="">未分類</option></select><app-icon name="down" /></div><div class="select-wrap priority-filter"><app-icon name="flag" /><select aria-label="篩選優先順序" [ngModel]="priorityFilter()" (ngModelChange)="priorityFilter.set($event)"><option value="all">所有優先順序</option>@for (priority of priorities; track priority.id) {<option [value]="priority.id">{{ priority.label }}</option>}</select><app-icon name="down" /></div>@if (view() === 'board') {<button class="settings-button" (click)="openStatuses()"><app-icon name="board" />管理狀態</button>}<button class="filter-button" (click)="openCategories()"><app-icon name="filter" /><span>管理分類</span></button></div></div>
+      @if (hasFilters()) {<div class="filter-summary"><span>顯示 {{ visibleTasks().length }} 個任務@if (scope() === 'active') { · 待完成}@if (scope() === 'done') { · 已完成}@if (scope() === 'archived') { · 封存}</span><button (click)="clearFilters()">清除篩選<app-icon name="close" /></button></div>}
 
       @if (view() === 'board') {
         <div class="kanban-scroll" cdkScrollable>
-          <div class="kanban" cdkDropListGroup>
+          <div class="kanban" [style.--column-count]="columns().length || 1" cdkDropListGroup>
             @for (column of columns(); track column.id) {
-              <section class="kanban-column" [attr.data-status]="column.id" [attr.aria-label]="column.label">
+              <section class="kanban-column" [attr.data-status]="column.id" [attr.data-color]="column.color" [attr.aria-label]="column.label">
                 <div class="column-header"><div><span class="column-dot"></span><h2>{{ column.label }}</h2><span class="column-count">{{ column.tasks.length }}</span></div><button class="tiny-icon" [attr.aria-label]="'在' + column.label + '新增任務'" (click)="openTask(column.id)"><app-icon name="plus" /></button></div>
                 <p class="column-subtitle">{{ column.subtitle }}</p>
                 <div class="task-list" cdkDropList [id]="column.id" [cdkDropListData]="column" (cdkDropListDropped)="drop($event)">
                   @for (task of column.tasks; track task.id) {
-                    <article class="task-card" cdkDrag [cdkDragData]="task" [cdkDragStartDelay]="{mouse: 0, touch: 180}" (cdkDragEnded)="dragEnded()" [attr.data-task-id]="task.id" [class.completed-card]="task.status === 'done'">
+                    <article class="task-card" cdkDrag [cdkDragData]="task" [cdkDragStartDelay]="{mouse: 0, touch: 180}" (cdkDragEnded)="dragEnded()" [attr.data-task-id]="task.id" [class.completed-card]="store.isDone(task)">
                       <div class="card-top"><span class="category-badge" [attr.data-color]="category(task.categoryId).color"><i></i>{{ category(task.categoryId).name }}</span><span class="priority" [attr.data-priority]="task.priority" [title]="priorityLabel(task.priority)"><app-icon name="flag" /><span>{{ priorityLabel(task.priority) }}</span></span></div>
-                      <button class="task-title" (click)="openTask(task.status, task)">@if (task.status === 'done') {<span class="task-done-mark"><app-icon name="check" /></span>}{{ task.title }}</button>
+                      <button class="task-title" (click)="openTask(task.status, task)">@if (store.isDone(task)) {<span class="task-done-mark"><app-icon name="check" /></span>}{{ task.title }}</button>
                       <p class="task-description">{{ task.description || '新增描述，讓任務目標更清楚。' }}</p>
                       @if (task.subtasks.length) {<div class="subtask-progress"><div><app-icon name="list" /><span>子任務</span><strong>{{ completedSubtasks(task) }}/{{ task.subtasks.length }}</strong></div><div class="subtask-track"><span [style.width.%]="completedSubtasks(task) / task.subtasks.length * 100"></span></div></div>}
-                      <div class="card-footer"><span class="due-date" [class.overdue]="isOverdue(task)"><app-icon name="calendar" />{{ formatDate(task.dueDate) }}@if (isOverdue(task)) {<small>逾期</small>}</span><span class="avatar card-avatar" [class]="'avatar card-avatar ' + member(task.assignee).color" [title]="member(task.assignee).name">{{ member(task.assignee).initials }}</span></div>
+                      <div class="card-footer"><div class="task-dates">@if (task.startDate) {<span class="due-date" [title]="formatDate(task.startDate, task.startTime, true)"><app-icon name="clock" /><span class="date-kind">開始</span>{{ formatDate(task.startDate, task.startTime) }}</span>}<span class="due-date" [class.overdue]="isOverdue(task)" [title]="formatDate(task.dueDate, task.dueTime, true)"><app-icon name="calendar" /><span class="date-kind">截止</span>{{ formatDate(task.dueDate, task.dueTime) }}@if (isOverdue(task)) {<small>逾期</small>}</span></div></div>
                       <button class="card-edit" [attr.aria-label]="'編輯 ' + task.title" title="編輯任務" (click)="openTask(task.status, task)"><app-icon name="edit" /></button>
                     </article>
                   }
-                  @if (!column.tasks.length) {<div class="empty-column"><app-icon [name]="column.id === 'done' ? 'circleCheck' : 'board'" /><span>{{ hasFilters() ? '沒有符合篩選的任務' : '把任務拖曳到這裡' }}</span></div>}
+                  @if (!column.tasks.length) {<div class="empty-column"><app-icon [name]="column.kind === 'done' ? 'circleCheck' : 'board'" /><span>{{ hasFilters() ? '沒有符合篩選的任務' : '把任務拖曳到這裡' }}</span></div>}
                 </div>
                 <button class="add-column-task" (click)="openTask(column.id)"><app-icon name="plus" />新增任務</button>
               </section>
+            } @empty {
+              <div class="empty-board"><app-icon name="board" /><strong>{{ scope() === 'all' ? '目前所有狀態欄位都已隱藏' : '尚未設定此類型的狀態' }}</strong><p>{{ scope() === 'all' ? '任務仍保留，可以在管理狀態中重新顯示欄位，或切換至清單查看。' : '可以在管理狀態中新增或調整任務類型。' }}</p><button class="button secondary" (click)="openStatuses()">管理狀態</button></div>
             }
           </div>
         </div>
+      } @else if (view() === 'list') {
+        @if (sortKey()) {
+          <div class="sorting-summary"><span><app-icon name="sort" />排序：{{ sortDescription() }}</span><button (click)="sortKey.set(null)">還原看板順序</button></div>
+        }
+        <div class="list-scroll">
+          <table class="task-table">
+            <thead><tr>@for (header of sortHeaders; track header.key) {<th scope="col" [attr.aria-sort]="sortState(header.key)"><button class="sort-header" [class.sorted]="sortKey() === header.key" [attr.aria-label]="'依' + header.label + '排序'" (click)="toggleSort(header.key)">{{ header.label }}<span class="sort-indicator">{{ sortKey() === header.key ? sortDirection() === 'asc' ? '↑' : '↓' : '↕' }}</span></button></th>}</tr></thead>
+            <tbody>
+              @for (task of sortedTasks(); track task.id) {
+                <tr>
+                  <td><button class="list-task-title" (click)="openTask(task.status, task)">{{ task.title }}</button></td>
+                  <td><span class="category-badge" [attr.data-color]="category(task.categoryId).color"><i></i>{{ category(task.categoryId).name }}</span></td>
+                  <td><select class="list-status" [attr.data-status]="task.status" [attr.data-color]="statusColor(task.status)" [attr.aria-label]="task.title + '的狀態'" [ngModel]="task.status" (ngModelChange)="changeStatus(task, $event)">@for (status of statuses(); track status.id) {<option [value]="status.id">{{ status.label }}</option>}</select></td>
+                  <td><span class="priority" [attr.data-priority]="task.priority"><app-icon name="flag" />{{ priorityLabel(task.priority) }}</span></td>
+                  <td><span class="list-date">{{ formatDate(task.startDate, task.startTime, true) }}</span></td>
+                  <td><span class="list-date" [class.overdue]="isOverdue(task)">{{ formatDate(task.dueDate, task.dueTime, true) }}@if (isOverdue(task)) {<small>逾期</small>}</span></td>
+                </tr>
+              } @empty {<tr><td colspan="6" class="empty-table">沒有符合條件的任務。<button (click)="clearFilters()">清除篩選</button></td></tr>}
+            </tbody>
+          </table>
+        </div>
       } @else {
-        <div class="list-scroll"><table class="task-table"><thead><tr><th>任務名稱</th><th>分類</th><th>狀態</th><th>優先順序</th><th>截止日</th><th>負責人</th></tr></thead><tbody>@for (task of visibleTasks(); track task.id) {<tr><td><button class="list-task-title" (click)="openTask(task.status, task)">{{ task.title }}</button></td><td><span class="category-badge" [attr.data-color]="category(task.categoryId).color"><i></i>{{ category(task.categoryId).name }}</span></td><td><select class="list-status" [attr.data-status]="task.status" [attr.aria-label]="task.title + '的狀態'" [ngModel]="task.status" (ngModelChange)="changeStatus(task, $event)">@for (status of statuses; track status.id) {<option [value]="status.id">{{ status.label }}</option>}</select></td><td><span class="priority" [attr.data-priority]="task.priority"><app-icon name="flag" />{{ priorityLabel(task.priority) }}</span></td><td><span class="due-date" [class.overdue]="isOverdue(task)">{{ formatDate(task.dueDate) }}</span></td><td><div class="list-member"><span [class]="'avatar card-avatar ' + member(task.assignee).color">{{ member(task.assignee).initials }}</span>{{ member(task.assignee).name }}</div></td></tr>} @empty {<tr><td colspan="6" class="empty-table">沒有符合條件的任務。<button (click)="clearFilters()">清除篩選</button></td></tr>}</tbody></table></div>
+        <app-calendar [tasks]="calendarTasks()" [statuses]="statuses()" [categories]="store.categories()" [mode]="view() === 'week' ? 'week' : 'month'" (editTask)="openTask($event.status, $event)" (createTask)="openCalendarTask($event)" />
       }
-      <footer class="board-footer"><span><app-icon name="grip" />拖曳卡片調整順序，或移至其他欄位更新進度</span><span>讓每一件事，都向前一點。<app-icon name="leaf" /></span></footer>
+      <footer class="board-footer"><span><app-icon [name]="view() === 'board' ? 'grip' : view() === 'list' ? 'sort' : 'calendar'" />{{ view() === 'board' ? '拖曳卡片調整順序，或移至其他欄位更新進度' : view() === 'list' ? '點選欄位標題排序，再次點選切換方向；未設定日期排在最後' : view() === 'week' ? '點選時段新增任務，或點選任務編輯' : '點選任務編輯，或用日期旁的＋建立任務' }}</span><span>讓每一件事，都向前一點。<app-icon name="leaf" /></span></footer>
     </section>
   </main>
 </div>
 
 @if (modal()) {
   <div class="modal-backdrop" (click)="closeModal()">
-    <section class="modal" [class.category-modal]="modal() === 'categories'" role="dialog" aria-modal="true" aria-labelledby="modal-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true" (click)="$event.stopPropagation()">
-      <div class="modal-header"><div><span class="modal-eyebrow">ORBIT WORKSPACE</span><h2 id="modal-title">@switch (modal()) {@case ('task') {{{ editing() ? '編輯任務' : '建立新任務' }}} @case ('categories') {管理任務分類} @case ('project') {修改專案名稱} @case ('delete') {刪除任務}}</h2></div><button class="icon-button" aria-label="關閉對話框" (click)="closeModal()"><app-icon name="close" /></button></div>
+    <section class="modal" [attr.data-modal]="modal()" [class.category-modal]="modal() === 'categories'" role="dialog" aria-modal="true" aria-labelledby="modal-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true" (click)="$event.stopPropagation()">
+      <div class="modal-header"><div><span class="modal-eyebrow">TMU IIH ORBIT</span><h2 id="modal-title">@switch (modal()) {@case ('task') {{{ editing() ? '編輯任務' : '建立新任務' }}} @case ('categories') {管理任務分類} @case ('project') {修改專案名稱} @case ('statuses') {管理看板狀態} @case ('workspaces') {管理工作空間} @case ('delete') {刪除任務}}</h2></div><button class="icon-button" aria-label="關閉對話框" [attr.cdkFocusInitial]="modal() === 'statuses' || modal() === 'workspaces' ? '' : null" (click)="closeModal()"><app-icon name="close" /></button></div>
       @switch (modal()) {
         @case ('task') {
           <form (ngSubmit)="saveTask()" class="task-form">
-            <div class="modal-body"><label class="form-field">任務名稱 <span class="required">*</span><input name="title" [(ngModel)]="draft.title" placeholder="這次，要完成什麼呢？" required maxlength="100" cdkFocusInitial></label><label class="form-field">任務描述<textarea name="description" [(ngModel)]="draft.description" rows="3" maxlength="2000" placeholder="補充目標、細節或重要的注意事項…"></textarea></label><div class="form-grid"><label class="form-field">任務分類<select name="category" [(ngModel)]="draft.categoryId"><option value="">未分類</option>@for (category of store.categories(); track category.id) {<option [value]="category.id">{{ category.name }}</option>}</select></label><label class="form-field">目前狀態<select name="status" [(ngModel)]="draft.status">@for (status of statuses; track status.id) {<option [value]="status.id">{{ status.label }}</option>}</select></label><label class="form-field">優先順序<select name="priority" [(ngModel)]="draft.priority">@for (priority of priorities; track priority.id) {<option [value]="priority.id">{{ priority.label }}</option>}</select></label><label class="form-field">負責人<select name="assignee" [(ngModel)]="draft.assignee"><option value="">未指派</option>@for (member of members; track member.id) {<option [value]="member.id">{{ member.name }}</option>}</select></label></div><label class="form-field">截止日期<input type="date" name="dueDate" [(ngModel)]="draft.dueDate" min="1900-01-01" max="9999-12-31"></label><div class="subtask-editor"><label class="field-label">子任務 <span>把大目標，拆成小步驟</span></label>@for (subtask of draft.subtasks; track subtask.id) {<div class="subtask-row"><label><input type="checkbox" [name]="'subtask-' + subtask.id" [(ngModel)]="subtask.done"><span [class.checked]="subtask.done">{{ subtask.title }}</span></label><button type="button" class="tiny-icon" [attr.aria-label]="'刪除子任務 ' + subtask.title" (click)="removeSubtask(subtask.id)"><app-icon name="close" /></button></div>}<div class="subtask-add"><input name="newSubtask" [(ngModel)]="subtaskDraft" placeholder="新增一個小步驟…" maxlength="120" aria-label="新增子任務" (keydown.enter)="$event.preventDefault(); addSubtask()"><button type="button" class="icon-button" aria-label="加入子任務" (click)="addSubtask()"><app-icon name="plus" /></button></div></div>@if (formError()) {<p class="form-error" role="alert">{{ formError() }}</p>}</div>
+            <div class="modal-body"><label class="form-field">任務名稱 <span class="required">*</span><input name="title" [(ngModel)]="draft.title" placeholder="這次，要完成什麼呢？" required maxlength="100" cdkFocusInitial></label><label class="form-field">任務描述<textarea name="description" [(ngModel)]="draft.description" rows="3" maxlength="2000" placeholder="補充目標、細節或重要的注意事項…"></textarea></label><div class="form-grid"><label class="form-field">任務分類<select name="category" [(ngModel)]="draft.categoryId"><option value="">未分類</option>@for (category of store.categories(); track category.id) {<option [value]="category.id">{{ category.name }}</option>}</select></label><label class="form-field">目前狀態<select name="status" [(ngModel)]="draft.status">@for (status of statuses(); track status.id) {<option [value]="status.id">{{ status.label }}</option>}</select></label><label class="form-field">優先順序<select name="priority" [(ngModel)]="draft.priority">@for (priority of priorities; track priority.id) {<option [value]="priority.id">{{ priority.label }}</option>}</select></label></div>
+              <section class="schedule-editor" aria-label="任務時程">
+                <div class="schedule-heading"><app-icon name="calendar" /><strong>任務時程</strong><small>日期選填 · 可分別加入時間</small></div>
+                <div class="schedule-grid">
+                  <div class="schedule-field">
+                    <label for="task-start-date">開始日期</label><input id="task-start-date" type="date" name="startDate" [ngModel]="draft.startDate" (ngModelChange)="dateChanged('start', $event)" min="1900-01-01" max="9999-12-31">
+                    <label class="time-option"><input type="checkbox" name="hasStartTime" [ngModel]="hasStartTime" (ngModelChange)="timeToggled('start', $event)" [disabled]="!draft.startDate">加入開始時間</label>
+                    @if (hasStartTime) {<label class="time-field" for="task-start-time">開始時間<input id="task-start-time" type="time" name="startTime" [(ngModel)]="draft.startTime" required></label>}
+                  </div>
+                  <div class="schedule-field">
+                    <label for="task-due-date">截止日期</label><input id="task-due-date" type="date" name="dueDate" [ngModel]="draft.dueDate" (ngModelChange)="dateChanged('due', $event)" min="1900-01-01" max="9999-12-31">
+                    <label class="time-option"><input type="checkbox" name="hasDueTime" [ngModel]="hasDueTime" (ngModelChange)="timeToggled('due', $event)" [disabled]="!draft.dueDate">加入截止時間</label>
+                    @if (hasDueTime) {<label class="time-field" for="task-due-time">截止時間<input id="task-due-time" type="time" name="dueTime" [(ngModel)]="draft.dueTime" required></label>}
+                  </div>
+                </div>
+                <p class="schedule-note">未設定時間的截止日算到當天結束；時間依本機時區顯示。</p>
+              </section>
+              <div class="subtask-editor"><label class="field-label">子任務 <span>把大目標，拆成小步驟</span></label>@for (subtask of draft.subtasks; track subtask.id) {<div class="subtask-row"><label><input type="checkbox" [name]="'subtask-' + subtask.id" [(ngModel)]="subtask.done"><span [class.checked]="subtask.done">{{ subtask.title }}</span></label><button type="button" class="tiny-icon" [attr.aria-label]="'刪除子任務 ' + subtask.title" (click)="removeSubtask(subtask.id)"><app-icon name="close" /></button></div>}<div class="subtask-add"><input name="newSubtask" [(ngModel)]="subtaskDraft" placeholder="新增一個小步驟…" maxlength="120" aria-label="新增子任務" (keydown.enter)="$event.preventDefault(); addSubtask()"><button type="button" class="icon-button" aria-label="加入子任務" (click)="addSubtask()"><app-icon name="plus" /></button></div></div>@if (formError()) {<p class="form-error" role="alert">{{ formError() }}</p>}</div>
             <div class="modal-footer">@if (editing()) {<button type="button" class="delete-link" (click)="requestDeleteTask(draft)"><app-icon name="trash" />刪除任務</button>} @else {<span class="form-note">好進展，從一個任務開始。</span>}<div><button type="button" class="button secondary" (click)="closeModal()">取消</button><button type="submit" class="button primary"><app-icon [name]="editing() ? 'check' : 'plus'" />{{ editing() ? '儲存變更' : '建立任務' }}</button></div></div>
           </form>
         }
@@ -93,6 +135,78 @@
           <div class="modal-body"><p class="modal-description">用分類整理不同類型的工作，讓看板一目了然。</p><div class="category-manager">@for (category of store.categories(); track category.id) {<div class="category-manager-row"><span class="category-dot" [attr.data-color]="category.color"></span><strong>{{ category.name }}</strong><small>{{ categoryCount(category.id) }} 個任務</small><button class="tiny-icon" [attr.aria-label]="'編輯分類 ' + category.name" (click)="editCategory(category)"><app-icon name="edit" /></button><button class="tiny-icon danger-icon" [attr.aria-label]="'刪除分類 ' + category.name" (click)="categoryToDelete.set(category)"><app-icon name="trash" /></button></div>} @empty {<p class="muted">還沒有分類，建立第一個吧。</p>}</div>
           @if (categoryToDelete(); as category) {<div class="category-delete-confirm" role="alert"><strong>刪除「{{ category.name }}」？</strong><p>任務會保留，並改為「未分類」。</p><button class="button secondary" (click)="categoryToDelete.set(null)">取消</button><button class="button danger" (click)="deleteCategory()">刪除分類</button></div>}
           <form class="category-form" (ngSubmit)="saveCategory()"><h3>{{ categoryEditingId() ? '編輯分類' : '新增分類' }}</h3><label class="form-field">分類名稱<input name="categoryName" [(ngModel)]="categoryDraft.name" placeholder="例如：測試驗證" required maxlength="24" cdkFocusInitial></label><fieldset class="color-picker"><legend>分類顏色</legend>@for (color of colors; track color.id) {<button type="button" [attr.data-color]="color.id" [class.selected]="categoryDraft.color === color.id" [attr.aria-label]="color.label" [attr.aria-pressed]="categoryDraft.color === color.id" (click)="categoryDraft.color = color.id">@if (categoryDraft.color === color.id) {<app-icon name="check" />}</button>}</fieldset>@if (categoryError()) {<p class="form-error" role="alert">{{ categoryError() }}</p>}<div class="category-form-actions">@if (categoryEditingId()) {<button type="button" class="button secondary" (click)="resetCategoryDraft()">取消編輯</button>}<button type="submit" class="button primary"><app-icon [name]="categoryEditingId() ? 'check' : 'plus'" />{{ categoryEditingId() ? '儲存分類' : '新增分類' }}</button></div></form></div><div class="modal-footer"><span class="form-note">分類變更會即時套用到所有任務。</span><button class="button secondary" (click)="closeModal()">完成</button></div>
+        }
+        @case ('statuses') {
+          <div class="modal-body">
+            <p class="modal-description">每個工作空間都有自己的狀態。調整順序後，看板與清單排序會一起更新。</p>
+            <div class="management-list" aria-label="看板狀態">
+              @for (status of statuses(); track status.id; let index = $index) {
+                <div class="management-row">
+                  <span class="category-dot" [attr.data-color]="status.color"></span>
+                  <div class="management-title"><strong>{{ status.label }}</strong><small>{{ kindLabel(status.kind) }} · {{ statusCount(status.id) }} 個任務@if (status.hidden) { · 看板已隱藏}</small></div>
+                  <div class="management-actions">
+                    <label class="status-visibility"><input type="checkbox" [attr.aria-label]="'在專案看板顯示' + status.label" [ngModel]="!status.hidden" (ngModelChange)="setStatusVisible(status, $event)"><span>看板顯示</span></label>
+                    <button class="tiny-icon order-up" [disabled]="index === 0" [attr.aria-label]="'將' + status.label + '前移'" (click)="store.reorderStatus(status.id, -1)"><app-icon name="down" /></button>
+                    <button class="tiny-icon" [disabled]="index === statuses().length - 1" [attr.aria-label]="'將' + status.label + '後移'" (click)="store.reorderStatus(status.id, 1)"><app-icon name="down" /></button>
+                    <button class="tiny-icon" [attr.aria-label]="'編輯狀態 ' + status.label" (click)="editStatus(status)"><app-icon name="edit" /></button>
+                    <button class="tiny-icon danger-icon" [disabled]="statuses().length <= 1" [attr.aria-label]="'刪除狀態 ' + status.label" (click)="requestDeleteStatus(status)"><app-icon name="trash" /></button>
+                  </div>
+                </div>
+              }
+            </div>
+            @if (statusToDelete(); as status) {
+              <div class="management-confirm" role="alert">
+                <strong>刪除「{{ status.label }}」？</strong><p>原有 {{ statusCount(status.id) }} 個任務會保留，移至以下狀態。</p>
+                <label class="form-field">任務移至<select [(ngModel)]="statusDestination">@for (target of statuses(); track target.id) {@if (target.id !== status.id) {<option [value]="target.id">{{ target.label }}</option>}}</select></label>
+                <div class="management-confirm-actions"><button class="button secondary" (click)="statusToDelete.set(null)">取消</button><button class="button danger" (click)="deleteStatus()">移動任務並刪除狀態</button></div>
+              </div>
+            }
+            <form class="category-form" (ngSubmit)="saveStatus()">
+              <h3>{{ statusEditingId() ? '編輯狀態' : '新增狀態' }}</h3>
+              <label class="form-field">狀態名稱<input name="statusName" [(ngModel)]="statusDraft.label" required maxlength="24" placeholder="例如：等待回覆"></label>
+              <label class="form-field">狀態說明<input name="statusSubtitle" [(ngModel)]="statusDraft.subtitle" maxlength="80" placeholder="這個階段要做什麼？"></label>
+              <label class="form-field">任務類型<select name="statusKind" [ngModel]="statusDraft.kind" (ngModelChange)="statusKindChanged($event)">@for (kind of statusKinds; track kind.id) {<option [value]="kind.id">{{ kind.label }}</option>}</select></label>
+              <p class="management-note">一般任務列入待完成；已完成列入進度；封存保留紀錄，不列入進度、逾期提醒或日曆。</p>
+              <label class="status-hide-option"><input type="checkbox" name="statusHidden" [(ngModel)]="statusDraft.hidden">隱藏此狀態欄位</label>
+              <p class="management-note">只隱藏專案看板欄位，任務仍可從清單或左側任務檢視開啟。</p>
+              <fieldset class="color-picker"><legend>狀態顏色</legend>@for (color of colors; track color.id) {<button type="button" [attr.data-color]="color.id" [class.selected]="statusDraft.color === color.id" [attr.aria-label]="color.label" [attr.aria-pressed]="statusDraft.color === color.id" (click)="statusDraft.color = color.id">@if (statusDraft.color === color.id) {<app-icon name="check" />}</button>}</fieldset>
+              @if (formError()) {<p class="form-error" role="alert">{{ formError() }}</p>}
+              <div class="category-form-actions">@if (statusEditingId()) {<button type="button" class="button secondary" (click)="resetStatusDraft()">取消編輯</button>}<button type="submit" class="button primary">{{ statusEditingId() ? '儲存狀態' : '新增狀態' }}</button></div>
+            </form>
+          </div>
+          <div class="modal-footer"><span class="form-note">狀態變更會立即保存。</span><button class="button secondary" (click)="closeModal()">完成</button></div>
+        }
+        @case ('workspaces') {
+          <div class="modal-body">
+            <p class="modal-description">不同工作空間分別保存任務、分類、狀態與專案名稱，切換時不會混在一起。</p>
+            <div class="management-list" aria-label="工作空間清單">
+              @for (workspace of store.workspaces(); track workspace.id) {
+                <div class="management-row">
+                  <span class="workspace-mark"><app-icon name="grid" /></span>
+                  <div class="management-title"><strong>{{ workspace.name }}</strong><small>{{ workspace.tasks.length }} 個任務 · {{ workspace.id === store.currentWorkspace().id ? '目前工作空間' : workspace.projectName }}</small></div>
+                  <div class="management-actions">
+                    @if (workspace.id !== store.currentWorkspace().id) {<button class="workspace-open" [attr.aria-label]="'切換至 ' + workspace.name" (click)="selectWorkspace(workspace.id)">切換</button>}
+                    <button class="tiny-icon" [attr.aria-label]="'改名工作空間 ' + workspace.name" (click)="editWorkspace(workspace)"><app-icon name="edit" /></button>
+                    <button class="tiny-icon danger-icon" [disabled]="store.workspaces().length <= 1" [attr.aria-label]="'刪除工作空間 ' + workspace.name" (click)="requestDeleteWorkspace(workspace)"><app-icon name="trash" /></button>
+                  </div>
+                </div>
+              }
+            </div>
+            @if (workspaceToDelete(); as workspace) {
+              <div class="management-confirm" role="alert">
+                <strong>刪除「{{ workspace.name }}」？</strong><p>此工作空間的 {{ workspace.tasks.length }} 個任務、分類與狀態會一起移除，無法復原。其他工作空間會保留。</p>
+                <label class="form-field">輸入工作空間名稱確認<input [(ngModel)]="workspaceDeleteName" [placeholder]="workspace.name"></label>
+                <div class="management-confirm-actions"><button class="button secondary" (click)="workspaceToDelete.set(null)">取消</button><button class="button danger" [disabled]="workspaceDeleteName !== workspace.name" (click)="deleteWorkspace()">確認刪除工作空間</button></div>
+              </div>
+            }
+            <form class="category-form" (ngSubmit)="saveWorkspace()">
+              <h3>{{ workspaceEditingId() ? '修改工作空間名稱' : '建立工作空間' }}</h3>
+              <label class="form-field">工作空間名稱<input name="workspaceName" [(ngModel)]="workspaceDraft" required maxlength="40" placeholder="例如：研究計畫、課程安排"></label>
+              @if (formError()) {<p class="form-error" role="alert">{{ formError() }}</p>}
+              <div class="category-form-actions">@if (workspaceEditingId()) {<button type="button" class="button secondary" (click)="workspaceEditingId.set(''); workspaceDraft = ''; formError.set('')">取消改名</button>}<button type="submit" class="button primary">{{ workspaceEditingId() ? '儲存工作空間名稱' : '建立工作空間' }}</button></div>
+            </form>
+          </div>
+          <div class="modal-footer"><span class="form-note">新工作空間會從空白看板開始。</span><button class="button secondary" (click)="closeModal()">完成</button></div>
         }
         @case ('project') {<form (ngSubmit)="saveProject()"><div class="modal-body"><label class="form-field">專案名稱<input name="projectName" [(ngModel)]="projectDraft" required maxlength="50" cdkFocusInitial></label>@if (formError()) {<p class="form-error" role="alert">{{ formError() }}</p>}</div><div class="modal-footer"><span></span><div><button type="button" class="button secondary" (click)="closeModal()">取消</button><button type="submit" class="button primary">儲存名稱</button></div></div></form>}
         @case ('delete') {<div class="modal-body"><p class="delete-description">確定刪除「<strong>{{ taskToDelete()?.title }}</strong>」嗎？</p><p class="muted">此任務與子任務會一起移除。</p></div><div class="modal-footer"><span></span><div><button id="keep-task" class="button secondary" (click)="closeModal()" cdkFocusInitial>保留任務</button><button class="button danger" (click)="deleteTask()">刪除任務</button></div></div>}

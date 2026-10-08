@@ -22,7 +22,7 @@
             "production": {
               "budgets": [
                 {"type": "initial", "maximumWarning": "650kB", "maximumError": "1MB"},
-                {"type": "anyComponentStyle", "maximumWarning": "28kB", "maximumError": "35kB"}
+                {"type": "anyComponentStyle", "maximumWarning": "30kB", "maximumError": "35kB"}
               ],
               "outputHashing": "all"
             },

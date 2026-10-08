@@ -9,6 +9,7 @@
     "isolatedModules": true,
     "experimentalDecorators": true,
     "importHelpers": true,
+    "rewriteRelativeImportExtensions": true,
     "target": "ES2022",
     "module": "preserve",
     "lib": ["ES2023", "dom"]
