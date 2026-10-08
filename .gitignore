@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.angular/
+out-tsc/
+test-results/
+playwright-report/
+.DS_Store

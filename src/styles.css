@@ -1,0 +1,41 @@
+@import '@angular/cdk/overlay-prebuilt.css';
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  color: #303b37;
+  background: #fff;
+  font-synthesis: none;
+  --ink: #303b37;
+  --muted: #939a96;
+  --green: #31584b;
+  --line: #eceeeb;
+  --violet: #9b83c8;
+  --blue: #759acb;
+  --orange: #d4a06d;
+  --pink: #cf8fa8;
+  --gray: #929992;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+body:has(.modal-backdrop), body:has(.sidebar.is-open) { overflow: hidden; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+button { color: inherit; }
+button:disabled { cursor: not-allowed; }
+button:focus-visible, a:focus-visible { outline: 3px solid #8cb9a1; outline-offset: 3px; }
+input:focus, select:focus, textarea:focus { outline: 2px solid #9fc3ac; outline-offset: 1px; }
+button { border: 0; }
+::selection { background: #d5e8da; color: #244b43; }
+
+/* The drag preview is placed in the document body by Angular CDK. */
+.cdk-drag-preview {
+  border: 1px solid #c3d4c8 !important;
+  box-shadow: 0 16px 36px #253b3326 !important;
+  transform: rotate(2deg);
+  cursor: grabbing !important;
+}
+.cdk-drag-placeholder { opacity: .25; border: 1px dashed #7b9e8a !important; box-shadow: none !important; }
+.cdk-drag-animating { transition: transform 180ms cubic-bezier(.2, 0, 0, 1); }
+.cdk-drop-list-dragging .task-card:not(.cdk-drag-placeholder) { transition: transform 180ms cubic-bezier(.2, 0, 0, 1); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
