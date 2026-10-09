@@ -6,7 +6,7 @@
   @if (mode() === 'week') {
     <div class="week-scroll" #weekScroller aria-label="一週時間表" (scroll)="rememberScroll()">
       <div class="week-timetable">
-        <div class="week-sticky-head">
+        <div class="week-sticky-head" (wheel)="scrollPageFromHeader($event)">
           <div class="week-date-header">
             <div class="week-timezone">本機時間</div>
             @for (day of weekDays(); track day.key) {
@@ -21,7 +21,7 @@
               <button class="all-day-cell" [class.week-today]="day.today" [style.grid-column]="$index + 2" [attr.aria-label]="'在 ' + day.key + ' 新增全天任務'" (click)="createAt(day.key)"><app-icon name="plus" /></button>
             }
             @for (event of allDayEvents(); track event.task.id) {
-              <button class="all-day-event" [attr.data-color]="category(event.task.categoryId).color" [class.task-completed]="isDone(event.task)" [style.grid-column]="(event.startColumn + 2) + ' / ' + (event.endColumn + 2)" [style.grid-row]="event.row + 1" [attr.title]="taskTitle(event.task)" [attr.aria-label]="taskTitle(event.task)" (click)="editTask.emit(event.task)">
+              <button class="all-day-event" [orbitColor]="category(event.task.categoryId).color" [class.task-completed]="isDone(event.task)" [style.grid-column]="(event.startColumn + 2) + ' / ' + (event.endColumn + 2)" [style.grid-row]="event.row + 1" [attr.title]="taskTitle(event.task)" [attr.aria-label]="taskTitle(event.task)" (click)="editTask.emit(event.task)">
                 @if (event.continuesBefore) {<span aria-hidden="true">←</span>}
                 @if (isDone(event.task)) {<app-icon name="check" />}
                 <span class="all-day-title">{{ event.task.title }}</span>
@@ -41,7 +41,7 @@
                 <button class="time-slot" [class.half-hour]="slot.minute % 60 !== 0" [style.height.px]="hourHeight() / 2" [attr.data-day]="dayIndex" [attr.data-minute]="slot.minute" [attr.tabindex]="slot.minute === 540 ? 0 : -1" [attr.aria-label]="'在 ' + day.key + ' ' + slot.label + ' 新增任務'" [attr.title]="slot.label + ' 新增任務'" (click)="createAt(day.key, slot.label)" (keydown)="slotKeydown($event, dayIndex, slot.minute)"></button>
               }
               @for (event of day.timedEvents; track event.task.id) {
-                <button class="timed-event" [attr.data-color]="category(event.task.categoryId).color" [class.task-completed]="isDone(event.task)" [class.short-event]="event.displayEnd - event.displayStart < 60" [class.overlapping-event]="event.columns > 1" [class.milestone-event]="event.milestone" [style.top.%]="event.displayStart / 1440 * 100" [style.height.%]="(event.displayEnd - event.displayStart) / 1440 * 100" [style.left.%]="event.column / event.columns * 100" [style.width.%]="100 / event.columns" [attr.title]="taskTitle(event.task)" [attr.aria-label]="taskTitle(event.task) + ' · ' + event.label" (click)="editTask.emit(event.task)">
+                <button class="timed-event" [orbitColor]="category(event.task.categoryId).color" [class.task-completed]="isDone(event.task)" [class.short-event]="event.displayEnd - event.displayStart < 60" [class.overlapping-event]="event.columns > 1" [class.milestone-event]="event.milestone" [style.top.%]="event.displayStart / 1440 * 100" [style.height.%]="(event.displayEnd - event.displayStart) / 1440 * 100" [style.left.%]="event.column / event.columns * 100" [style.width.%]="100 / event.columns" [attr.title]="taskTitle(event.task)" [attr.aria-label]="taskTitle(event.task) + ' · ' + event.label" (click)="editTask.emit(event.task)">
                   <strong>@if (isDone(event.task)) {<app-icon name="check" />}{{ event.task.title }}</strong>
                   <small>{{ event.label }}</small>
                   <span class="timed-category">{{ category(event.task.categoryId).name }}</span>
@@ -63,7 +63,7 @@
           <div class="day-heading"><span class="day-number" [class.today-number]="day.today">{{ day.number }}</span>@if (day.today) {<span class="today-label">今天</span>}<button [attr.aria-label]="'在 ' + day.key + ' 新增任務'" title="在這天新增任務" (click)="createAt(day.key)"><app-icon name="plus" /></button></div>
           <div class="day-tasks">
             @for (task of day.visibleTasks; track task.id) {
-              <button class="calendar-task" [attr.data-color]="category(task.categoryId).color" [class.task-completed]="isDone(task)" [attr.title]="taskTitle(task)" [attr.aria-label]="taskTitle(task)" (click)="editTask.emit(task)">
+              <button class="calendar-task" [orbitColor]="category(task.categoryId).color" [class.task-completed]="isDone(task)" [attr.title]="taskTitle(task)" [attr.aria-label]="taskTitle(task)" (click)="editTask.emit(task)">
                 <span class="calendar-task-title">@if (isDone(task)) {<app-icon name="check" />}<span>{{ task.title }}</span></span>
                 <small>{{ scheduleLabel(task, day.key) }}</small>
               </button>
@@ -78,6 +78,6 @@
   <p class="calendar-note"><app-icon name="clock" />{{ mode() === 'week' ? '跨日任務的完整日放在全天區；點選空白時段新增任務。' : '跨日任務會顯示於日期區間內；時間依本機時區顯示。' }}</p>
   <section class="unscheduled-tasks" aria-label="未排程任務">
     <div class="unscheduled-heading"><h3><app-icon name="list" />未排程<span>{{ unscheduled().length }}</span></h3><p>還沒設定日期的任務，隨時可以安排。</p></div>
-    <div class="unscheduled-list">@for (task of unscheduled(); track task.id) {<button [attr.data-color]="category(task.categoryId).color" (click)="editTask.emit(task)"><i></i>{{ task.title }}<app-icon name="edit" /></button>} @empty {<span class="no-unscheduled">每個任務都已有日期安排。</span>}</div>
+    <div class="unscheduled-list">@for (task of unscheduled(); track task.id) {<button [orbitColor]="category(task.categoryId).color" (click)="editTask.emit(task)"><i></i>{{ task.title }}<app-icon name="edit" /></button>} @empty {<span class="no-unscheduled">每個任務都已有日期安排。</span>}</div>
   </section>
 </section>

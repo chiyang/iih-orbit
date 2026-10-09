@@ -8,7 +8,7 @@ function relativeDate(offset: number): string {
 }
 
 export function createInitialState(): BoardState {
-  const seeds: Omit<Task, 'startDate' | 'startTime' | 'dueTime'>[] = [
+  const seeds: Omit<Task, 'startDate' | 'startTime' | 'dueTime' | 'projectId'>[] = [
     {id: 't1', title: '整理使用者訪談與需求', description: '讓每個設計決定，都從使用者的真實需求開始。', categoryId: 'research', status: 'todo', priority: 'high', dueDate: relativeDate(2), subtasks: [{id: 's1', title: '彙整訪談筆記', done: true}, {id: 's2', title: '歸納痛點', done: false}, {id: 's3', title: '確認需求優先順序', done: false}]},
     {id: 't2', title: '規劃網站資訊架構', description: '梳理頁面層級，打造直覺且清楚的瀏覽動線。', categoryId: 'design', status: 'todo', priority: 'medium', dueDate: relativeDate(4), subtasks: []},
     {id: 't3', title: '撰寫品牌故事文案', description: '用簡單、真誠的文字，說出我們的品牌價值。', categoryId: 'content', status: 'todo', priority: 'low', dueDate: relativeDate(6), subtasks: []},
@@ -22,11 +22,11 @@ export function createInitialState(): BoardState {
     {id: 't11', title: '建置開發環境', description: '開發工具與專案架構已經設定完成。', categoryId: 'development', status: 'done', priority: 'high', dueDate: relativeDate(-1), subtasks: []}
   ];
 
-  const tasks: Task[] = seeds.map(task => ({...task, startDate: relativeDate(task.status === 'done' ? -5 : task.status === 'todo' ? 1 : -1), startTime: '', dueTime: ''}));
+  const tasks: Task[] = seeds.map(task => ({...task, projectId: 'project-website', startDate: relativeDate(task.status === 'done' ? -5 : task.status === 'todo' ? 1 : -1), startTime: '', dueTime: ''}));
 
   return {
-    version: 3,
-    projectName: '品牌網站改版',
+    version: 4,
+    projects: [{id: 'project-website', name: '品牌網站改版'}],
     statuses: COLUMNS.map(status => ({...status})),
     categories: [
       {id: 'design', name: '介面設計', color: 'violet'},

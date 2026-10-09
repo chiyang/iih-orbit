@@ -1,46 +1,55 @@
 import { DOCUMENT } from '@angular/common';
-import { computed, effect, inject, Injectable, signal } from '@angular/core';
-
-type TextSize = 'small' | 'standard' | 'large' | 'extra-large';
-const STORAGE_KEY = 'orbit-text-size-v1';
+import { computed, effect, inject, Injectable, OnDestroy, signal } from '@angular/core';
+import { BoardStore } from './board-store';
+import { AppearancePreferences, TextSize, ThemeMode, themeTokens } from './appearance-data';
 
 export const TEXT_SIZES: {id: TextSize; label: string; scale: number}[] = [
-  {id: 'small', label: '小 90%', scale: .9},
+  {id: 'extra-small', label: '特小 70%', scale: .7},
+  {id: 'compact', label: '小 80%', scale: .8},
+  // Keep the saved identifier so existing 90% preferences and backups retain their size.
+  {id: 'small', label: '中 90%', scale: .9},
   {id: 'standard', label: '標準 100%', scale: 1},
   {id: 'large', label: '大 115%', scale: 1.15},
   {id: 'extra-large', label: '特大 130%', scale: 1.3}
 ];
 
 @Injectable({providedIn: 'root'})
-export class UiPreferences {
+export class UiPreferences implements OnDestroy {
   private readonly document = inject(DOCUMENT);
+  private readonly store = inject(BoardStore);
   readonly options = TEXT_SIZES;
-  readonly textSize = signal<TextSize>(this.load());
+  readonly textSize = computed(() => this.store.appearance().textSize);
+  readonly theme = computed(() => this.store.appearance().theme);
+  readonly accent = computed(() => this.store.appearance().accent);
   readonly scale = computed(() => this.options.find(option => option.id === this.textSize())?.scale ?? 1);
-  readonly storageWarning = signal('');
+  readonly storageWarning = this.store.storageWarning;
+  private readonly media = this.document.defaultView?.matchMedia?.('(prefers-color-scheme: dark)');
+  private readonly systemDark = signal(this.media?.matches ?? false);
+  readonly dark = computed(() => this.theme() === 'dark' || (this.theme() === 'system' && this.systemDark()));
+  private readonly mediaListener = (event: MediaQueryListEvent) => this.systemDark.set(event.matches);
 
   constructor() {
-    effect(() => this.document.documentElement.style.setProperty('--font-scale', String(this.scale())));
+    effect(() => {
+      const root = this.document.documentElement;
+      root.style.setProperty('--font-scale', String(this.scale()));
+      root.dataset['theme'] = this.dark() ? 'dark' : 'light';
+      root.style.colorScheme = this.dark() ? 'dark' : 'light';
+      for (const [key, value] of Object.entries(themeTokens(this.accent(), this.dark()))) root.style.setProperty(key, value);
+    });
+    this.media?.addEventListener('change', this.mediaListener);
   }
 
-  setTextSize(value: unknown): void {
+  ngOnDestroy(): void {
+    this.media?.removeEventListener('change', this.mediaListener);
+  }
+
+  async setTextSize(value: unknown): Promise<void> {
     const option = this.options.find(item => item.id === value);
     if (!option) return;
-    this.textSize.set(option.id);
-    try {
-      localStorage.setItem(STORAGE_KEY, option.id);
-      this.storageWarning.set('');
-    } catch {
-      this.storageWarning.set('字體大小已套用，但瀏覽器目前無法記住設定。');
-    }
+    await this.store.updateAppearance({textSize: option.id});
   }
 
-  private load(): TextSize {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return this.options.find(option => option.id === saved)?.id ?? 'standard';
-    } catch {
-      return 'standard';
-    }
-  }
+  async setTheme(theme: ThemeMode): Promise<void> { await this.store.updateAppearance({theme}); }
+  async setAccent(accent: string): Promise<void> { await this.store.updateAppearance({accent}); }
+  snapshot(): AppearancePreferences { return {...this.store.appearance()}; }
 }

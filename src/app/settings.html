@@ -1,0 +1,31 @@
+<div class="settings-content">
+  <section class="settings-section" aria-labelledby="appearance-title">
+    <h3 id="appearance-title">外觀與閱讀</h3><p>即時調整，並套用到同一瀏覽器的其他分頁。</p>
+    <fieldset class="theme-modes"><legend>顯示主題</legend>
+      @for (mode of modes; track mode.id) {
+        <button type="button" [class.selected]="preferences.theme() === mode.id" [attr.aria-pressed]="preferences.theme() === mode.id" (click)="preferences.setTheme(mode.id)">{{ mode.label }}</button>
+      }
+    </fieldset>
+    <label class="setting-field">字體大小<select aria-label="設定字體大小" [ngModel]="preferences.textSize()" (ngModelChange)="preferences.setTextSize($event)">@for (option of preferences.options; track option.id) {<option [value]="option.id">{{ option.label }}</option>}</select></label>
+    <fieldset class="accent-swatches"><legend>主題色</legend>@for (accent of accents; track accent.color) {<button type="button" [style.--swatch]="accent.color" [class.selected]="preferences.accent() === accent.color" [attr.aria-label]="'主題色：' + accent.label" [attr.aria-pressed]="preferences.accent() === accent.color" (click)="setAccent(accent.color)">@if (preferences.accent() === accent.color) {<app-icon name="check" />}</button>}</fieldset>
+    <div class="custom-color"><label>自訂主題色<input type="color" aria-label="選擇主題色" [value]="preferences.accent()" (change)="setAccent($any($event.target).value)"></label><label>HEX 色碼<input type="text" aria-label="主題色 HEX 色碼" maxlength="7" spellcheck="false" [value]="preferences.accent()" (change)="setAccent($any($event.target).value)" placeholder="#31584b"></label></div>
+    <p class="setting-note">文字與按鈕會依主題調整對比。分類與看板狀態可在各自的管理視窗選擇顏色，不受主題色影響。</p>
+  </section>
+  <section class="settings-section" aria-labelledby="local-sync-title">
+    <h3 id="local-sync-title">本機同步與備份</h3>
+    <p class="sync-state" role="status"><i [class.warning]="store.hasUnsavedChanges() || store.storageWarning()"></i>{{ store.pendingWrites() ? '保存中' : store.hasUnsavedChanges() ? '本分頁有未保存的變更' : store.storageWarning() ? '儲存需要留意' : '已保存本機・分頁同步已啟用' }}</p>
+    <p>同一瀏覽器、同一網站來源的分頁會自動同步資料與外觀。各分頁保留自己的工作空間選擇及未送出的表單。</p>
+    <button type="button" class="setting-button" (click)="openBackup.emit()"><app-icon name="export" />開啟資料與備份</button>
+  </section>
+  <section class="settings-section reset-section" aria-labelledby="reset-title">
+    <h3 id="reset-title">資料重置</h3><p>重置前可以下載目前全部資料的備份。</p>
+    <div class="reset-choices"><div><strong>清空工作資料</strong><p>移除所有工作空間及任務，保留字體、主題與主題色。</p><button type="button" class="setting-button" [disabled]="busy() || store.pendingWrites() > 0" (click)="beginReset('work')">清空工作資料</button></div><div><strong>重置整個 Orbit</strong><p>移除工作資料、舊版資料與外觀偏好，回到預設設定。</p><button type="button" class="setting-button" [disabled]="busy() || store.pendingWrites() > 0" (click)="beginReset('all')">重置整個 Orbit</button></div></div>
+    @if (resetMode()) {
+      <div class="reset-confirm" role="alert"><strong>確定要{{ resetPhrase() }}？</strong><p>將移除 {{ store.workspaces().length }} 個工作空間及其所有任務，建立一個空白工作空間。此操作無法復原，請先下載備份。</p><button type="button" class="setting-button" [disabled]="busy()" (click)="downloadCurrent()"><app-icon name="export" />先下載全部備份</button><label class="setting-field">請輸入「{{ resetPhrase() }}」<input type="text" autocomplete="off" [(ngModel)]="confirmation" aria-label="重置確認文字" [placeholder]="resetPhrase()"></label><div class="reset-actions"><button type="button" class="setting-button" [disabled]="busy()" (click)="resetMode.set(null)">取消</button><button type="button" class="setting-button danger" [disabled]="busy() || store.pendingWrites() > 0 || confirmation !== resetPhrase()" (click)="reset()">確認重置</button></div></div>
+    }
+    <p class="setting-note">只清理 IIH Orbit 的資料。重新整理後不會重新載入範例任務。</p>
+  </section>
+  @if (message()) {<p class="settings-message" role="status">{{ message() }}</p>}
+  @if (error()) {<p class="settings-error" role="alert">{{ error() }}</p>}
+  @if (store.storageWarning() && store.storageWarning() !== error()) {<p class="settings-error" role="alert">{{ store.storageWarning() }}</p>}
+</div>

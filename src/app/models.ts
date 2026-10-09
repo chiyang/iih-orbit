@@ -2,7 +2,7 @@ export type TaskStatus = string;
 export type StatusKind = 'active' | 'done' | 'archived';
 export type TaskScope = 'all' | 'active' | 'done' | 'archived';
 export type Priority = 'high' | 'medium' | 'low';
-export type CategoryColor = 'violet' | 'blue' | 'green' | 'orange' | 'pink' | 'gray';
+export type CategoryColor = 'violet' | 'blue' | 'green' | 'orange' | 'pink' | 'gray' | `#${string}`;
 
 export interface Category {
   id: string;
@@ -16,11 +16,17 @@ export interface Subtask {
   done: boolean;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+}
+
 export interface Task {
   id: string;
   title: string;
   description: string;
   categoryId: string;
+  projectId: string;
   status: TaskStatus;
   priority: Priority;
   startDate: string;
@@ -31,8 +37,8 @@ export interface Task {
 }
 
 export interface BoardState {
-  version: 3;
-  projectName: string;
+  version: 4;
+  projects: Project[];
   categories: Category[];
   statuses: BoardStatus[];
   tasks: Task[];

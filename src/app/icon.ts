@@ -30,6 +30,7 @@ const PATHS: Record<string, string> = {
   grip: 'M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01',
   sort: 'M8 3v18m-4-4 4 4 4-4M16 21V3m-4 4 4-4 4 4',
   week: 'M3 5h18v16H3zM16 3v4M8 3v4M3 11h18M7 14v3M12 14v3M17 14v3',
+  settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z',
   archive: 'M3 3h18v5H3zM5 8v13h14V8M9 12h6'
 };
 

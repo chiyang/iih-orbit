@@ -6,7 +6,7 @@ import { COLUMNS } from '../src/app/models.ts';
 
 const categories = [{id: 'design', name: '介面設計', color: 'violet'}];
 function task(overrides = {}) {
-  return {id: 'task', title: '任務', description: '', categoryId: 'design', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: [], ...overrides};
+  return {id: 'task', title: '任務', description: '', categoryId: 'design', projectId: '', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: [], ...overrides};
 }
 
 test('升級舊看板時保留不同成員的全部任務、子任務、分類與順序', () => {
@@ -15,15 +15,16 @@ test('升級舊看板時保留不同成員的全部任務、子任務、分類�
     projectName: '既有專案',
     categories,
     tasks: [
-      {id: 'a', title: 'Mia 的任務', description: '保留內容', categoryId: 'design', status: 'progress', priority: 'high', assignee: 'mia', dueDate: '2026-10-09', subtasks: [{id: 's', title: '步驟', done: true}]},
+      {id: 'a', title: 'Mia 的任務', description: '保留內容', categoryId: 'design', projectId: '', status: 'progress', priority: 'high', assignee: 'mia', dueDate: '2026-10-09', subtasks: [{id: 's', title: '步驟', done: true}]},
       {id: 'b', title: '未指派任務', description: '', categoryId: '', status: 'done', priority: 'low', assignee: '', dueDate: '', subtasks: []}
     ]
   };
   const original = structuredClone(legacy);
   const migrated = readBoardState(legacy);
-  assert.equal(migrated.version, 3);
+  assert.equal(migrated.version, 4);
   assert.deepEqual(migrated.statuses, COLUMNS);
-  assert.equal(migrated.projectName, legacy.projectName);
+  assert.equal(migrated.projects[0].name, legacy.projectName);
+  assert.equal(migrated.tasks[0].projectId, migrated.projects[0].id);
   assert.deepEqual(migrated.tasks.map(item => item.id), ['a', 'b']);
   assert.equal(migrated.tasks[0].dueDate, '2026-10-09');
   assert.deepEqual(migrated.tasks[0].subtasks, legacy.tasks[0].subtasks);
@@ -36,12 +37,12 @@ test('升級舊看板時保留不同成員的全部任務、子任務、分類�
 
 test('新版看板讀取後保留開始與截止時間', () => {
   const state = {version: 2, projectName: '時間排程', categories, tasks: [task({startDate: '2026-10-08', startTime: '09:15', dueDate: '2026-10-09', dueTime: '17:30'})]};
-  assert.deepEqual(readBoardState(state), {...state, version: 3, statuses: COLUMNS});
+  assert.deepEqual(readBoardState(state), {version: 4, projects: [{id: 'project-legacy', name: '時間排程'}], categories, statuses: COLUMNS, tasks: state.tasks.map(item => ({...item, projectId: 'project-legacy'}))});
 });
 
 test('拒絕無效日期、時間、重複 ID 與未知格式', () => {
   const state = {version: 2, projectName: '專案', categories, tasks: [task()]};
-  assert.equal(readBoardState({...state, version: 4}), null);
+  assert.equal(readBoardState({...state, version: 99}), null);
   assert.equal(readBoardState({...state, tasks: [task(), task()]}), null);
   assert.equal(readBoardState({...state, tasks: [task({dueDate: '2026-02-30'})]}), null);
   assert.equal(readBoardState({...state, tasks: [task({dueDate: '2026-10-08', dueTime: '24:00'})]}), null);

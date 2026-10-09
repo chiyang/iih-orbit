@@ -5,16 +5,16 @@ import { readBoardState } from '../src/app/board-data.ts';
 import { boardStatusesForScope, createWorkspaceState, emptyWorkspace, readWorkspaceState, removeBoardStatus, statusKind, updateWorkspaceBoard } from '../src/app/workspace-data.ts';
 import { isTaskOverdue, sortTasks } from '../src/app/task-schedule.ts';
 
-const task = {id: 'task', title: '既有任務', description: '保留內容', categoryId: '', status: 'progress', priority: 'medium', startDate: '2026-10-07', startTime: '09:00', dueDate: '2026-10-09', dueTime: '18:00', subtasks: [{id: 'step', title: '小步驟', done: true}]};
-const board = {version: 3, projectName: '既有專案', categories: [], statuses: COLUMNS.map(status => ({...status})), tasks: [task]};
+const task = {id: 'task', title: '既有任務', description: '保留內容', categoryId: '', projectId: '', status: 'progress', priority: 'medium', startDate: '2026-10-07', startTime: '09:00', dueDate: '2026-10-09', dueTime: '18:00', subtasks: [{id: 'step', title: '小步驟', done: true}]};
+const board = {version: 4, projects: [], categories: [], statuses: COLUMNS.map(status => ({...status})), tasks: [task]};
 
 test('單看板升級為工作空間，完整保留任務、時間、順序與分類，原始資料不變', () => {
-  const legacy = {...board, version: 2, tasks: [task, {...task, id: 'second', status: 'done'}]};
+  const legacy = {...board, version: 2, projectName: '既有專案', tasks: [task, {...task, id: 'second', status: 'done'}]};
   delete legacy.statuses;
   const original = structuredClone(legacy);
   const state = createWorkspaceState(readBoardState(legacy));
-  assert.deepEqual(state.workspaces[0].tasks, legacy.tasks);
-  assert.equal(state.workspaces[0].projectName, legacy.projectName);
+  assert.deepEqual(state.workspaces[0].tasks, legacy.tasks.map(item => ({...item, projectId: 'project-legacy'})));
+  assert.equal(state.workspaces[0].projects[0].name, legacy.projectName);
   assert.deepEqual(state.workspaces[0].statuses.map(status => status.id), ['todo', 'progress', 'review', 'done', 'archived']);
   assert.deepEqual(legacy, original);
 });
@@ -23,7 +23,7 @@ test('新增工作空間從空白開始，修改選定看板不改動其他工�
   const original = createWorkspaceState(board);
   const second = emptyWorkspace('second', '研究計畫');
   const source = {...original, activeWorkspaceId: second.id, workspaces: [...original.workspaces, second]};
-  const updated = updateWorkspaceBoard(source, {...second, projectName: '研究進度', tasks: [{...task, id: 'research'}]});
+  const updated = updateWorkspaceBoard(source, {...second, projects: [{id: 'research-project', name: '研究進度'}], tasks: [{...task, id: 'research', projectId: 'research-project'}]});
   assert.deepEqual(updated.workspaces[0], original.workspaces[0]);
   assert.deepEqual(second.tasks, []);
   assert.equal(updated.workspaces[1].tasks[0].id, 'research');

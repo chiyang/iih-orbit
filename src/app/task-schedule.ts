@@ -1,7 +1,7 @@
-import type { BoardStatus, Category, Task } from './models';
+import type { BoardStatus, Category, Project, Task } from './models';
 import { COLUMNS } from './models.ts';
 
-export type SortKey = 'title' | 'category' | 'status' | 'priority' | 'startDate' | 'dueDate';
+export type SortKey = 'title' | 'project' | 'category' | 'status' | 'priority' | 'startDate' | 'dueDate';
 export type SortDirection = 'asc' | 'desc';
 
 export function dateKey(date: Date): string {
@@ -87,9 +87,10 @@ export function weekDates(anchor: Date): Date[] {
 const collator = new Intl.Collator('zh-Hant-TW', {numeric: true, sensitivity: 'base'});
 const priorityOrder = {high: 0, medium: 1, low: 2};
 
-export function sortTasks(tasks: readonly Task[], categories: readonly Category[], key: SortKey | null, direction: SortDirection, statuses: readonly BoardStatus[] = COLUMNS): Task[] {
+export function sortTasks(tasks: readonly Task[], categories: readonly Category[], key: SortKey | null, direction: SortDirection, statuses: readonly BoardStatus[] = COLUMNS, projects: readonly Project[] = []): Task[] {
   if (!key) return [...tasks];
   const categoryNames = new Map(categories.map(category => [category.id, category.name]));
+  const projectNames = new Map(projects.map(project => [project.id, project.name]));
   const statusOrder = new Map(statuses.map((status, index) => [status.id, index]));
   const factor = direction === 'asc' ? 1 : -1;
   return [...tasks].sort((left, right) => {
@@ -104,8 +105,8 @@ export function sortTasks(tasks: readonly Task[], categories: readonly Category[
     }
     if (key === 'priority') return (priorityOrder[left.priority] - priorityOrder[right.priority]) * factor;
     if (key === 'status') return ((statusOrder.get(left.status) ?? statuses.length) - (statusOrder.get(right.status) ?? statuses.length)) * factor;
-    const leftValue = key === 'category' ? categoryNames.get(left.categoryId) || '未分類' : left.title;
-    const rightValue = key === 'category' ? categoryNames.get(right.categoryId) || '未分類' : right.title;
+    const leftValue = key === 'category' ? categoryNames.get(left.categoryId) || '未分類' : key === 'project' ? projectNames.get(left.projectId) || '未指定專案' : left.title;
+    const rightValue = key === 'category' ? categoryNames.get(right.categoryId) || '未分類' : key === 'project' ? projectNames.get(right.projectId) || '未指定專案' : right.title;
     return collator.compare(leftValue, rightValue) * factor;
   });
 }

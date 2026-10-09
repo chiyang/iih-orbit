@@ -7,7 +7,7 @@ export function createWorkspaceState(board: BoardState): WorkspaceState {
 }
 
 export function emptyWorkspace(id: string, name: string): Workspace {
-  return {version: 3, id, name: name.trim(), projectName: name.trim(), categories: [], statuses: COLUMNS.map(status => ({...status})), tasks: []};
+  return {version: 4, id, name: name.trim(), projects: [], categories: [], statuses: COLUMNS.map(status => ({...status})), tasks: []};
 }
 
 export function readWorkspaceState(value: unknown): WorkspaceState | null {

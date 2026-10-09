@@ -1,6 +1,7 @@
 import { afterRenderEffect, Component, computed, DestroyRef, ElementRef, inject, input, output, signal, viewChild } from '@angular/core';
 import { BoardStatus, Category, COLUMNS, Task } from './models';
 import { Icon } from './icon';
+import { ThemeColor } from './theme-color';
 import { dateKey, monthDates, parseDate, taskDateRange, taskOccursOn, weekDates } from './task-schedule';
 import { HOUR_HEIGHT, layoutAllDayTasks, minuteLabel, timedEventsOnDay } from './week-layout';
 import { UiPreferences } from './ui-preferences';
@@ -12,7 +13,7 @@ export interface CalendarCreate {
 
 @Component({
   selector: 'app-calendar',
-  imports: [Icon],
+  imports: [Icon, ThemeColor],
   templateUrl: './calendar.html',
   styleUrl: './calendar.css'
 })
@@ -101,6 +102,18 @@ export class Calendar {
     if (scroller && this.hourHeight() === this.previousHourHeight) {
       this.scrollHour = scroller.scrollTop / this.previousHourHeight;
     }
+  }
+
+  scrollPageFromHeader(event: WheelEvent): void {
+    if (event.ctrlKey || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+    const scroller = this.weekScroller()?.nativeElement;
+    const page = scroller?.ownerDocument.defaultView;
+    if (!scroller || !page || !event.cancelable) return;
+    const lineHeight = parseFloat(page.getComputedStyle(scroller).lineHeight) || 20;
+    const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? lineHeight
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? page.innerHeight : 1;
+    event.preventDefault();
+    page.scrollBy({top: event.deltaY * unit, behavior: 'instant'});
   }
 
   createAt(date: string, time?: string): void {

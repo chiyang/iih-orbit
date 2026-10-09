@@ -1,0 +1,30 @@
+:root {
+  color-scheme: light;
+  --page: #fff; --surface: #fff;
+  --text: #30383c; --text-muted: #606b75; --text-soft: #646e78;
+  --accent: #31584b; --accent-strong: #31584b; --accent-text: #31584b; --on-accent: #fff;
+  --surface-soft: color-mix(in srgb, var(--accent) 4.5%, var(--surface));
+  --surface-hover: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  --sidebar-bg: color-mix(in srgb, var(--accent) 10.5%, var(--surface));
+  --section-bg: color-mix(in srgb, var(--accent) 5.5%, var(--surface));
+  --control-bg: color-mix(in srgb, var(--accent) 7.5%, var(--surface));
+  --header-bg: color-mix(in srgb, var(--accent) 9.5%, var(--surface));
+  --footer-bg: color-mix(in srgb, var(--accent) 6.5%, var(--surface));
+  --calendar-outside-bg: color-mix(in srgb, var(--accent) 6.5%, var(--surface));
+  --calendar-weekend-bg: color-mix(in srgb, var(--accent) 2.5%, var(--surface));
+  --calendar-today-bg: color-mix(in srgb, var(--accent) 17%, var(--surface));
+  --accent-soft: color-mix(in srgb, var(--accent) 12.5%, var(--surface));
+  --border: color-mix(in srgb, var(--accent) 17%, var(--surface));
+  --accent-border: color-mix(in srgb, var(--accent) 40%, var(--surface));
+  --danger-text: #9c4333; --danger-bg: #fff1ed; --danger-border: #e5c7b9;
+  --warning-text: #936229; --warning-bg: #fff7e9; --warning-border: #ecd9c4; --shadow-rgb: 0 0 0;
+}
+body { background: var(--page); }
+.settings-entry { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--accent-text); padding: 8px 10px; border-radius: 8px; font-size: var(--font-10); white-space: nowrap; }
+.settings-entry app-icon { width: 16px; height: 16px; }
+.settings-entry:hover { background: var(--surface-hover); }
+.custom-color-fields { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 16px; margin: 12px 0 22px; }
+.custom-color-fields label { display: grid; gap: 8px; color: var(--text-muted); font-size: var(--font-11); }
+.custom-color-fields input { width: 100%; min-width: 0; height: 40px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--surface); color: var(--text); font-size: var(--font-11); }
+.custom-color-fields input[type='color'] { padding: 4px; cursor: pointer; }
+@media (max-width: 700px) { .settings-entry span { display: none; } .custom-color-fields { grid-template-columns: 100px minmax(0, 1fr); gap: 10px; } }
