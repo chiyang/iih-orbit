@@ -1,8 +1,12 @@
 # IIH Orbit 下一版設計與實作順序
 
-日期：2026-10-08  
-狀態：階段 1、2 程式已實作，版本 1.3.0 加入設定、主題、自訂顏色及重置；階段 2 實際畫面驗收待完成，階段 3–5 待實作。  
+日期：2026-10-09
+
+狀態：階段 1–3 程式已實作，版本 1.4.0 加入 Google Calendar 唯讀整合、日期範圍讀取及來源增量同步。階段 2 畫面與階段 3 真實 Google 帳號驗收待完成；階段 4、5 待實作。
+
 目標：維持 Angular v22、單人使用、無自建後端，加入資料攜帶、分頁同步、Google 整合與外觀設定。
+
+2026-10-09 補充：設定改為分類分頁、加入主題快捷切換與 1／3／7／30 天截止篩選；月曆與週視圖以週日開始。程式內訊息中心、今日／明天／下週開始清單、可設定的右下角提示與多分頁去重已實作；桌面／手機通知的後續範圍見 [提醒設計](reminder-design.md)，目前尚未實作系統通知。
 
 ## 1. 設計時的起點與目前進度
 
@@ -16,7 +20,7 @@
 
 改版前每次修改保存整份工作空間資料，沒有跨分頁監聽或同時寫入協調，可能以舊資料覆蓋另一分頁。
 
-階段 1 已加入 `orbit-workspaces-v2` 的世代與修訂識別、寫入協調、分頁通知及檔案匯出／匯入；目前工作空間改存每個分頁的 `sessionStorage`。階段 2 將字體、主題與主題色納入同一儲存記錄，全部備份格式升為 3，還原時一起套用；工作空間匯入保留全域外觀。Google 與同步排程設定將隨後續階段加入。Google 仍不要求 Client Secret，接入時再建立並設定 Client ID。
+階段 1 已加入 `orbit-workspaces-v2` 的世代與修訂識別、寫入協調、分頁通知及檔案匯出／匯入；目前工作空間改存每個分頁的 `sessionStorage`。階段 2 將字體、主題與主題色納入同一儲存記錄，全部備份格式升為 3，還原時一起套用；工作空間匯入保留全域外觀。階段 3 將公開 Google 設定、來源綁定與更新頻率納入同一記錄，備份格式升為 4，仍讀取格式 1–3。特定工作空間備份可附帶公開連線設定，匯入時需另行勾選才套用。Google 不要求 Client Secret，設定頁提供 Client ID 的建立教學及使用者授權。
 
 版本 1.2.0 採用「工作空間內的專案分組」，不增加獨立專案看板。任務新增可選的單一專案歸屬，專案共用分類與狀態；標題改為工作空間名稱，所有專案的任務可同時顯示，也能篩選。舊專案標題升級為第一個專案，備份格式升至 2，仍支援格式 1 的舊備份。外部月曆仍以工作空間綁定，Drive 的備份及同步範圍維持工作空間層級。
 
@@ -25,7 +29,7 @@
 1. **先完成本機備份與同步，再接 Google。** 即使沒有 Google 帳號、沒有網路，任務管理仍可正常使用。
 2. **Google Calendar 活動獨立保存，疊加到月曆與週視圖。** 使用「外部月曆」來源分組，不把每個活動轉成一般任務或任務分類。
 3. **Google Drive 使用可見的 `IIH Orbit` 資料夾保存版本。** 使用者能在 Drive 查看備份；程式只管理自己建立或使用者授權的檔案。
-4. **設定頁保存 OAuth Client ID，不保存 Client Secret。** 登入授權憑證只存在本次開啟的記憶體中，不放進 localStorage、匯出檔或 Drive。
+4. **設定頁保存 OAuth Client ID，不保存 Client Secret。** 依使用者選擇，未過期授權憑證暫存至分頁 sessionStorage，重新整理驗證後恢復，同來源分頁可接續。憑證不放進 localStorage、匯出檔或 Drive，原到期時間不延長。
 5. **雲端同時修改時保留兩份版本。** 第一版提供衝突選擇與複製工作空間，不自動猜測哪份修改應被丟棄。
 
 Google 的瀏覽器授權流程使用 Client ID；Client Secret 是伺服器端流程才需要的資料。Client ID 可以隨備份攜帶，但匯入後仍須重新授權。[Google Client ID 說明](https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid)
@@ -72,7 +76,7 @@ Web Locks 可協調同一網站不同分頁的操作，`storage` 事件會通知
 
 同一任務被其他分頁修改後，正在編輯的視窗提示「此任務已更新」，提供載入新版本或將草稿另存為新任務。不同任務的修改依序套用，不互相覆蓋。
 
-月曆快取、雲端待處理操作及版本紀錄使用 IndexedDB，避免大量外部活動擠滿 localStorage。寫入鎖不支援的環境須提供經驗證的交易式儲存替代方案，完成前不宣稱支援安全的同時寫入。
+月曆快取已使用獨立的 `iih-orbit-calendar-v1` IndexedDB，來源游標與最多六段日期實例快取一起保存；同帳號及來源的工作空間共用讀取。雲端待處理操作及版本紀錄將另用 IndexedDB。工作資料的寫入鎖不支援時已提供交易式儲存替代方案；Calendar 的 GET 讀取在支援 Web Locks 時協調同一來源，其他環境仍能重讀共享快取。
 
 分頁同步限同一網站來源與瀏覽器使用者設定檔；不同瀏覽器或不同電腦透過 Drive 同步。
 
@@ -153,7 +157,9 @@ Client ID 是瀏覽器授權流程使用的公開識別，不必當成密碼隱�
 
 若部署網址是 `https://example-user.github.io/project-manager/`，授權來源應填 `https://example-user.github.io`，不含 `/project-manager/`。同一帳號網域底下的其他專案也屬於同一 origin；若要隔離這個工具，可考慮專用的自訂網域。這是依 origin 不包含路徑的規則做出的部署建議。[Google origin 規則](https://developers.google.com/identity/protocols/oauth2/javascript-implicit-flow#javascript-origin-validation-rules)
 
-Origin 限制不會把 Access Token 綁定到該網站；Google API 的 Access Token 仍是 Bearer Token，取得它的人可能在有效期內使用。因此只在記憶體保存短期憑證、按需取得最小權限，並避免把匯入的活動描述當作可執行 HTML，是本版的保護措施。[Google 憑證保護說明](https://developers.google.com/identity/protocols/oauth2/resources/best-practices)
+Origin 限制不會把 Access Token 綁定到該網站；Google API 的 Access Token 仍是 Bearer Token，取得它的人可能在有效期內使用。使用者選擇在 sessionStorage 暫存未過期憑證以延續重新整理後的操作；這個儲存仍可被同源 JavaScript 讀取。程式按需取得最小權限、不將憑證寫入長期資料或備份，並避免把活動描述當成可執行 HTML。[Google 憑證保護說明](https://developers.google.com/identity/protocols/oauth2/resources/best-practices)
+
+分頁連線以 Client ID、帳號、資料世代及公開失效識別檢查；同來源新分頁透過 BroadcastChannel 請求有效憑證並保存至自己的 sessionStorage。解除連線或重新授權更新不含憑證的公開失效識別，避免未收到通知、延遲回覆或恢復舊分頁時復活舊授權。重置及全部匯入改變世代，舊憑證拒絕恢復。sessionStorage 可以跨重新整理保留，但正常新分頁不直接共享；瀏覽器還原分頁時也必須重新驗證期限。[sessionStorage](https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage)、[BroadcastChannel](https://developer.mozilla.org/en-US/docs/Web/API/Broadcast_Channel_API)
 
 若未來改用需伺服器交換授權碼與管理更新憑證的 Code Model，須另規劃伺服器端元件；GitHub Pages 的靜態前端不能替代該元件。[Google Code Model](https://developers.google.com/identity/oauth2/web/guides/use-code-model)
 
@@ -182,10 +188,10 @@ Origin 限制不會把 Access Token 綁定到該網站；Google API 的 Access T
 ### 重置規則
 
 - 「清空工作資料」刪除工作空間與月曆快取，保留外觀與公開連線設定，建立一個空白工作空間。
-- 「重置整個 Orbit」清除 Orbit 舊版升級來源、備份及偏好鍵，保留一份新世代的空白狀態記錄，避免重載範例；不使用 `localStorage.clear()` 影響同一來源其他程式。現階段 IndexedDB 只有不含工作資料的寫入協調鎖，保持可用；未來月曆快取及雲端佇列加入時也需清理。
+- 「重置整個 Orbit」清除 Orbit 舊版升級來源、備份及偏好鍵，保留一份新世代的空白狀態記錄，避免重載範例；不使用 `localStorage.clear()` 影響同一來源其他程式。月曆快取另行清空；不含工作資料的寫入協調鎖保持可用，未來雲端佇列加入時也需清理。
 - 重置前提供下載備份，要求明確確認，暫停同步並通知其他分頁。重置後不重新載入範例任務或偷偷還原舊版鍵。
 - 本機重置不刪除 Google Calendar 原始活動或 Drive 備份。重置後建立新的資料世代，雲端資料需手動選擇恢復或接續，避免自動同步立刻把資料帶回。
-- 「解除本機連線」停止同步及清除記憶體憑證；另提供前往 Google 管理應用存取權的連結，清楚區分本機停用與 Google 端撤銷授權。
+- 「解除本機連線」停止同來源分頁的同步及清除記憶體／sessionStorage 憑證；另提供前往 Google 管理應用存取權的連結，清楚區分本機停用與 Google 端撤銷授權。
 
 ## 9. 實作順序與完成條件
 

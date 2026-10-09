@@ -1,39 +1,51 @@
 import { A11yModule } from '@angular/cdk/a11y';
 import { CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup } from '@angular/cdk/drag-drop';
 import { CdkScrollable } from '@angular/cdk/scrolling';
-import { Component, computed, HostListener, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, HostListener, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BoardStore, StoreResult, TaskEditContext } from './board-store';
-import { BackupKind, OrbitBackup, readBackup } from './backup-data';
 import { Calendar, CalendarCreate } from './calendar';
 import { Icon } from './icon';
 import { ThemeColor } from './theme-color';
 import { Settings } from './settings';
+import type { SettingsTab } from './settings';
 import { colorHex, validHex } from './appearance-data';
-import { downloadBackup } from './backup-file';
 import { BoardStatus, Category, CategoryColor, CATEGORY_COLORS, PRIORITIES, Priority, Project, StatusKind, Task, TaskScope, TaskStatus, Workspace } from './models';
 import { dateKey, isTaskOverdue, parseDate, scheduleError, SortDirection, SortKey, sortTasks } from './task-schedule';
 import { minuteLabel, timeMinutes } from './week-layout';
 import { UiPreferences } from './ui-preferences';
 import { boardStatusesForScope } from './workspace-data';
 import { projectProgress, projectSummaries, tasksForProject } from './project-data';
+import { CalendarSources } from './calendar-sources';
+import { ExternalEventDetails } from './external-event-details';
+import { ExternalEvent } from './google-data';
+import { DeadlineFilter, deadlineState, DUE_DAY_PRESETS } from './reminder-data';
+import { ReminderCenter } from './reminder-center';
+import { ReminderBadge } from './reminder-badge';
+import { ReminderPopups } from './reminder-popups';
+import type { ReminderItem, ReminderTab } from './reminder-items';
+import { TaskCell } from './task-cell';
+import type { TaskCellField } from './task-cell';
 
-type Modal = 'task' | 'categories' | 'projects' | 'delete' | 'statuses' | 'workspaces' | 'backup' | 'settings' | null;
+type Modal = 'task' | 'categories' | 'projects' | 'delete' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, Calendar, ThemeColor, Settings],
+  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, Calendar, ThemeColor, Settings, CalendarSources, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell],
   templateUrl: './app.html',
   styleUrls: ['./app.css', './forms.css']
 })
 export class App {
   readonly store = inject(BoardStore);
+  readonly externalEntry = signal<ExternalEvent | null>(null);
+  openExternalEvent(entry: ExternalEvent): void { this.externalEntry.set(entry); this.modal.set('external-event'); }
   readonly preferences = inject(UiPreferences);
   private readonly workspaceNameSegmenter = new Intl.Segmenter('zh-TW', {granularity: 'grapheme'});
   readonly currentWorkspaceInitial = computed(() => this.workspaceInitial(this.store.currentWorkspace().name));
   readonly statuses = this.store.statuses;
   readonly priorities = PRIORITIES;
+  readonly listFields: TaskCellField[] = ['title', 'projectId', 'categoryId', 'status', 'priority', 'startDate', 'dueDate'];
   readonly colors = CATEGORY_COLORS;
   readonly query = signal('');
   readonly categoryFilter = signal('all');
@@ -49,8 +61,18 @@ export class App {
   readonly projectEditing = signal<Project | null>(null);
   readonly projectToDelete = signal<Project | null>(null);
   readonly priorityFilter = signal('all');
+  readonly deadlineFilter = signal<DeadlineFilter>('all');
+  readonly deadlineDays = signal<number | null>(null);
+  readonly effectiveDeadlineDays = computed(() => this.deadlineDays() ?? this.store.reminders().dueSoonDays);
+  readonly deadlineSelection = computed(() => this.deadlineFilter() === 'due-soon' && this.deadlineDays() !== null ? 'due-' + this.deadlineDays() : this.deadlineFilter());
+  readonly reminderTab = signal<ReminderTab>('today');
+  readonly remindersOpen = signal(false);
+  readonly now = signal(new Date());
+  readonly settingsTab = signal<SettingsTab>('appearance');
   readonly scope = signal<TaskScope>('all');
   readonly view = signal<'board' | 'list' | 'month' | 'week'>('board');
+  readonly calendarShowOrbit = signal(true);
+  readonly calendarShowGoogle = signal(true);
   readonly sortKey = signal<SortKey | null>(null);
   readonly sortDirection = signal<SortDirection>('asc');
   readonly sortHeaders: {key: SortKey; label: string}[] = [
@@ -81,15 +103,6 @@ export class App {
     {id: 'archived', label: '封存'}
   ];
   readonly toast = signal('');
-  readonly backupRange = signal<BackupKind>('full');
-  readonly backupWorkspaceIds = signal<string[]>([]);
-  readonly totalTaskCount = computed(() => this.store.workspaces().reduce((count, workspace) => count + workspace.tasks.length, 0));
-  readonly importPreview = signal<OrbitBackup | null>(null);
-  readonly backupError = signal('');
-  readonly readingBackup = signal(false);
-  readonly importingBackup = signal(false);
-  readonly confirmingImport = signal(false);
-  readonly importFilename = signal('');
   readonly taskEditContext = signal<TaskEditContext | null>(null);
   readonly taskDraftConflict = computed(() => {
     const context = this.taskEditContext();
@@ -113,9 +126,6 @@ export class App {
   subtaskDraft = '';
   hasStartTime = false;
   hasDueTime = false;
-  importConfirmation = '';
-  private confirmedRevision = '';
-  private fileLoadId = 0;
   private formWorkspaceId = '';
   private formGeneration = '';
   private deletionContext?: TaskEditContext;
@@ -127,6 +137,7 @@ export class App {
     return tasksForProject(this.store.tasks(), this.selectedProjectId()).filter(task => {
       const matchesQuery = !search || `${task.title} ${task.description} ${this.category(task.categoryId).name} ${this.projectName(task.projectId)}`.toLocaleLowerCase().includes(search);
       return matchesQuery && (this.categoryFilter() === 'all' || task.categoryId === this.categoryFilter())
+        && (this.deadlineFilter() === 'all' || deadlineState(task, this.now(), this.effectiveDeadlineDays(), this.statuses()) === this.deadlineFilter())
         && (this.priorityFilter() === 'all' || task.priority === this.priorityFilter())
         && (this.scope() !== 'active' || (!this.store.isDone(task) && !this.store.isArchived(task)))
         && (this.scope() !== 'done' || this.store.isDone(task))
@@ -141,8 +152,67 @@ export class App {
   readonly activeTaskCount = computed(() => this.store.activeTasks().filter(task => !this.store.isDone(task)).length);
   readonly archivedTaskCount = computed(() => this.store.tasks().filter(task => this.store.isArchived(task)).length);
   readonly calendarTasks = computed(() => this.visibleTasks().filter(task => !this.store.isArchived(task)));
-  readonly sortedTasks = computed(() => sortTasks(this.visibleTasks(), this.store.categories(), this.sortKey(), this.sortDirection(), this.statuses(), this.store.projects()));
-  readonly hasFilters = computed(() => !!this.query() || this.selectedProjectId() !== 'all' || this.categoryFilter() !== 'all' || this.priorityFilter() !== 'all' || this.scope() !== 'all');
+  readonly effectiveSortKey = computed(() => this.sortKey() ?? (this.deadlineFilter() === 'all' ? null : 'dueDate'));
+  readonly sortedTasks = computed(() => sortTasks(this.visibleTasks(), this.store.categories(), this.effectiveSortKey(), this.sortKey() ? this.sortDirection() : 'asc', this.statuses(), this.store.projects()));
+  readonly hasFilters = computed(() => !!this.query() || this.selectedProjectId() !== 'all' || this.categoryFilter() !== 'all' || this.priorityFilter() !== 'all' || this.scope() !== 'all' || this.deadlineFilter() !== 'all');
+  readonly deadlineCounts = computed(() => this.store.tasks().reduce((counts, task) => {
+    const state = deadlineState(task, this.now(), this.effectiveDeadlineDays(), this.statuses());
+    if (state) counts[state]++;
+    return counts;
+  }, {'overdue': 0, 'due-soon': 0}));
+  readonly deadlinePresets = computed(() => DUE_DAY_PRESETS.map(days => ({days, count: this.store.tasks().filter(task => deadlineState(task, this.now(), days, this.statuses()) === 'due-soon').length})));
+
+  constructor() {
+    const timer = setInterval(() => this.now.set(new Date()), 30000);
+    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+  }
+
+  @HostListener('window:focus')
+  updateNow(): void { this.now.set(new Date()); }
+
+  openSettings(tab: SettingsTab = 'appearance'): void {
+    this.settingsTab.set(tab); this.sidebarOpen.set(false); this.modal.set('settings');
+  }
+
+  selectDeadline(value: DeadlineFilter): void {
+    if (!['all', 'overdue', 'due-soon'].includes(value)) return;
+    this.deadlineFilter.set(value);
+    if (value === 'all') this.deadlineDays.set(null);
+    if (value !== 'all') { this.scope.set('active'); this.sortKey.set(null); }
+  }
+
+  selectDueSoonDays(days: number): void {
+    if (!Number.isInteger(days) || days < 1 || days > 30) return;
+    this.deadlineDays.set(days); this.selectDeadline('due-soon');
+  }
+  selectDeadlineOption(value: string): void {
+    if (value.startsWith('due-') && value !== 'due-soon') { const days = Number(value.slice(4)); if (DUE_DAY_PRESETS.includes(days)) this.selectDueSoonDays(days); }
+    else if (['all', 'overdue', 'due-soon'].includes(value)) { this.deadlineDays.set(null); this.selectDeadline(value as DeadlineFilter); }
+  }
+  openReminders(tab: ReminderTab = 'today'): void {
+    if (this.modal()) return;
+    this.reminderTab.set(tab); this.sidebarOpen.set(false); this.remindersOpen.set(true);
+  }
+  toggleReminders(): void {
+    if (this.modal()) return;
+    if (this.remindersOpen()) this.remindersOpen.set(false);
+    else this.openReminders();
+  }
+  openReminder(item: ReminderItem): void {
+    if (this.modal()) return;
+    if (item.generation !== this.store.generation() || item.workspaceId !== this.store.currentWorkspace().id) return;
+    if (item.external) {
+      const source = this.store.google().sources.find(source => source.id === item.external!.source.id);
+      if (!source?.visible || !source.workspaceIds.includes(item.workspaceId) || source.accountId !== this.store.google().accountId) return;
+      this.openExternalEvent(item.external);
+    } else {
+      const task = this.store.tasks().find(task => task.id === item.task.id);
+      if (task && !this.store.isDone(task) && !this.store.isArchived(task)) this.openTask(task.status, task);
+    }
+  }
+  showReminderDeadline(days: number): void {
+    this.clearFilters(); this.selectDueSoonDays(days); this.view.set('list');
+  }
 
   @HostListener('document:keydown.escape')
   escape(): void {
@@ -151,6 +221,7 @@ export class App {
     else if (this.workspaceToDelete()) this.workspaceToDelete.set(null);
     else if (this.categoryToDelete()) this.categoryToDelete.set(null);
     else if (this.modal()) this.closeModal();
+    else if (this.remindersOpen()) this.remindersOpen.set(false);
     else this.sidebarOpen.set(false);
   }
 
@@ -209,11 +280,14 @@ export class App {
   }
 
   isOverdue(task: Task): boolean {
-    return isTaskOverdue(task, new Date(), this.statuses());
+    return isTaskOverdue(task, this.now(), this.statuses());
   }
 
   toggleSort(key: SortKey): void {
-    if (this.sortKey() === key) this.sortDirection.update(direction => direction === 'asc' ? 'desc' : 'asc');
+    if (this.effectiveSortKey() === key) {
+      const direction = this.sortState(key) === 'ascending' ? 'desc' : 'asc';
+      this.sortKey.set(key); this.sortDirection.set(direction);
+    }
     else {
       this.sortKey.set(key);
       this.sortDirection.set('asc');
@@ -221,14 +295,14 @@ export class App {
   }
 
   sortState(key: SortKey): 'ascending' | 'descending' | 'none' {
-    return this.sortKey() === key ? this.sortDirection() === 'asc' ? 'ascending' : 'descending' : 'none';
+    return this.effectiveSortKey() === key ? !this.sortKey() || this.sortDirection() === 'asc' ? 'ascending' : 'descending' : 'none';
   }
 
   sortDescription(): string {
-    const key = this.sortKey();
+    const key = this.effectiveSortKey();
     const label = this.sortHeaders.find(header => header.key === key)?.label ?? '';
     const order = key === 'priority' ? this.sortDirection() === 'asc' ? '高至低' : '低至高'
-      : key === 'startDate' || key === 'dueDate' ? this.sortDirection() === 'asc' ? '由早到晚' : '由晚到早'
+      : key === 'startDate' || key === 'dueDate' ? !this.sortKey() || this.sortDirection() === 'asc' ? '由早到晚' : '由晚到早'
       : this.sortDirection() === 'asc' ? '升冪' : '降冪';
     return `${label} · ${order}`;
   }
@@ -236,6 +310,8 @@ export class App {
   selectScope(scope: TaskScope): void {
     if (scope === 'all') this.projectFilter.set('all');
     this.scope.set(scope);
+    this.deadlineFilter.set('all');
+    this.deadlineDays.set(null);
     this.categoryFilter.set('all');
     this.sidebarOpen.set(false);
     if (scope === 'archived' && (this.view() === 'month' || this.view() === 'week')) this.view.set('list');
@@ -244,6 +320,8 @@ export class App {
   selectCategory(id: string): void {
     this.categoryFilter.set(id);
     this.scope.set('all');
+    this.deadlineFilter.set('all');
+    this.deadlineDays.set(null);
     this.sidebarOpen.set(false);
   }
 
@@ -252,6 +330,8 @@ export class App {
     this.categoryFilter.set('all');
     this.projectFilter.set('all');
     this.priorityFilter.set('all');
+    this.deadlineFilter.set('all');
+    this.deadlineDays.set(null);
     this.scope.set('all');
   }
 
@@ -401,6 +481,15 @@ export class App {
     if (!this.handleResult(await this.store.moveTask(task.id, status))) return;
     this.notifySaved(`已移至${this.statusLabel(status)}`);
   }
+
+  openListTask(event: Event, task: Task): void {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, input, select, textarea, a, form')) return;
+    if (event.type === 'keydown' && event.target !== event.currentTarget) return;
+    if (event.type === 'keydown') event.preventDefault();
+    this.openTask(task.status, task);
+  }
+  inlineSaved(message: string): void { this.notify(message); }
 
   openCategories(): void {
     this.rememberFormContext();
@@ -648,9 +737,9 @@ export class App {
   }
 
   closeModal(): void {
-    if (this.importingBackup() || (this.modal() === 'settings' && this.store.pendingWrites() > 0)) return;
-    this.fileLoadId++;
+    if (this.modal() === 'settings' && this.store.pendingWrites() > 0) return;
     this.modal.set(null);
+    this.externalEntry.set(null);
     this.categoryToDelete.set(null);
     this.taskToDelete.set(null);
     this.statusToDelete.set(null);
@@ -658,80 +747,7 @@ export class App {
     this.projectToDelete.set(null);
   }
 
-  openBackup(): void {
-    this.backupWorkspaceIds.set([this.store.currentWorkspace().id]);
-    this.backupRange.set('full');
-    this.importPreview.set(null);
-    this.backupError.set('');
-    this.readingBackup.set(false);
-    this.confirmingImport.set(false);
-    this.importFilename.set('');
-    this.modal.set('backup');
-  }
-
-  toggleBackupWorkspace(id: string, selected: boolean): void {
-    this.backupWorkspaceIds.update(ids => selected ? [...new Set([...ids, id])] : ids.filter(item => item !== id));
-  }
-
-  async exportBackup(all = false): Promise<void> {
-    this.backupError.set('');
-    try {
-      downloadBackup(await this.store.backupForExport(all ? 'full' : this.backupRange(), this.backupWorkspaceIds()));
-      this.notify('備份檔已準備下載');
-    } catch (error) { this.backupError.set(error instanceof Error ? error.message : '無法匯出備份檔。'); }
-  }
-
-  async readImportFile(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
-    const request = ++this.fileLoadId;
-    this.readingBackup.set(true);
-    this.importPreview.set(null);
-    this.confirmingImport.set(false);
-    this.backupError.set('');
-    try {
-      if (file.size > 20 * 1024 * 1024) throw new Error('檔案超過 20 MB，請選擇較小的工作空間備份。');
-      const text = await file.text();
-      if (request !== this.fileLoadId) return;
-      let value: unknown;
-      try { value = JSON.parse(text); } catch { throw new Error('檔案不是有效的 JSON，原有資料未變更。'); }
-      this.importPreview.set(readBackup(value));
-      this.importFilename.set(file.name);
-    } catch (error) {
-      if (request === this.fileLoadId) this.backupError.set(error instanceof Error ? error.message : '無法讀取備份，原有資料未變更。');
-    } finally { if (request === this.fileLoadId) this.readingBackup.set(false); }
-  }
-
-  prepareFullImport(): void {
-    this.store.refreshFromStorage();
-    this.confirmedRevision = this.store.revision();
-    this.importConfirmation = '';
-    this.backupError.set('');
-    this.confirmingImport.set(true);
-  }
-
-  async executeImport(): Promise<void> {
-    const backup = this.importPreview();
-    if (!backup || this.importingBackup() || this.store.pendingWrites()) return;
-    if (backup.kind === 'full' && (!this.confirmingImport() || this.importConfirmation !== '取代全部資料')) return;
-    this.importingBackup.set(true);
-    this.backupError.set('');
-    try {
-      const result = await this.store.importBackup(backup, this.confirmedRevision);
-      if (!result.ok) { this.backupError.set(result.message); return; }
-      this.clearFilters();
-      this.sortKey.set(null);
-      this.importingBackup.set(false);
-      this.closeModal();
-      this.notify(backup.kind === 'full' ? '全部資料已還原' : `已新增 ${backup.data.workspaces.length} 個工作空間，原有資料保留`);
-    } finally { this.importingBackup.set(false); }
-  }
-
-  backupTaskCount(backup: OrbitBackup): number {
-    return backup.data.workspaces.reduce((count, workspace) => count + workspace.tasks.length, 0);
-  }
+  openBackup(): void { this.openSettings('data'); }
 
   private handleResult(result: StoreResult, category = false): result is Extract<StoreResult, {ok: true}> {
     if (result.ok) return true;

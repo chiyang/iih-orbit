@@ -4,7 +4,13 @@
   }
   <aside class="sidebar" [class.is-open]="sidebarOpen()" [attr.inert]="modal() || (mobileViewport() && !sidebarOpen()) ? '' : null">
     <a class="brand" href="/" aria-label="TMU IIH Orbit 首頁"><span class="brand-symbol"><app-icon name="leaf" /></span><span class="brand-wordmark"><span class="brand-institution">TMU</span><span class="brand-name">IIH Orbit</span></span></a>
-    <div class="workspace-switch"><span class="workspace-icon workspace-initial" aria-hidden="true">{{ currentWorkspaceInitial() }}</span><label class="workspace-details"><span>工作空間</span><select aria-label="切換工作空間" [ngModel]="store.currentWorkspace().id" (ngModelChange)="selectWorkspace($event)">@for (workspace of store.workspaces(); track workspace.id) {<option [value]="workspace.id">{{ workspace.name }}</option>}</select></label><button class="tiny-icon" aria-label="管理工作空間" title="管理工作空間" (click)="openWorkspaces()"><app-icon name="edit" /></button></div>
+    <p class="brand-tagline">讓每一步，慢慢上軌道。</p>
+    <div class="workspace-switch">
+      <span class="workspace-caption">工作空間</span>
+      <div class="workspace-current" aria-hidden="true"><span class="workspace-icon workspace-initial">{{ currentWorkspaceInitial() }}</span><strong>{{ store.currentWorkspace().name }}</strong><app-icon name="down" /></div>
+      <select class="workspace-picker" aria-label="切換工作空間" [title]="store.currentWorkspace().name" [ngModel]="store.currentWorkspace().id" (ngModelChange)="selectWorkspace($event)">@for (workspace of store.workspaces(); track workspace.id) {<option [value]="workspace.id">{{ workspace.name }}</option>}</select>
+      <button class="tiny-icon workspace-manage" aria-label="管理工作空間" title="管理工作空間" (click)="openWorkspaces()"><app-icon name="edit" /></button>
+    </div>
     <div class="nav-label">工作空間</div>
     <nav aria-label="主要導覽" class="primary-nav">
       <button [class.active]="scope() === 'all' && categoryFilter() === 'all'" (click)="selectScope('all')"><app-icon name="board" /><span>專案看板</span><span class="nav-count">{{ store.tasks().length }}</span></button>
@@ -21,6 +27,7 @@
       <button [class.active]="categoryFilter() === ''" (click)="selectCategory('')"><span class="category-dot" orbitColor="gray"></span><span>未分類</span><small>{{ categoryCount('') }}</small></button>
     </nav>
     <button class="manage-categories" (click)="openCategories()"><app-icon name="tag" />管理分類</button>
+    <app-calendar-sources (configure)="openSettings('calendar')" />
     <div class="sidebar-bottom">
       <div class="little-tip"><span class="tip-art"><app-icon name="spark" /></span><strong>小步前進，也是一種進展</strong><p>拖曳任務卡片，<br>讓每一步的進度清楚可見。</p><span class="tip-line"></span></div>
       <div class="profile"><span class="personal-symbol"><app-icon name="leaf" /></span><span><strong>智慧醫療跨領域<br>學士學位學程<br>工作台</strong><small>單機・單人工作空間</small></span></div>
@@ -30,7 +37,7 @@
   <main class="main" [attr.inert]="modal() || (mobileViewport() && sidebarOpen()) ? '' : null">
     <header class="topbar">
       <div class="breadcrumb"><button class="icon-button mobile-menu" aria-label="開啟側邊欄" (click)="sidebarOpen.set(true)"><app-icon name="menu" /></button><span class="mobile-wordmark" aria-label="TMU IIH Orbit"><span>TMU</span><strong>IIH Orbit</strong></span><span class="desktop-crumb workspace-crumb">{{ store.currentWorkspace().name }}</span><app-icon class="desktop-crumb" name="chevron" /><strong class="desktop-crumb navigation-crumb" [title]="navigationTitle()">{{ navigationTitle() }}</strong></div>
-      <div class="topbar-right"><button class="settings-entry" aria-label="設定" title="設定" (click)="modal.set('settings')"><app-icon name="settings" /><span>設定</span></button><button class="backup-button" aria-label="資料與備份" title="資料與備份" (click)="openBackup()"><app-icon name="export" /><span>資料與備份</span></button><label class="text-size-control"><span class="font-symbol" aria-hidden="true">Aa</span><span class="text-size-label">字體</span><select aria-label="字體大小" aria-describedby="text-size-help" [ngModel]="preferences.textSize()" (ngModelChange)="preferences.setTextSize($event)">@for (option of preferences.options; track option.id) {<option [value]="option.id">{{ option.label }}</option>}</select></label><span id="text-size-help" class="visually-hidden">即時調整所有視圖與表單的文字，設定會保存於此瀏覽器。</span><span class="save-status" [class.warning]="store.storageWarning()"><span class="status-dot"></span>{{ store.storageWarning() ? '儲存需要留意' : '本機自動儲存' }}</span><span class="local-mode"><app-icon name="panel" />單機版</span></div>
+      <div class="topbar-right"><app-reminder-badge [expanded]="remindersOpen()" (openCenter)="toggleReminders()" /><button class="settings-entry theme-toggle" [attr.aria-label]="'目前主題：' + preferences.themeLabel() + '；切換淺色、深色、跟隨系統'" [title]="'主題：' + preferences.themeLabel() + '（點擊循環切換）'" (click)="preferences.cycleTheme()"><app-icon [name]="preferences.themeIcon()" /><span>{{ preferences.themeLabel() }}</span></button><button class="settings-entry" aria-label="設定" title="設定" (click)="openSettings()"><app-icon name="settings" /><span>設定</span></button><button class="backup-button" aria-label="資料與備份" title="資料與備份" (click)="openBackup()"><app-icon name="export" /><span>資料與備份</span></button><label class="text-size-control"><span class="font-symbol" aria-hidden="true">Aa</span><span class="text-size-label">字體</span><select aria-label="字體大小" aria-describedby="text-size-help" [ngModel]="preferences.textSize()" (ngModelChange)="preferences.setTextSize($event)">@for (option of preferences.options; track option.id) {<option [value]="option.id">{{ option.label }}</option>}</select></label><span id="text-size-help" class="visually-hidden">即時調整所有視圖與表單的文字，設定會保存於此瀏覽器。</span><span class="save-status" [class.warning]="store.storageWarning()"><span class="status-dot"></span>{{ store.storageWarning() ? '儲存需要留意' : '本機自動儲存' }}</span><span class="local-mode"><app-icon name="panel" />單機版</span></div>
     </header>
 
     <section class="project-header" aria-labelledby="project-title">
@@ -58,8 +65,9 @@
 
     <section class="board-area" aria-label="任務工作區">
       <div class="view-toolbar"><div class="view-tabs" role="group" aria-label="顯示方式"><button [class.active]="view() === 'board'" [attr.aria-pressed]="view() === 'board'" (click)="view.set('board')"><app-icon name="board" />看板視圖</button><button [class.active]="view() === 'list'" [attr.aria-pressed]="view() === 'list'" (click)="view.set('list')"><app-icon name="list" />清單視圖</button><button [class.active]="view() === 'month'" [attr.aria-pressed]="view() === 'month'" (click)="view.set('month')"><app-icon name="calendar" />月曆視圖</button><button [class.active]="view() === 'week'" [attr.aria-pressed]="view() === 'week'" (click)="view.set('week')"><app-icon name="week" />週視圖</button></div><div class="board-totals"><span><i class="total-dot"></i>{{ selectedProgress().taskCount }} 個任務</span><span><i class="progress-dot"></i>{{ selectedProgress().total - selectedProgress().completed }} 個待完成</span></div></div>
-      <div class="filter-toolbar"><div class="search-box"><app-icon name="search" /><input aria-label="搜尋任務" placeholder="搜尋任務名稱或內容…" [ngModel]="query()" (ngModelChange)="query.set($event)">@if (query()) {<button class="tiny-icon" aria-label="清除搜尋" (click)="query.set('')"><app-icon name="close" /></button>}</div><div class="filter-actions"><div class="select-wrap"><app-icon name="tag" /><select aria-label="篩選分類" [ngModel]="categoryFilter()" (ngModelChange)="categoryFilter.set($event)"><option value="all">所有分類</option>@for (category of store.categories(); track category.id) {<option [value]="category.id">{{ category.name }}</option>}<option value="">未分類</option></select><app-icon name="down" /></div><div class="select-wrap priority-filter"><app-icon name="flag" /><select aria-label="篩選優先順序" [ngModel]="priorityFilter()" (ngModelChange)="priorityFilter.set($event)"><option value="all">所有優先順序</option>@for (priority of priorities; track priority.id) {<option [value]="priority.id">{{ priority.label }}</option>}</select><app-icon name="down" /></div>@if (view() === 'board') {<button class="settings-button" (click)="openStatuses()"><app-icon name="board" />管理狀態</button>}<button class="filter-button" (click)="openCategories()"><app-icon name="filter" /><span>管理分類</span></button></div></div>
-      @if (hasFilters()) {<div class="filter-summary"><span>顯示 {{ visibleTasks().length }} 個任務@if (selectedProjectId() !== 'all') { · {{ selectedProgress().name }}}@if (scope() === 'active') { · 待完成}@if (scope() === 'done') { · 已完成}@if (scope() === 'archived') { · 封存}</span><button (click)="clearFilters()">清除篩選<app-icon name="close" /></button></div>}
+      <div class="filter-toolbar"><div class="search-box"><app-icon name="search" /><input aria-label="搜尋任務" placeholder="搜尋任務名稱或內容…" [ngModel]="query()" (ngModelChange)="query.set($event)">@if (query()) {<button class="tiny-icon" aria-label="清除搜尋" (click)="query.set('')"><app-icon name="close" /></button>}</div><div class="filter-actions"><div class="select-wrap"><app-icon name="tag" /><select aria-label="篩選分類" [ngModel]="categoryFilter()" (ngModelChange)="categoryFilter.set($event)"><option value="all">所有分類</option>@for (category of store.categories(); track category.id) {<option [value]="category.id">{{ category.name }}</option>}<option value="">未分類</option></select><app-icon name="down" /></div><div class="select-wrap deadline-filter"><app-icon name="clock" /><select aria-label="篩選截止日期" [ngModel]="deadlineSelection()" (ngModelChange)="selectDeadlineOption($event)"><option value="all">所有截止日期</option><option value="overdue">已逾期</option><option value="due-1">1 天內到期</option><option value="due-3">3 天內到期</option><option value="due-7">7 天內到期</option><option value="due-30">30 天內到期</option><option value="due-soon">設定範圍：{{ store.reminders().dueSoonDays }} 天內</option></select><app-icon name="down" /></div><div class="select-wrap priority-filter"><app-icon name="flag" /><select aria-label="篩選優先順序" [ngModel]="priorityFilter()" (ngModelChange)="priorityFilter.set($event)"><option value="all">所有優先順序</option>@for (priority of priorities; track priority.id) {<option [value]="priority.id">{{ priority.label }}</option>}</select><app-icon name="down" /></div>@if (view() === 'board') {<button class="settings-button" (click)="openStatuses()"><app-icon name="board" />管理狀態</button>}<button class="filter-button" (click)="openCategories()"><app-icon name="filter" /><span>管理分類</span></button></div></div>
+      <div class="deadline-shortcuts" aria-label="工作空間截止提醒"><button [class.selected]="deadlineFilter() === 'overdue'" [attr.aria-pressed]="deadlineFilter() === 'overdue'" (click)="selectDeadline(deadlineFilter() === 'overdue' ? 'all' : 'overdue')"><app-icon name="clock" />已逾期 <strong>{{ deadlineCounts().overdue }}</strong></button>@for (preset of deadlinePresets(); track preset.days) {<button [class.selected]="deadlineFilter() === 'due-soon' && effectiveDeadlineDays() === preset.days" [attr.aria-pressed]="deadlineFilter() === 'due-soon' && effectiveDeadlineDays() === preset.days" (click)="deadlineFilter() === 'due-soon' && effectiveDeadlineDays() === preset.days ? selectDeadline('all') : selectDueSoonDays(preset.days)">{{ preset.days }} 天內到期 <strong>{{ preset.count }}</strong></button>}<button (click)="openReminders('tomorrow')"><app-icon name="calendar" />明天開始</button><button (click)="openReminders('next-week')">下週開始</button><button class="reminder-settings" (click)="openSettings('reminders')"><app-icon name="settings" />提醒設定</button></div>
+      @if (hasFilters()) {<div class="filter-summary"><span>顯示 {{ visibleTasks().length }} 個任務@if (selectedProjectId() !== 'all') { · {{ selectedProgress().name }}}@if (scope() === 'active') { · 待完成}@if (scope() === 'done') { · 已完成}@if (scope() === 'archived') { · 封存}@if (deadlineFilter() === 'overdue') { · 已逾期}@if (deadlineFilter() === 'due-soon') { · {{ effectiveDeadlineDays() }} 天內到期}</span>@if (deadlineFilter() !== 'all' && view() !== 'list') {<button (click)="view.set('list')"><app-icon name="list" />查看截止清單</button>}<button (click)="clearFilters()">清除篩選<app-icon name="close" /></button></div>}
 
       @if (view() === 'board') {
         <div class="kanban-scroll" cdkScrollable>
@@ -72,9 +80,11 @@
                   @for (task of column.tasks; track task.id) {
                     <article class="task-card" cdkDrag [cdkDragData]="task" [cdkDragStartDelay]="{mouse: 0, touch: 180}" (cdkDragEnded)="dragEnded()" [attr.data-task-id]="task.id" [class.completed-card]="store.isDone(task)">
                       <div class="card-top"><span class="category-badge" [orbitColor]="category(task.categoryId).color"><i></i>{{ category(task.categoryId).name }}</span><span class="priority" [attr.data-priority]="task.priority" [title]="priorityLabel(task.priority)"><app-icon name="flag" /><span>{{ priorityLabel(task.priority) }}</span></span></div>
-                      @if (task.projectId) {<button class="task-project-tag" [attr.aria-label]="'篩選專案 ' + projectName(task.projectId)" (click)="selectProject(task.projectId)"><app-icon name="tag" />{{ projectName(task.projectId) }}</button>}
-                      <button class="task-title" (click)="openTask(task.status, task)">@if (store.isDone(task)) {<span class="task-done-mark"><app-icon name="check" /></span>}{{ task.title }}</button>
-                      <p class="task-description">{{ task.description || '新增描述，讓任務目標更清楚。' }}</p>
+                      <button class="task-open-area" [attr.aria-label]="'開啟任務 ' + task.title" (click)="openTask(task.status, task)">
+                        @if (task.projectId) {<span class="task-project-tag"><app-icon name="tag" />{{ projectName(task.projectId) }}</span>}
+                        <span class="task-title">@if (store.isDone(task)) {<span class="task-done-mark"><app-icon name="check" /></span>}{{ task.title }}</span>
+                        <span class="task-description">{{ task.description || '新增描述，讓任務目標更清楚。' }}</span>
+                      </button>
                       @if (task.subtasks.length) {<div class="subtask-progress"><div><app-icon name="list" /><span>子任務</span><strong>{{ completedSubtasks(task) }}/{{ task.subtasks.length }}</strong></div><div class="subtask-track"><span [style.width.%]="completedSubtasks(task) / task.subtasks.length * 100"></span></div></div>}
                       <div class="card-footer"><div class="task-dates">@if (task.startDate) {<span class="due-date" [title]="formatDate(task.startDate, task.startTime, true)"><app-icon name="clock" /><span class="date-kind">開始</span>{{ formatDate(task.startDate, task.startTime) }}</span>}<span class="due-date" [class.overdue]="isOverdue(task)" [title]="formatDate(task.dueDate, task.dueTime, true)"><app-icon name="calendar" /><span class="date-kind">截止</span>{{ formatDate(task.dueDate, task.dueTime) }}@if (isOverdue(task)) {<small>逾期</small>}</span></div></div>
                       <button class="card-edit" [attr.aria-label]="'編輯 ' + task.title" title="編輯任務" (click)="openTask(task.status, task)"><app-icon name="edit" /></button>
@@ -90,31 +100,25 @@
           </div>
         </div>
       } @else if (view() === 'list') {
-        @if (sortKey()) {
-          <div class="sorting-summary"><span><app-icon name="sort" />排序：{{ sortDescription() }}</span><button (click)="sortKey.set(null)">還原看板順序</button></div>
+        @if (effectiveSortKey()) {
+          <div class="sorting-summary"><span><app-icon name="sort" />排序：{{ sortDescription() }}</span>@if (sortKey()) {<button (click)="sortKey.set(null)">{{ deadlineFilter() === 'all' ? '還原看板順序' : '還原截止日期排序' }}</button>}</div>
         }
         <div class="list-scroll">
           <table class="task-table">
-            <thead><tr>@for (header of sortHeaders; track header.key) {<th scope="col" [attr.aria-sort]="sortState(header.key)"><button class="sort-header" [class.sorted]="sortKey() === header.key" [attr.aria-label]="'依' + header.label + '排序'" (click)="toggleSort(header.key)">{{ header.label }}<span class="sort-indicator">{{ sortKey() === header.key ? sortDirection() === 'asc' ? '↑' : '↓' : '↕' }}</span></button></th>}</tr></thead>
+            <thead><tr>@for (header of sortHeaders; track header.key) {<th scope="col" [attr.aria-sort]="sortState(header.key)"><button class="sort-header" [class.sorted]="effectiveSortKey() === header.key" [attr.aria-label]="'依' + header.label + '排序'" (click)="toggleSort(header.key)">{{ header.label }}<span class="sort-indicator">{{ sortState(header.key) === 'none' ? '↕' : sortState(header.key) === 'ascending' ? '↑' : '↓' }}</span></button></th>}</tr></thead>
             <tbody>
               @for (task of sortedTasks(); track task.id) {
-                <tr>
-                  <td><button class="list-task-title" (click)="openTask(task.status, task)">{{ task.title }}</button></td>
-                  <td><button class="task-project-tag list-project-tag" (click)="selectProject(task.projectId)">{{ projectName(task.projectId) }}</button></td>
-                  <td><span class="category-badge" [orbitColor]="category(task.categoryId).color"><i></i>{{ category(task.categoryId).name }}</span></td>
-                  <td><select class="list-status" [attr.data-status]="task.status" [orbitColor]="statusColor(task.status)" [attr.aria-label]="task.title + '的狀態'" [ngModel]="task.status" (ngModelChange)="changeStatus(task, $event)">@for (status of statuses(); track status.id) {<option [value]="status.id">{{ status.label }}</option>}</select></td>
-                  <td><span class="priority" [attr.data-priority]="task.priority"><app-icon name="flag" />{{ priorityLabel(task.priority) }}</span></td>
-                  <td><span class="list-date">{{ formatDate(task.startDate, task.startTime, true) }}</span></td>
-                  <td><span class="list-date" [class.overdue]="isOverdue(task)">{{ formatDate(task.dueDate, task.dueTime, true) }}@if (isOverdue(task)) {<small>逾期</small>}</span></td>
+                <tr class="task-row" tabindex="0" [attr.aria-label]="task.title + '，點擊空白處或按 Enter 開啟完整任務'" (click)="openListTask($event, task)" (keydown.enter)="openListTask($event, task)">
+                  @for (field of listFields; track field) {<td><app-task-cell [task]="task" [field]="field" [now]="now()" (saved)="inlineSaved($event)" /></td>}
                 </tr>
               } @empty {<tr><td colspan="7" class="empty-table">沒有符合條件的任務。<button (click)="clearFilters()">清除篩選</button></td></tr>}
             </tbody>
           </table>
         </div>
       } @else {
-        <app-calendar [tasks]="calendarTasks()" [statuses]="statuses()" [categories]="store.categories()" [mode]="view() === 'week' ? 'week' : 'month'" (editTask)="openTask($event.status, $event)" (createTask)="openCalendarTask($event)" />
+        <app-calendar [tasks]="calendarTasks()" [statuses]="statuses()" [categories]="store.categories()" [mode]="view() === 'week' ? 'week' : 'month'" [showOrbit]="calendarShowOrbit()" [showGoogle]="calendarShowGoogle()" [deadlineFiltered]="deadlineFilter() !== 'all'" (orbitVisibilityChange)="calendarShowOrbit.set($event)" (googleVisibilityChange)="calendarShowGoogle.set($event)" (editTask)="openTask($event.status, $event)" (readExternal)="openExternalEvent($event)" (createTask)="openCalendarTask($event)" />
       }
-      <footer class="board-footer"><span><app-icon [name]="view() === 'board' ? 'grip' : view() === 'list' ? 'sort' : 'calendar'" />{{ view() === 'board' ? '拖曳卡片調整順序，或移至其他欄位更新進度' : view() === 'list' ? '點選欄位標題排序，再次點選切換方向；未設定日期排在最後' : view() === 'week' ? '點選時段新增任務，或點選任務編輯' : '點選任務編輯，或用日期旁的＋建立任務' }}</span><span>讓每一件事，都向前一點。<app-icon name="leaf" /></span></footer>
+      <footer class="board-footer"><span><app-icon [name]="view() === 'board' ? 'grip' : view() === 'list' ? 'sort' : 'calendar'" />{{ view() === 'board' ? '拖曳卡片調整順序，或移至其他欄位更新進度' : view() === 'list' ? '點擊欄位原位編輯；空白處或列上 Enter 開啟完整任務，欄位標題可排序' : view() === 'week' ? '拖曳本機任務調整日期與時間，或點選空白時段新增任務' : '拖曳本機任務調整日期，或用日期旁的＋建立任務' }}</span><span>讓每一件事，都向前一點。<app-icon name="leaf" /></span></footer>
     </section>
   </main>
 </div>
@@ -122,7 +126,7 @@
 @if (modal()) {
   <div class="modal-backdrop" (click)="closeModal()">
     <section class="modal" [attr.data-modal]="modal()" [class.category-modal]="modal() === 'categories'" role="dialog" aria-modal="true" aria-labelledby="modal-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true" (click)="$event.stopPropagation()">
-      <div class="modal-header"><div><span class="modal-eyebrow">TMU IIH ORBIT</span><h2 id="modal-title">@switch (modal()) {@case ('task') {{{ editing() ? '編輯任務' : '建立新任務' }}} @case ('categories') {管理任務分類} @case ('projects') {專案管理} @case ('statuses') {管理看板狀態} @case ('workspaces') {管理工作空間} @case ('backup') {資料與備份} @case ('settings') {設定} @case ('delete') {刪除任務}}</h2></div><button class="icon-button" aria-label="關閉對話框" [attr.cdkFocusInitial]="modal() === 'statuses' || modal() === 'workspaces' || modal() === 'backup' || modal() === 'projects' || modal() === 'settings' ? '' : null" (click)="closeModal()"><app-icon name="close" /></button></div>
+      <div class="modal-header"><div><span class="modal-eyebrow">TMU IIH ORBIT</span><h2 id="modal-title">@switch (modal()) {@case ('task') {{{ editing() ? '編輯任務' : '建立新任務' }}} @case ('categories') {管理任務分類} @case ('projects') {專案管理} @case ('statuses') {管理看板狀態} @case ('workspaces') {管理工作空間} @case ('settings') {設定} @case ('external-event') {Google 活動明細} @case ('delete') {刪除任務}}</h2></div><button class="icon-button" aria-label="關閉對話框" [attr.cdkFocusInitial]="modal() === 'statuses' || modal() === 'workspaces' || modal() === 'projects' || modal() === 'settings' || modal() === 'external-event' ? '' : null" (click)="closeModal()"><app-icon name="close" /></button></div>
       @switch (modal()) {
         @case ('task') {
           <form (ngSubmit)="saveTask()" class="task-form">
@@ -150,7 +154,8 @@
             <div class="modal-footer">@if (editing()) {<button type="button" class="delete-link" (click)="requestDeleteTask(draft)"><app-icon name="trash" />刪除任務</button>} @else {<span class="form-note">好進展，從一個任務開始。</span>}<div><button type="button" class="button secondary" (click)="closeModal()">取消</button><button type="submit" class="button primary" [disabled]="store.pendingWrites() > 0"><app-icon [name]="editing() ? 'check' : 'plus'" />{{ editing() ? '儲存變更' : '建立任務' }}</button></div></div>
           </form>
         }
-        @case ('settings') {<app-settings (openBackup)="openBackup()" (resetDone)="clearFilters(); sortKey.set(null)" /><div class="modal-footer"><button class="button secondary" (click)="closeModal()">完成</button></div>}
+        @case ('settings') {@defer (on immediate) {<app-settings [initialTab]="settingsTab()" (resetDone)="clearFilters(); sortKey.set(null)" />} @placeholder {<div class="modal-body" role="status">載入設定…</div>} @error {<div class="modal-body" role="alert">無法載入設定，請重新整理後再試。</div>}<div class="modal-footer"><button class="button secondary" (click)="closeModal()">完成</button></div>}
+        @case ('external-event') {@if (externalEntry(); as entry) {<app-external-event-details [entry]="entry" />}<div class="modal-footer"><button class="button secondary" (click)="closeModal()">關閉</button></div>}
         @case ('categories') {
           <div class="modal-body"><p class="modal-description">用分類整理不同類型的工作，讓看板一目了然。</p><div class="category-manager">@for (category of store.categories(); track category.id) {<div class="category-manager-row"><span class="category-dot" [orbitColor]="category.color"></span><strong>{{ category.name }}</strong><small>{{ categoryCount(category.id) }} 個任務</small><button class="tiny-icon" [attr.aria-label]="'編輯分類 ' + category.name" (click)="editCategory(category)"><app-icon name="edit" /></button><button class="tiny-icon danger-icon" [attr.aria-label]="'刪除分類 ' + category.name" (click)="categoryToDelete.set(category)"><app-icon name="trash" /></button></div>} @empty {<p class="muted">還沒有分類，建立第一個吧。</p>}</div>
           @if (categoryToDelete(); as category) {<div class="category-delete-confirm" role="alert"><strong>刪除「{{ category.name }}」？</strong><p>任務會保留，並改為「未分類」。</p><button class="button secondary" (click)="categoryToDelete.set(null)">取消</button><button class="button danger" (click)="deleteCategory()">刪除分類</button></div>}
@@ -195,35 +200,6 @@
             </form>
           </div>
           <div class="modal-footer"><span class="form-note">狀態變更會立即保存。</span><button class="button secondary" (click)="closeModal()">完成</button></div>
-        }
-        @case ('backup') {
-          <div class="modal-body backup-body">
-            <section class="backup-section" aria-labelledby="backup-export-title">
-              <h3 id="backup-export-title">匯出備份</h3><p>下載 JSON 檔，保存任務、分類、狀態、時程與工作空間。</p>
-              <fieldset class="backup-options"><legend class="visually-hidden">匯出範圍</legend><label><input type="radio" name="backupRange" value="full" [ngModel]="backupRange()" (ngModelChange)="backupRange.set($event)">全部資料<span>所有工作空間與外觀偏好</span></label><label><input type="radio" name="backupRange" value="workspaces" [ngModel]="backupRange()" (ngModelChange)="backupRange.set($event)">選定工作空間<span>可選一個或多個</span></label></fieldset>
-              @if (backupRange() === 'workspaces') {
-                <div class="backup-workspace-list" aria-label="選擇匯出工作空間">@for (workspace of store.workspaces(); track workspace.id) {<label><input type="checkbox" [checked]="backupWorkspaceIds().includes(workspace.id)" (change)="toggleBackupWorkspace(workspace.id, $any($event.target).checked)"><span>{{ workspace.name }}<small>{{ workspace.tasks.length }} 個任務</small></span></label>}</div>
-              }
-              <button class="button primary" [disabled]="store.pendingWrites() > 0 || (backupRange() === 'workspaces' && !backupWorkspaceIds().length)" (click)="exportBackup()"><app-icon name="export" />下載備份檔</button>
-              @if (store.hasUnsavedChanges()) {<p class="backup-caution">此分頁有尚未成功儲存的變更，也會包含在匯出檔中。</p>}
-            </section>
-            <section class="backup-section" aria-labelledby="backup-import-title">
-              <h3 id="backup-import-title">匯入備份</h3><p>先選擇檔案查看內容，再決定匯入。選定工作空間備份會新增副本，名稱重複也可以。</p>
-              <label class="backup-file-field">選擇 IIH Orbit 備份檔<input type="file" accept=".json,application/json" [disabled]="importingBackup()" (change)="readImportFile($event)"></label>
-              @if (readingBackup()) {<p role="status">正在讀取備份…</p>}
-              @if (importPreview(); as backup) {
-                <div class="backup-preview"><strong>{{ backup.kind === 'full' ? '全部資料備份' : '工作空間備份' }}</strong><small>{{ importFilename() }} · {{ backup.exportedAt.replace('T', ' ').slice(0, 16) }} UTC</small><p>{{ backup.data.workspaces.length }} 個工作空間 · {{ backupTaskCount(backup) }} 個任務</p><ul>@for (workspace of backup.data.workspaces; track workspace.id) {<li>{{ workspace.name }}<span>{{ workspace.tasks.length }} 個任務</span></li>}</ul></div>
-                @if (backup.kind === 'workspaces') {<button class="button primary" [disabled]="importingBackup() || store.pendingWrites() > 0" (click)="executeImport()">{{ importingBackup() ? '正在匯入…' : '新增 ' + backup.data.workspaces.length + ' 個工作空間' }}</button>}
-                @else if (!confirmingImport()) {<button class="button secondary" [disabled]="store.pendingWrites() > 0" (click)="prepareFullImport()">檢查全部資料覆蓋範圍</button>}
-                @else {
-                  <div class="backup-replace-warning" role="alert"><strong>將取代目前全部資料</strong><p>目前 {{ store.workspaces().length }} 個工作空間、{{ totalTaskCount() }} 個任務將由備份取代；備份包含的字體設定也會套用。此操作無法直接復原，建議先下載目前備份。</p><button class="button secondary" (click)="exportBackup(true)"><app-icon name="export" />先下載目前全部資料</button><label class="form-field">輸入「取代全部資料」確認<input [(ngModel)]="importConfirmation" autocomplete="off" placeholder="取代全部資料" [disabled]="importingBackup()"></label><div class="backup-confirm-actions"><button class="button secondary" [disabled]="importingBackup()" (click)="confirmingImport.set(false)">取消覆蓋</button><button class="button secondary" [disabled]="importingBackup()" (click)="prepareFullImport()">重新檢查範圍</button><button class="button danger" [disabled]="importConfirmation !== '取代全部資料' || importingBackup() || store.pendingWrites() > 0" (click)="executeImport()">{{ importingBackup() ? '正在還原…' : '確認取代並還原' }}</button></div></div>
-                }
-              }
-              @if (backupError()) {<p class="form-error" role="alert">{{ backupError() }}</p>}
-            </section>
-            <p class="backup-sync-note"><app-icon name="save" />同一瀏覽器、同一網站的分頁會自動同步資料，各分頁可查看不同工作空間。</p>
-          </div>
-          <div class="modal-footer"><span class="form-note">備份檔包含工作內容，請自行妥善保存。</span><button class="button secondary" [disabled]="importingBackup()" (click)="closeModal()">完成</button></div>
         }
         @case ('workspaces') {
           <div class="modal-body">
@@ -278,3 +254,14 @@
   </div>
 }
 @if (toast()) {<div class="toast" role="status"><span><app-icon name="check" /></span>{{ toast() }}<button class="tiny-icon" aria-label="關閉提示" (click)="toast.set('')"><app-icon name="close" /></button></div>}
+
+<app-reminder-popups [blocked]="!!modal() || sidebarOpen() || remindersOpen()" (openItem)="openReminder($event)" (openCenter)="openReminders($event)" />
+
+@if (remindersOpen()) {
+  <section id="reminder-panel" class="reminder-panel" role="dialog" aria-modal="false" aria-labelledby="reminder-panel-title" [attr.inert]="modal() || sidebarOpen() ? '' : null">
+    <header class="reminder-panel-header"><div><app-icon name="bell" /><h2 id="reminder-panel-title">訊息中心</h2></div><button class="icon-button" aria-label="關閉訊息中心" (click)="remindersOpen.set(false)"><app-icon name="close" /></button></header>
+    @defer (on immediate) {<app-reminder-center [initialTab]="reminderTab()" (openItem)="openReminder($event)" (openSettings)="openSettings('reminders')" (showDeadline)="showReminderDeadline($event)" />}
+    @placeholder {<p class="reminder-panel-loading" role="status">正在開啟訊息中心…</p>}
+    @error {<p class="reminder-panel-loading" role="alert">訊息中心無法載入，請關閉後重試。</p>}
+  </section>
+}

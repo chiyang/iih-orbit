@@ -1,5 +1,8 @@
+<div class="settings-tabs" role="tablist" aria-label="設定分類">
+  @for (tab of tabs; track tab.id) {<button type="button" role="tab" [id]="'settings-tab-' + tab.id" [attr.data-tab]="tab.id" [attr.aria-selected]="activeTab() === tab.id" [attr.aria-controls]="'settings-panel-' + tab.id" [tabindex]="activeTab() === tab.id ? 0 : -1" [class.selected]="activeTab() === tab.id" (click)="activeTab.set(tab.id)" (keydown)="tabKeydown($event)">{{ tab.label }}</button>}
+</div>
 <div class="settings-content">
-  <section class="settings-section" aria-labelledby="appearance-title">
+  <section class="settings-section settings-panel" role="tabpanel" id="settings-panel-appearance" aria-labelledby="settings-tab-appearance" [hidden]="activeTab() !== 'appearance'" tabindex="0">
     <h3 id="appearance-title">外觀與閱讀</h3><p>即時調整，並套用到同一瀏覽器的其他分頁。</p>
     <fieldset class="theme-modes"><legend>顯示主題</legend>
       @for (mode of modes; track mode.id) {
@@ -11,15 +14,28 @@
     <div class="custom-color"><label>自訂主題色<input type="color" aria-label="選擇主題色" [value]="preferences.accent()" (change)="setAccent($any($event.target).value)"></label><label>HEX 色碼<input type="text" aria-label="主題色 HEX 色碼" maxlength="7" spellcheck="false" [value]="preferences.accent()" (change)="setAccent($any($event.target).value)" placeholder="#31584b"></label></div>
     <p class="setting-note">文字與按鈕會依主題調整對比。分類與看板狀態可在各自的管理視窗選擇顏色，不受主題色影響。</p>
   </section>
-  <section class="settings-section" aria-labelledby="local-sync-title">
+    <section class="settings-section settings-panel" role="tabpanel" id="settings-panel-reminders" aria-labelledby="settings-tab-reminders" [hidden]="activeTab() !== 'reminders'" tabindex="0">
+      <h3 id="reminders-title">截止日期提醒</h3><p>在工作區篩選已逾期或即將到期的任務。只計入待完成任務，已完成與封存不列入提醒。</p>
+      <fieldset class="theme-modes"><legend>常用到期範圍</legend>@for (days of duePresets; track days) {<button type="button" [class.selected]="store.reminders().dueSoonDays === days" [attr.aria-pressed]="store.reminders().dueSoonDays === days" (click)="setDueSoonDays(days)">{{ days }} 天</button>}</fieldset>
+      <label class="setting-field">即將到期的範圍（天）<input type="number" min="1" max="30" step="1" aria-label="即將到期天數" [ngModel]="store.reminders().dueSoonDays" (change)="setDueSoonDays($any($event.target).value)"></label>
+      <p class="setting-note">可設定 1–30 天，從目前時間起計算。未填截止時間的任務以當天結束為準；清單篩選預設依截止日期與時間由近到遠排序。</p>
+      <h3>開始時間與右下角提示</h3><p>訊息中心提供今日、明天及下週開始的安排，包含全天任務與 Google 活動。下週依週日至週六計算，跨日項目只列於開始日。</p>
+      <label class="reminder-checkbox"><input type="checkbox" [checked]="store.reminders().popupEnabled" (change)="setReminderOptions({popupEnabled: $any($event.target).checked})">顯示即將開始的右下角提示</label>
+      <label class="setting-field">有時間的安排提前多久提醒<select aria-label="提前提醒分鐘" [ngModel]="store.reminders().leadMinutes" (ngModelChange)="setReminderOptions({leadMinutes: +$event})">@for (minutes of leadPresets; track minutes) {<option [value]="minutes">{{ minutes }} 分鐘{{ minutes === 30 ? '（預設）' : '' }}</option>}</select></label>
+      <label class="setting-field">全天安排的當日提示時間<input type="time" aria-label="全天提醒時間" [ngModel]="store.reminders().allDayTime" (change)="setReminderOptions({allDayTime: $any($event.target).value})"></label>
+      <label class="reminder-checkbox"><input type="checkbox" [checked]="store.reminders().includeGoogle" (change)="setReminderOptions({includeGoogle: $any($event.target).checked})">右下角提示包含 Google 月曆活動</label>
+      <p class="setting-note">提示只在程式開啟且分頁在前景時顯示，不使用桌面通知。全天安排在指定時間後於當天提示一次；有時間的安排若剛開始五分鐘內，回到分頁時仍可提示。多分頁共用提醒記錄，改期後可重新提醒。編輯視窗開啟時暫緩提示，點選提示可開啟任務或唯讀活動。</p>
+    </section>
+  <section class="settings-section settings-panel" role="tabpanel" id="settings-panel-data" aria-labelledby="settings-tab-data" [hidden]="activeTab() !== 'data'" tabindex="0">
     <h3 id="local-sync-title">本機同步與備份</h3>
     <p class="sync-state" role="status"><i [class.warning]="store.hasUnsavedChanges() || store.storageWarning()"></i>{{ store.pendingWrites() ? '保存中' : store.hasUnsavedChanges() ? '本分頁有未保存的變更' : store.storageWarning() ? '儲存需要留意' : '已保存本機・分頁同步已啟用' }}</p>
     <p>同一瀏覽器、同一網站來源的分頁會自動同步資料與外觀。各分頁保留自己的工作空間選擇及未送出的表單。</p>
-    <button type="button" class="setting-button" (click)="openBackup.emit()"><app-icon name="export" />開啟資料與備份</button>
+    <app-backup-panel (restored)="resetDone.emit()" />
   </section>
-  <section class="settings-section reset-section" aria-labelledby="reset-title">
+  <section class="settings-section settings-panel" role="tabpanel" id="settings-panel-calendar" aria-labelledby="settings-tab-calendar" [hidden]="activeTab() !== 'calendar'" tabindex="0"><app-google-settings /></section>
+  <section class="settings-section reset-section settings-panel" role="tabpanel" id="settings-panel-reset" aria-labelledby="settings-tab-reset" [hidden]="activeTab() !== 'reset'" tabindex="0">
     <h3 id="reset-title">資料重置</h3><p>重置前可以下載目前全部資料的備份。</p>
-    <div class="reset-choices"><div><strong>清空工作資料</strong><p>移除所有工作空間及任務，保留字體、主題與主題色。</p><button type="button" class="setting-button" [disabled]="busy() || store.pendingWrites() > 0" (click)="beginReset('work')">清空工作資料</button></div><div><strong>重置整個 Orbit</strong><p>移除工作資料、舊版資料與外觀偏好，回到預設設定。</p><button type="button" class="setting-button" [disabled]="busy() || store.pendingWrites() > 0" (click)="beginReset('all')">重置整個 Orbit</button></div></div>
+    <div class="reset-choices"><div><strong>清空工作資料</strong><p>移除工作空間、任務、月曆綁定及快取，保留外觀、提醒範圍、Client ID 與更新頻率。</p><button type="button" class="setting-button" [disabled]="busy() || store.pendingWrites() > 0" (click)="beginReset('work')">清空工作資料</button></div><div><strong>重置整個 Orbit</strong><p>移除工作資料、月曆綁定、快取及公開連線設定，回到預設設定。</p><button type="button" class="setting-button" [disabled]="busy() || store.pendingWrites() > 0" (click)="beginReset('all')">重置整個 Orbit</button></div></div>
     @if (resetMode()) {
       <div class="reset-confirm" role="alert"><strong>確定要{{ resetPhrase() }}？</strong><p>將移除 {{ store.workspaces().length }} 個工作空間及其所有任務，建立一個空白工作空間。此操作無法復原，請先下載備份。</p><button type="button" class="setting-button" [disabled]="busy()" (click)="downloadCurrent()"><app-icon name="export" />先下載全部備份</button><label class="setting-field">請輸入「{{ resetPhrase() }}」<input type="text" autocomplete="off" [(ngModel)]="confirmation" aria-label="重置確認文字" [placeholder]="resetPhrase()"></label><div class="reset-actions"><button type="button" class="setting-button" [disabled]="busy()" (click)="resetMode.set(null)">取消</button><button type="button" class="setting-button danger" [disabled]="busy() || store.pendingWrites() > 0 || confirmation !== resetPhrase()" (click)="reset()">確認重置</button></div></div>
     }

@@ -2,6 +2,10 @@
 .modal { width: 760px; max-width: 100%; max-height: calc(100dvh - 48px); overflow-y: auto; border-radius: 15px; background: var(--surface); box-shadow: 0 24px 80px rgb(var(--shadow-rgb) / 0.169); animation: enter .18s ease-out; }
 .modal[data-modal='task'] { width: 820px; }
 .modal[data-modal='projects'] { width: 760px; }
+.modal[data-modal='settings'] { width: 1040px; height: min(820px, calc(100dvh - 48px)); display: flex; flex-direction: column; overflow: hidden; }
+.modal[data-modal='settings'] > .modal-header, .modal[data-modal='settings'] > .modal-footer { flex-shrink: 0; }
+.modal[data-modal='settings'] > app-settings { flex: 1; min-height: 0; }
+.modal[data-modal='settings'] > .modal-body { flex: 1; min-height: 0; overflow-y: auto; }
 .modal[data-modal='delete'] { width: 520px; }
 .empty-board { grid-column: 1 / -1; min-height: 320px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 28px; color: var(--text-muted); text-align: center; }
 .empty-board > app-icon { width: 32px; height: 32px; color: var(--text-muted); }

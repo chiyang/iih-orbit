@@ -59,14 +59,14 @@ export function taskOccursOn(task: Task, day: string): boolean {
 
 export function startOfWeek(date: Date): Date {
   const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  result.setDate(result.getDate() - (result.getDay() + 6) % 7);
+  result.setDate(result.getDate() - result.getDay());
   return result;
 }
 
 export function monthDates(anchor: Date): Date[] {
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   const start = startOfWeek(first);
-  const offset = (first.getDay() + 6) % 7;
+  const offset = first.getDay();
   const daysInMonth = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate();
   return Array.from({length: Math.ceil((offset + daysInMonth) / 7) * 7}, (_, index) => {
     const day = new Date(start);

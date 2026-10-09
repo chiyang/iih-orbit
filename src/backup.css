@@ -36,3 +36,5 @@
 @media (max-width: 1100px) { .backup-button > span { display: none; } }
 @media (max-width: 700px) { .backup-button { padding: 7px; } .backup-options { grid-template-columns: 1fr; } .sync-notice { margin-left: 20px; margin-right: 20px; } .draft-conflict { margin-left: 20px; margin-right: 20px; } }
 @media (max-width: 400px) { .topbar-right { gap: 6px !important; } .text-size-control .font-symbol { display: none; } .backup-button { padding: 6px; } }
+.backup-google-choice { display: flex; align-items: center; gap: 8px; margin: 12px 0 18px; font-size: var(--font-11); color: var(--text-muted); }
+.backup-google-choice input { width: 16px; height: 16px; accent-color: var(--accent-strong); flex-shrink: 0; }

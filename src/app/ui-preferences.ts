@@ -20,6 +20,8 @@ export class UiPreferences implements OnDestroy {
   readonly options = TEXT_SIZES;
   readonly textSize = computed(() => this.store.appearance().textSize);
   readonly theme = computed(() => this.store.appearance().theme);
+  readonly themeLabel = computed(() => ({light: '淺色', dark: '深色', system: '跟隨系統'})[this.theme()]);
+  readonly themeIcon = computed(() => ({light: 'sun', dark: 'moon', system: 'monitor'})[this.theme()]);
   readonly accent = computed(() => this.store.appearance().accent);
   readonly scale = computed(() => this.options.find(option => option.id === this.textSize())?.scale ?? 1);
   readonly storageWarning = this.store.storageWarning;
@@ -50,6 +52,10 @@ export class UiPreferences implements OnDestroy {
   }
 
   async setTheme(theme: ThemeMode): Promise<void> { await this.store.updateAppearance({theme}); }
+  async cycleTheme(): Promise<void> {
+    const modes: ThemeMode[] = ['light', 'dark', 'system'];
+    await this.setTheme(modes[(modes.indexOf(this.theme()) + 1) % modes.length]);
+  }
   async setAccent(accent: string): Promise<void> { await this.store.updateAppearance({accent}); }
   snapshot(): AppearancePreferences { return {...this.store.appearance()}; }
 }

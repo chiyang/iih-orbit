@@ -1,0 +1,10 @@
+:host {display: block;}
+.button {display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 10px 16px; border-radius: 7px; border: 1px solid var(--border); font-size: var(--font-11); background: var(--surface); color: var(--text);}
+.button.primary {background: var(--accent-strong); color: var(--on-accent); border-color: var(--accent-strong);}
+.button.danger {background: var(--danger-text); color: var(--surface); border-color: var(--danger-text);}
+.button:disabled {opacity: .55; cursor: default;}
+.button app-icon {width: 15px; height: 15px;}
+.form-field {display: grid; gap: 8px; font-size: var(--font-11);}
+.form-field input {padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font-size: var(--font-12);}
+.form-error {color: var(--danger-text); font-size: var(--font-11); line-height: 1.7;}
+.backup-message {color: var(--accent-text); font-size: var(--font-11); line-height: 1.7;}

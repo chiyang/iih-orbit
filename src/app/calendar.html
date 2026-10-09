@@ -1,7 +1,15 @@
-<section class="calendar-view" [class.week-view]="mode() === 'week'" [attr.aria-label]="mode() === 'month' ? '月曆視圖' : '週視圖'">
+<section class="calendar-view" [class.week-view]="mode() === 'week'" [class.calendar-dragging]="draggedTaskId()" [attr.aria-label]="mode() === 'month' ? '月曆視圖' : '週視圖'" (dragleave)="leaveCalendar($event)">
   <div class="calendar-toolbar">
-    <div class="calendar-heading"><span class="calendar-icon"><app-icon name="calendar" /></span><div><h2 aria-live="polite">{{ periodTitle() }}</h2><p>{{ periodTaskCount() }} 個排程任務 · {{ mode() === 'month' ? '月曆總覽' : '一週安排' }}</p></div></div>
-    <div class="calendar-navigation"><button class="today-button" (click)="goToday()">今天</button><button class="calendar-arrow previous" [attr.aria-label]="mode() === 'month' ? '上一個月' : '上一週'" (click)="navigate(-1)"><app-icon name="chevron" /></button><button class="calendar-arrow" [attr.aria-label]="mode() === 'month' ? '下一個月' : '下一週'" (click)="navigate(1)"><app-icon name="chevron" /></button></div>
+    <div class="calendar-heading"><span class="calendar-icon"><app-icon name="calendar" /></span><div><h2 aria-live="polite">{{ periodTitle() }}</h2><p>{{ periodTaskCount() }} 個排程任務@if (periodExternalCount()) { · {{ periodExternalCount() }} 個 Google 活動} · {{ mode() === 'month' ? '月曆總覽' : '一週安排' }}</p></div></div>
+    <div class="calendar-navigation">@if (mode() === 'month') {<button class="today-button expand-all-button" [disabled]="!hasOverflow()" [attr.aria-expanded]="allDaysExpanded()" (click)="toggleAllDays()">{{ allDaysExpanded() ? '全部收合' : '展開全部' }}</button>}<button class="today-button" (click)="goToday()">今天</button><button class="calendar-arrow previous" [attr.aria-label]="mode() === 'month' ? '上一個月' : '上一週'" (click)="navigate(-1)"><app-icon name="chevron" /></button><button class="calendar-arrow" [attr.aria-label]="mode() === 'month' ? '下一個月' : '下一週'" (click)="navigate(1)"><app-icon name="chevron" /></button></div>
+  </div>
+  <div class="calendar-display-controls">
+    <div class="calendar-source-toggles" role="group" aria-label="月曆顯示來源">
+      <span>顯示</span>
+      <button type="button" [class.selected]="showGoogle() && !deadlineFiltered()" [attr.aria-pressed]="googleVisible()" [disabled]="deadlineFiltered()" [attr.aria-describedby]="deadlineFiltered() ? 'calendar-source-help' : null" (click)="toggleGoogle()"><span class="source-google-mark" aria-hidden="true">G</span>Google 月曆</button>
+      <button type="button" [class.selected]="showOrbit()" [attr.aria-pressed]="showOrbit()" (click)="toggleOrbit()"><span class="source-orbit-dot" aria-hidden="true"></span>Orbit 任務</button>
+    </div>
+    <span class="calendar-display-help" id="calendar-source-help" role="status">@if (deadlineFiltered()) {截止篩選已暫時隱藏 Google 活動，清除篩選後恢復原選擇。} @else if (!showGoogle() && !showOrbit()) {目前隱藏所有來源，點選上方按鈕即可顯示。} @else if (mode() === 'month') {全天優先 · 同組 Google 在前 · 各來源內依時間排序}</span>
   </div>
   @if (mode() === 'week') {
     <div class="week-scroll" #weekScroller aria-label="一週時間表" (scroll)="rememberScroll()">
@@ -15,16 +23,16 @@
               </div>
             }
           </div>
-          <div class="week-all-day" [style.--all-day-rows]="allDayRows()">
+          <div class="week-all-day" [style.--all-day-rows]="allDayRows()" (dragover)="allDayDragOver($event)" (drop)="allDayDrop($event)">
             <span class="all-day-label">全天</span>
             @for (day of weekDays(); track day.key) {
-              <button class="all-day-cell" [class.week-today]="day.today" [style.grid-column]="$index + 2" [attr.aria-label]="'在 ' + day.key + ' 新增全天任務'" (click)="createAt(day.key)"><app-icon name="plus" /></button>
+              <button class="all-day-cell" [class.week-today]="day.today" [class.calendar-drop-target]="dropPosition()?.kind === 'all-day' && dropPosition()?.day === day.key" [attr.data-date]="day.key" [style.grid-column]="$index + 2" [attr.aria-label]="'在 ' + day.key + ' 新增全天任務'" (click)="createAt(day.key)"><app-icon name="plus" /></button>
             }
             @for (event of allDayEvents(); track event.task.id) {
-              <button class="all-day-event" [orbitColor]="category(event.task.categoryId).color" [class.task-completed]="isDone(event.task)" [style.grid-column]="(event.startColumn + 2) + ' / ' + (event.endColumn + 2)" [style.grid-row]="event.row + 1" [attr.title]="taskTitle(event.task)" [attr.aria-label]="taskTitle(event.task)" (click)="editTask.emit(event.task)">
+              <button class="all-day-event" [orbitColor]="category(event.task.categoryId).color" [class.task-completed]="isDone(event.task)" [style.grid-column]="(event.startColumn + 2) + ' / ' + (event.endColumn + 2)" [style.grid-row]="event.row + 2" [attr.title]="taskTitle(event.task)" [attr.aria-label]="taskTitle(event.task)" (click)="openEntry(event.task)" [class.external-event]="isExternal(event.task)" [attr.draggable]="!isExternal(event.task) && !savingMove()" [class.task-drag-source]="draggedTaskId() === event.task.id" (dragstart)="startAllDayDrag($event, event.task, days()[event.startColumn].key)" (dragend)="endDrag()">
                 @if (event.continuesBefore) {<span aria-hidden="true">←</span>}
                 @if (isDone(event.task)) {<app-icon name="check" />}
-                <span class="all-day-title">{{ event.task.title }}</span>
+                <span class="all-day-title">@if (isExternal(event.task)) {<span class="external-mark" aria-label="Google 唯讀活動">G · </span>}{{ event.task.title }}</span>
                 @if (event.continuesAfter) {<span aria-hidden="true">→</span>}
               </button>
             }
@@ -36,18 +44,19 @@
             <span class="hour-label last-hour">24:00</span>
           </div>
           @for (day of weekDays(); track day.key; let dayIndex = $index) {
-            <section class="time-day" [class.week-today]="day.today" [attr.aria-label]="day.key + ' 時間欄'">
+            <section class="time-day" [class.week-today]="day.today" [attr.data-date]="day.key" [attr.aria-label]="day.key + ' 時間欄'" (dragover)="timeDragOver($event, day.key)" (drop)="timeDrop($event, day.key)">
               @for (slot of slots; track slot.minute) {
                 <button class="time-slot" [class.half-hour]="slot.minute % 60 !== 0" [style.height.px]="hourHeight() / 2" [attr.data-day]="dayIndex" [attr.data-minute]="slot.minute" [attr.tabindex]="slot.minute === 540 ? 0 : -1" [attr.aria-label]="'在 ' + day.key + ' ' + slot.label + ' 新增任務'" [attr.title]="slot.label + ' 新增任務'" (click)="createAt(day.key, slot.label)" (keydown)="slotKeydown($event, dayIndex, slot.minute)"></button>
               }
               @for (event of day.timedEvents; track event.task.id) {
-                <button class="timed-event" [orbitColor]="category(event.task.categoryId).color" [class.task-completed]="isDone(event.task)" [class.short-event]="event.displayEnd - event.displayStart < 60" [class.overlapping-event]="event.columns > 1" [class.milestone-event]="event.milestone" [style.top.%]="event.displayStart / 1440 * 100" [style.height.%]="(event.displayEnd - event.displayStart) / 1440 * 100" [style.left.%]="event.column / event.columns * 100" [style.width.%]="100 / event.columns" [attr.title]="taskTitle(event.task)" [attr.aria-label]="taskTitle(event.task) + ' · ' + event.label" (click)="editTask.emit(event.task)">
-                  <strong>@if (isDone(event.task)) {<app-icon name="check" />}{{ event.task.title }}</strong>
+                <button class="timed-event" [orbitColor]="category(event.task.categoryId).color" [class.task-completed]="isDone(event.task)" [class.short-event]="event.displayEnd - event.displayStart < 60" [class.overlapping-event]="event.columns > 1" [class.milestone-event]="event.milestone" [style.top.%]="event.displayStart / 1440 * 100" [style.height.%]="(event.displayEnd - event.displayStart) / 1440 * 100" [style.left.%]="event.column / event.columns * 100" [style.width.%]="100 / event.columns" [attr.title]="taskTitle(event.task)" [attr.aria-label]="taskTitle(event.task) + ' · ' + event.label" (click)="openEntry(event.task)" [class.external-event]="isExternal(event.task)" [attr.draggable]="!isExternal(event.task) && !savingMove()" [class.task-drag-source]="draggedTaskId() === event.task.id" (dragstart)="startDrag($event, event.task, {kind: 'time', day: day.key, minute: event.startMinute})" (dragend)="endDrag()">
+                  <strong>@if (isExternal(event.task)) {<span class="external-mark" aria-label="Google 唯讀活動">G · </span>}@if (isDone(event.task)) {<app-icon name="check" />}{{ event.task.title }}</strong>
                   <small>{{ event.label }}</small>
                   <span class="timed-category">{{ category(event.task.categoryId).name }}</span>
                   @if (event.continuesBefore || event.continuesAfter) {<span class="event-continuation">{{ event.continuesBefore ? '接續前一天' : '' }}{{ event.continuesBefore && event.continuesAfter ? ' · ' : '' }}{{ event.continuesAfter ? '延續至隔天' : '' }}</span>}
                 </button>
               }
+              @if (dropPosition(); as position) {@if (position.kind === 'time' && position.day === day.key) {<div class="calendar-drop-time" [style.top.%]="(position.minute || 0) / 1440 * 100"><span>{{ dropTimeLabel() }}</span></div>}}
               @if (day.today) {<div class="now-line" [style.top.%]="nowPosition()" [attr.title]="'目前時間 ' + now().toLocaleTimeString('zh-TW', {hour: '2-digit', minute: '2-digit', hour12: false})"><span></span></div>}
             </section>
           }
@@ -56,28 +65,30 @@
     </div>
   } @else {
     <div class="calendar-scroll">
-    <div class="calendar-grid">
+    <div class="calendar-grid" [style.--month-weeks]="days().length / 7">
       @for (weekday of weekdays; track weekday) {<div class="weekday-heading">{{ weekday }}</div>}
       @for (day of days(); track day.key) {
-        <section class="calendar-day" [class.outside-month]="!day.currentMonth" [class.today]="day.today" [attr.aria-label]="day.key" [attr.data-date]="day.key">
+        <section class="calendar-day" [class.outside-month]="!day.currentMonth" [class.today]="day.today" [class.calendar-drop-target]="dropPosition()?.day === day.key" [attr.aria-label]="day.key" [attr.data-date]="day.key" (dragover)="dragOver($event, {kind: 'month', day: day.key})" (drop)="drop($event, {kind: 'month', day: day.key})">
           <div class="day-heading"><span class="day-number" [class.today-number]="day.today">{{ day.number }}</span>@if (day.today) {<span class="today-label">今天</span>}<button [attr.aria-label]="'在 ' + day.key + ' 新增任務'" title="在這天新增任務" (click)="createAt(day.key)"><app-icon name="plus" /></button></div>
           <div class="day-tasks">
             @for (task of day.visibleTasks; track task.id) {
-              <button class="calendar-task" [orbitColor]="category(task.categoryId).color" [class.task-completed]="isDone(task)" [attr.title]="taskTitle(task)" [attr.aria-label]="taskTitle(task)" (click)="editTask.emit(task)">
-                <span class="calendar-task-title">@if (isDone(task)) {<app-icon name="check" />}<span>{{ task.title }}</span></span>
-                <small>{{ scheduleLabel(task, day.key) }}</small>
+              <button class="calendar-task" [orbitColor]="category(task.categoryId).color" [class.month-all-day]="isAllDay(task, day.key)" [class.month-timed]="!isAllDay(task, day.key)" [class.task-completed]="isDone(task)" [attr.title]="taskTitle(task) + ' · ' + scheduleLabel(task, day.key)" [attr.aria-label]="taskTitle(task) + ' · ' + scheduleLabel(task, day.key)" (click)="openEntry(task)" [class.external-event]="isExternal(task)" [attr.draggable]="!isExternal(task) && !savingMove()" [class.task-drag-source]="draggedTaskId() === task.id" (dragstart)="startDrag($event, task, {kind: 'month', day: day.key})" (dragend)="endDrag()">
+                <span class="calendar-task-title">@if (isExternal(task)) {<span class="external-mark" aria-label="Google 唯讀活動">G</span>} @else if (!isAllDay(task, day.key)) {<i class="month-task-dot" aria-hidden="true"></i>}@if (isDone(task)) {<app-icon name="check" />}<span>{{ task.title }}</span></span>
+                <small>{{ monthScheduleLabel(task, day.key) }}</small>
               </button>
             }
-            @if (day.tasks.length > 3) {<button class="more-tasks" (click)="toggleDay(day.key)">{{ expandedDays().has(day.key) ? '收合任務' : '+' + (day.tasks.length - 3) + ' 個任務' }}</button>}
+            @if (day.tasks.length > monthPreviewLimit) {<button class="more-tasks" [attr.aria-expanded]="dayExpanded(day.key)" (click)="toggleDay(day.key)">{{ dayExpanded(day.key) ? '收合活動' : '+' + (day.tasks.length - monthPreviewLimit) + ' 個活動' }}</button>}
           </div>
         </section>
       }
     </div>
     </div>
   }
-  <p class="calendar-note"><app-icon name="clock" />{{ mode() === 'week' ? '跨日任務的完整日放在全天區；點選空白時段新增任務。' : '跨日任務會顯示於日期區間內；時間依本機時區顯示。' }}</p>
-  <section class="unscheduled-tasks" aria-label="未排程任務">
-    <div class="unscheduled-heading"><h3><app-icon name="list" />未排程<span>{{ unscheduled().length }}</span></h3><p>還沒設定日期的任務，隨時可以安排。</p></div>
-    <div class="unscheduled-list">@for (task of unscheduled(); track task.id) {<button [orbitColor]="category(task.categoryId).color" (click)="editTask.emit(task)"><i></i>{{ task.title }}<app-icon name="edit" /></button>} @empty {<span class="no-unscheduled">每個任務都已有日期安排。</span>}</div>
-  </section>
+  @if (moveNotice() || savingMove()) {<p class="calendar-move-notice" role="status">{{ savingMove() ? '正在儲存任務時程…' : moveNotice() }}</p>}
+  @if (moveError()) {<p class="calendar-move-error" role="alert">{{ moveError() }}</p>}
+  <p class="calendar-note"><app-icon name="clock" />{{ mode() === 'week' ? '拖曳本機任務調整日期與時間（每 15 分鐘）；拖至全天區可改為全天。' : '拖曳本機任務至其他日期，保留時間與日期跨度；每天預覽四項，可展開全部。' }} Google 活動為唯讀。</p>
+  @if (showOrbit()) {<section class="unscheduled-tasks" aria-label="未排程任務">
+    <div class="unscheduled-heading"><h3><app-icon name="list" />未排程<span>{{ unscheduled().length }}</span></h3><p>可拖曳至日期或時段，安排任務。</p></div>
+    <div class="unscheduled-list">@for (task of unscheduled(); track task.id) {<button [orbitColor]="category(task.categoryId).color" (click)="openEntry(task)" [attr.draggable]="!savingMove()" [class.task-drag-source]="draggedTaskId() === task.id" (dragstart)="startDrag($event, task, {kind: 'all-day', day: today()})" (dragend)="endDrag()"><i></i>{{ task.title }}<app-icon name="edit" /></button>} @empty {<span class="no-unscheduled">每個任務都已有日期安排。</span>}</div>
+  </section>}
 </section>

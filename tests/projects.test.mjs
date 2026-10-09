@@ -66,7 +66,7 @@ test('格式 1 舊備份匯入時升級專案與任務，舊匯出檔仍保持�
   const backup = {application: 'iih-orbit', formatVersion: 1, appVersion: '1.1.0', kind: 'workspaces', exportedAt: '2026-10-08T00:00:00Z', data: {version: 1, activeWorkspaceId: 'old', workspaces: [workspace]}};
   const original = structuredClone(backup);
   const restored = readBackup(backup);
-  assert.equal(restored.formatVersion, 3);
+  assert.equal(restored.formatVersion, 4);
   assert.equal(restored.data.workspaces[0].projects[0].name, '迎新活動');
   assert.equal(restored.data.workspaces[0].tasks[0].projectId, restored.data.workspaces[0].projects[0].id);
   assert.deepEqual(backup, original);

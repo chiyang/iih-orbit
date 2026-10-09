@@ -1,5 +1,6 @@
 import type { Task } from './models';
 import { dateKey, parseDate, taskDateRange } from './task-schedule.ts';
+import type { ExternalTask } from './google-data.ts';
 
 export interface TimedEvent {
   task: Task;
@@ -24,7 +25,7 @@ export interface AllDayEvent {
   continuesAfter: boolean;
 }
 
-export const HOUR_HEIGHT = 88;
+export const HOUR_HEIGHT = 72;
 
 export function timeMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number);
@@ -32,13 +33,20 @@ export function timeMinutes(time: string): number {
 }
 
 export function minuteLabel(minute: number): string {
-  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(Math.floor(minute % 60)).padStart(2, '0')}`;
 }
 
 /** Return only the calendar days fully covered by a task, including timed multi-day ranges. */
 export function allDayRange(task: Task): {start: string; end: string} | null {
   const range = taskDateRange(task);
   if (!range || (!task.startTime && !task.dueTime)) return range;
+  const interval = (task as ExternalTask).sourceInterval;
+  if (interval) {
+    const start = parseDate(range.start), end = parseDate(range.end);
+    if (interval.start > start.getTime()) start.setDate(start.getDate() + 1);
+    end.setDate(end.getDate() - 1);
+    return start <= end ? {start: dateKey(start), end: dateKey(end)} : null;
+  }
   if (!task.startDate || !task.dueDate) return null;
   let start = task.startDate;
   let end = task.dueDate;
@@ -90,17 +98,28 @@ export function timedEventsOnDay(tasks: readonly Task[], day: string): TimedEven
     const fullDays = allDayRange(task);
     if (fullDays && fullDays.start <= day && day <= fullDays.end) continue;
     const singleBoundary = !task.startDate || !task.dueDate;
-    const startMinute = singleBoundary ? timeMinutes(task.startTime || task.dueTime)
+    let startMinute = singleBoundary ? timeMinutes(task.startTime || task.dueTime)
       : day === task.startDate && task.startTime ? timeMinutes(task.startTime) : 0;
-    const endMinute = singleBoundary ? startMinute
+    let endMinute = singleBoundary ? startMinute
       : day === task.dueDate && task.dueTime ? timeMinutes(task.dueTime) : 1440;
     // An interval ending at midnight belongs to the previous day, except a true point event.
-    if (!singleBoundary && endMinute === 0 && range.start !== day) continue;
-    const milestone = startMinute === endMinute;
+    const interval = (task as ExternalTask).sourceInterval;
+    let labelSuffix = '';
+    let elapsedMinutes = endMinute - startMinute;
+    if (interval) {
+      const dayStart = parseDate(day).getTime(), dayEnd = nextDate.getTime();
+      if (interval.start >= dayEnd || (interval.end <= dayStart && interval.start !== interval.end)) continue;
+      const actualStart = new Date(Math.max(interval.start, dayStart)), actualEnd = new Date(Math.min(interval.end, dayEnd));
+      const wallMinute = (date: Date) => date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
+      startMinute = wallMinute(actualStart); endMinute = actualEnd.getTime() === dayEnd ? 1440 : wallMinute(actualEnd);
+      elapsedMinutes = (actualEnd.getTime() - actualStart.getTime()) / 60000;
+      if (endMinute <= startMinute && elapsedMinutes > 0) labelSuffix = '（時區轉換）';
+    } else if (!singleBoundary && endMinute === 0 && range.start !== day) continue;
+    const milestone = interval ? interval.start === interval.end : startMinute === endMinute;
     const displayStart = Math.min(startMinute, 1410);
-    const displayEnd = Math.min(1440, Math.max(endMinute, displayStart + 30));
+    const displayEnd = Math.min(1440, Math.max(endMinute <= startMinute && elapsedMinutes > 0 ? startMinute + elapsedMinutes : endMinute, displayStart + 30));
     const label = milestone ? `${minuteLabel(startMinute)}${singleBoundary ? task.startDate ? ' 開始' : ' 截止' : ''}`
-      : `${minuteLabel(startMinute)} – ${minuteLabel(endMinute)}`;
+      : `${minuteLabel(startMinute)} – ${minuteLabel(endMinute)}${labelSuffix}`;
     events.push({
       task,
       startMinute,

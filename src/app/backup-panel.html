@@ -1,0 +1,27 @@
+<section class="backup-section" aria-labelledby="backup-export-title">
+              <h3 id="backup-export-title">匯出備份</h3><p>下載 JSON 檔，保存任務、分類、狀態、時程與工作空間。</p>
+              <fieldset class="backup-options"><legend class="visually-hidden">匯出範圍</legend><label><input type="radio" name="backupRange" value="full" [ngModel]="backupRange()" (ngModelChange)="backupRange.set($event)">全部資料<span>所有工作空間、外觀與 Google 設定</span></label><label><input type="radio" name="backupRange" value="workspaces" [ngModel]="backupRange()" (ngModelChange)="backupRange.set($event)">選定工作空間<span>可選一個或多個</span></label></fieldset>
+              @if (backupRange() === 'workspaces') {
+                <div class="backup-workspace-list" aria-label="選擇匯出工作空間">@for (workspace of store.workspaces(); track workspace.id) {<label><input type="checkbox" [checked]="backupWorkspaceIds().includes(workspace.id)" (change)="toggleBackupWorkspace(workspace.id, $any($event.target).checked)"><span>{{ workspace.name }}<small>{{ workspace.tasks.length }} 個任務</small></span></label>}</div>
+                <label class="backup-google-choice"><input type="checkbox" [ngModel]="backupIncludeGoogle()" (ngModelChange)="backupIncludeGoogle.set($event)">附帶 Google Client ID 與更新設定</label>
+              }
+              <button class="button primary" [disabled]="store.pendingWrites() > 0 || (backupRange() === 'workspaces' && !backupWorkspaceIds().length)" (click)="exportBackup()"><app-icon name="export" />下載備份檔</button>
+              @if (store.hasUnsavedChanges()) {<p class="backup-caution">此分頁有尚未成功儲存的變更，也會包含在匯出檔中。</p>}
+            </section>
+            <section class="backup-section" aria-labelledby="backup-import-title">
+              <h3 id="backup-import-title">匯入備份</h3><p>先選擇檔案查看內容，再決定匯入。選定工作空間備份會新增副本，名稱重複也可以。</p>
+              <label class="backup-file-field">選擇 IIH Orbit 備份檔<input type="file" accept=".json,application/json" [disabled]="importingBackup()" (change)="readImportFile($event)"></label>
+              @if (readingBackup()) {<p role="status">正在讀取備份…</p>}
+              @if (importPreview(); as backup) {
+                <div class="backup-preview"><strong>{{ backup.kind === 'full' ? '全部資料備份' : '工作空間備份' }}</strong><small>{{ importFilename() }} · {{ backup.exportedAt.replace('T', ' ').slice(0, 16) }} UTC</small><p>{{ backup.data.workspaces.length }} 個工作空間 · {{ backupTaskCount(backup) }} 個任務</p><p>{{ backup.google?.sources?.length || backup.calendarSources?.length || 0 }} 個月曆來源綁定@if (backup.google?.clientId) { · 包含 Client ID}</p><ul>@for (workspace of backup.data.workspaces; track workspace.id) {<li>{{ workspace.name }}<span>{{ workspace.tasks.length }} 個任務</span></li>}</ul></div>
+                @if (backup.kind === 'workspaces') {@if (backup.google?.clientId) {<label class="backup-google-choice"><input type="checkbox" [ngModel]="applyImportedGoogle()" (ngModelChange)="applyImportedGoogle.set($event)">套用備份中的 Google Client ID 與帳號設定</label><p class="backup-caution">勾選才會更換本機 Google 設定；套用後月曆自動更新先暫停。現有工作空間仍保留。</p>}<button class="button primary" [disabled]="importingBackup() || store.pendingWrites() > 0" (click)="executeImport()">{{ importingBackup() ? '正在匯入…' : '新增 ' + backup.data.workspaces.length + ' 個工作空間' }}</button>}
+                @else if (!confirmingImport()) {<button class="button secondary" [disabled]="store.pendingWrites() > 0" (click)="prepareFullImport()">檢查全部資料覆蓋範圍</button>}
+                @else {
+                  <div class="backup-replace-warning" role="alert"><strong>將取代目前全部資料</strong><p>目前 {{ store.workspaces().length }} 個工作空間、{{ totalTaskCount() }} 個任務將由備份取代；外觀與 Google 連線設定也會套用，月曆自動更新會先暫停，需重新授權。此操作無法直接復原，建議先下載目前備份。</p><button class="button secondary" (click)="exportBackup(true)"><app-icon name="export" />先下載目前全部資料</button><label class="form-field">輸入「取代全部資料」確認<input [(ngModel)]="importConfirmation" autocomplete="off" placeholder="取代全部資料" [disabled]="importingBackup()"></label><div class="backup-confirm-actions"><button class="button secondary" [disabled]="importingBackup()" (click)="confirmingImport.set(false)">取消覆蓋</button><button class="button secondary" [disabled]="importingBackup()" (click)="prepareFullImport()">重新檢查範圍</button><button class="button danger" [disabled]="importConfirmation !== '取代全部資料' || importingBackup() || store.pendingWrites() > 0" (click)="executeImport()">{{ importingBackup() ? '正在還原…' : '確認取代並還原' }}</button></div></div>
+                }
+              }
+              @if (backupError()) {<p class="form-error" role="alert">{{ backupError() }}</p>}
+            </section>
+            <p class="backup-sync-note"><app-icon name="save" />同一瀏覽器、同一網站的分頁會自動同步資料，各分頁可查看不同工作空間。</p>
+<p class="backup-sync-note">備份檔包含工作內容，請妥善保存。</p>
+@if (message()) {<p class="backup-message" role="status">{{ message() }}</p>}

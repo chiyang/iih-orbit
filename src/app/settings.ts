@@ -1,18 +1,32 @@
-import { Component, inject, output, signal } from '@angular/core';
+import { Component, inject, input, linkedSignal, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ACCENT_COLORS, ThemeMode, validHex } from './appearance-data';
 import { downloadBackup } from './backup-file';
 import { BoardStore } from './board-store';
 import { Icon } from './icon';
+import { BackupPanel } from './backup-panel';
 import { UiPreferences } from './ui-preferences';
+import { GoogleSettingsPanel } from './google-settings';
+import { DUE_DAY_PRESETS, START_LEAD_PRESETS } from './reminder-data';
+import type { ReminderPreferences } from './reminder-data';
 
-@Component({selector: 'app-settings', imports: [FormsModule, Icon], templateUrl: './settings.html', styleUrl: './settings.css'})
+export type SettingsTab = 'appearance' | 'reminders' | 'calendar' | 'data' | 'reset';
+export const SETTINGS_TABS: {id: SettingsTab; label: string}[] = [
+  {id: 'appearance', label: '外觀與閱讀'}, {id: 'reminders', label: '任務提醒'},
+  {id: 'calendar', label: 'Google 月曆'}, {id: 'data', label: '資料與備份'}, {id: 'reset', label: '資料重置'}
+];
+
+@Component({selector: 'app-settings', imports: [FormsModule, Icon, GoogleSettingsPanel, BackupPanel], templateUrl: './settings.html', styleUrl: './settings.css'})
 export class Settings {
   readonly store = inject(BoardStore);
   readonly preferences = inject(UiPreferences);
+  readonly initialTab = input<SettingsTab>('appearance');
+  readonly activeTab = linkedSignal(() => this.initialTab());
+  readonly tabs = SETTINGS_TABS;
   readonly accents = ACCENT_COLORS;
+  readonly duePresets = DUE_DAY_PRESETS;
+  readonly leadPresets = START_LEAD_PRESETS;
   readonly modes: {id: ThemeMode; label: string}[] = [{id: 'light', label: '淺色'}, {id: 'dark', label: '深色'}, {id: 'system', label: '跟隨系統'}];
-  readonly openBackup = output<void>();
   readonly resetDone = output<void>();
   readonly resetMode = signal<'work' | 'all' | null>(null);
   readonly message = signal('');
@@ -20,6 +34,23 @@ export class Settings {
   readonly busy = signal(false);
   confirmation = '';
   private confirmedRevision = '';
+
+  tabKeydown(event: KeyboardEvent): void {
+    const index = this.tabs.findIndex(tab => tab.id === this.activeTab());
+    const next = event.key === 'ArrowRight' ? (index + 1) % this.tabs.length : event.key === 'ArrowLeft' ? (index + this.tabs.length - 1) % this.tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? this.tabs.length - 1 : -1;
+    if (next < 0) return;
+    event.preventDefault(); this.activeTab.set(this.tabs[next].id);
+    (event.currentTarget as HTMLElement).closest('[role="tablist"]')?.querySelector<HTMLButtonElement>(`[data-tab="${this.activeTab()}"]`)?.focus();
+  }
+
+  async setDueSoonDays(value: unknown): Promise<void> {
+    await this.setReminderOptions({dueSoonDays: typeof value === 'number' ? value : Number(value)});
+  }
+  async setReminderOptions(patch: Partial<ReminderPreferences>): Promise<void> {
+    this.error.set('');
+    const result = await this.store.updateReminders(patch);
+    if (!result.ok) this.error.set(result.message);
+  }
 
   async setAccent(value: string): Promise<void> {
     if (!validHex(value)) { this.error.set('請輸入 # 加上六位英數字，例如 #31584b。'); return; }

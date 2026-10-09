@@ -1,0 +1,16 @@
+button {color: var(--text);}
+.reminder-popups { position: fixed; right: 24px; bottom: 24px; z-index: 700; width: min(350px, calc(100vw - 32px)); max-height: calc(100dvh - 110px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 2px; scrollbar-width: thin; }
+.reminder-popup { background: var(--surface); border: 1px solid var(--accent-border); border-radius: 10px; box-shadow: 0 6px 26px rgb(var(--shadow-rgb) / .16); }
+.popup-heading { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: var(--accent-soft); border-radius: 9px 9px 0 0; }
+.popup-heading > span { flex: 1; display: flex; align-items: center; gap: 7px; color: var(--accent-text); font-size: var(--font-10); }
+.popup-heading app-icon { width: 14px; height: 14px; }
+.popup-close { background: transparent; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 5px; }
+.popup-close:hover { background: var(--surface-hover); }
+.popup-open { width: 100%; display: grid; gap: 7px; padding: 13px 15px 16px; background: transparent; text-align: left; }
+.popup-open strong { font-size: var(--font-13); line-height: 1.5; overflow-wrap: anywhere; }
+.popup-open span { font-size: var(--font-11); color: var(--text-muted); }
+.popup-open small { font-size: var(--font-9); color: var(--accent-text); }
+.popup-open:hover { background: var(--surface-hover); }
+.popup-center { display: flex; justify-content: center; align-items: center; gap: 7px; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: var(--font-10); }
+.popup-center app-icon { width: 14px; height: 14px; }
+@media (max-width: 700px) {.reminder-popups {right: 14px; bottom: 14px;}}

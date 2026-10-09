@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { createBackup } from '../src/app/backup-data.ts';
+import { DEFAULT_REMINDERS } from '../src/app/reminder-data.ts';
 
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -19,6 +20,53 @@ after(() => rm(directory, {recursive: true, force: true}));
 const task = {id: 'task', title: '既有任務', description: '保留內容', categoryId: '', projectId: '', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: []};
 const legacy = {version: 2, projectName: '原專案', categories: [], tasks: [task, {...task, id: 'done', status: 'done'}]};
 const migratedTasks = legacy.tasks.map(item => ({...item, projectId: 'project-legacy'}));
+
+test('提醒設定升級舊資料，跨分頁保存並與外觀修改合併，非法範圍不覆蓋資料', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const first = new BoardStore(), second = new BoardStore();
+  assert.equal(first.reminders().dueSoonDays, 3);
+  await Promise.all([first.updateReminders({dueSoonDays: 7}), second.updateAppearance({theme: 'dark'})]);
+  first.refreshFromStorage(); second.refreshFromStorage();
+  assert.equal(second.reminders().dueSoonDays, 7); assert.equal(first.appearance().theme, 'dark');
+  assert.equal(new BoardStore().reminders().dueSoonDays, 7);
+  assert.equal((await first.updateReminders({dueSoonDays: 0})).ok, false);
+  assert.equal((await first.updateReminders({dueSoonDays: 2.5})).ok, false);
+  assert.equal(first.reminders().dueSoonDays, 7); assert.equal(first.tasks().length, 2);
+});
+
+test('全部備份還原提醒範圍，工作空間匯入保留本機範圍，重置及舊備份有預設值', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore();
+  await store.updateReminders({dueSoonDays: 10});
+  const full = await store.backupForExport('full');
+  assert.deepEqual(full.reminders, {...DEFAULT_REMINDERS, dueSoonDays: 10});
+  const partial = await store.backupForExport('workspaces', [store.currentWorkspace().id]);
+  assert.equal(partial.reminders, undefined);
+  await store.updateReminders({dueSoonDays: 5});
+  await store.importBackup(partial); assert.equal(store.reminders().dueSoonDays, 5);
+  await store.importBackup(full, store.revision()); assert.equal(store.reminders().dueSoonDays, 10);
+  await store.resetData(false, store.revision()); assert.equal(store.reminders().dueSoonDays, 10);
+  await store.resetData(true, store.revision()); assert.equal(store.reminders().dueSoonDays, 3);
+  await store.updateReminders({dueSoonDays: 8});
+  delete full.reminders;
+  await store.importBackup(full, store.revision()); assert.equal(store.reminders().dueSoonDays, 3);
+});
+
+test('提示設定跨分頁逐欄合併、全部備份往返、重置保留或還原，非法選項拒絕', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const first = new BoardStore(), second = new BoardStore();
+  await Promise.all([first.updateReminders({leadMinutes: 60, allDayTime: '08:30'}), second.updateReminders({popupEnabled: false, includeGoogle: false})]);
+  first.refreshFromStorage(); second.refreshFromStorage();
+  const preferences = {...DEFAULT_REMINDERS, leadMinutes: 60, allDayTime: '08:30', popupEnabled: false, includeGoogle: false};
+  assert.deepEqual(first.reminders(), preferences); assert.deepEqual(second.reminders(), preferences);
+  assert.equal((await first.updateReminders({leadMinutes: 10})).ok, false);
+  assert.equal((await first.updateReminders({allDayTime: '24:00'})).ok, false);
+  const full = await first.backupForExport('full'); assert.deepEqual(full.reminders, preferences);
+  await first.updateReminders(DEFAULT_REMINDERS); await first.importBackup(full, first.revision()); assert.deepEqual(first.reminders(), preferences);
+  localStorage.setItem('orbit-reminder-delivery-v1', '[]');
+  await first.resetData(false, first.revision()); assert.deepEqual(first.reminders(), preferences); assert.equal(localStorage.getItem('orbit-reminder-delivery-v1'), null);
+  await first.resetData(true, first.revision()); assert.deepEqual(first.reminders(), DEFAULT_REMINDERS);
+});
 
 function memoryStorage() {
   const values = new Map();
@@ -38,6 +86,65 @@ function storage(saved = {}, fail = false) {
   };
   return values;
 }
+
+test('Google 設定與不同工作空間的月曆綁定依序合併，任務及進度不變', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const first = new BoardStore();
+  await first.updateGoogle({clientId: '123-example.apps.googleusercontent.com', accountId: 'account', email: 'a@example.com'});
+  // A changed Client ID intentionally starts with no account; authorization then sets it.
+  await first.updateGoogle({accountId: 'account', email: 'a@example.com'});
+  const workspaceId = first.currentWorkspace().id;
+  await first.saveWorkspace('', '其他');
+  const secondWorkspace = first.currentWorkspace().id;
+  const second = new BoardStore();
+  const source = {id: 'source', accountId: 'account', calendarId: 'calendar', name: '學程月曆', color: '#759acb', workspaceIds: [], visible: true};
+  await first.bindCalendar(source, workspaceId, true);
+  await second.bindCalendar({...source, id: 'other-source'}, secondWorkspace, true);
+  await first.updateGoogle({refreshMinutes: 15});
+  await second.updateAppearance({theme: 'dark'});
+  first.refreshFromStorage();
+  assert.equal(first.google().sources.length, 1);
+  assert.deepEqual(first.google().sources[0].workspaceIds, [workspaceId, secondWorkspace]);
+  assert.equal(first.google().refreshMinutes, 15);
+  assert.equal(first.appearance().theme, 'dark');
+  first.switchWorkspace(workspaceId);
+  assert.equal(first.tasks().length, 2);
+  assert.equal(first.progress(), 50);
+  await first.deleteWorkspace(secondWorkspace);
+  assert.deepEqual(first.google().sources[0].workspaceIds, [workspaceId]);
+});
+
+test('工作空間副本重建月曆綁定，全部還原暫停排程，重置清空來源但保留或清除 Client ID', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore();
+  await store.updateGoogle({clientId: '123-example.apps.googleusercontent.com'});
+  await store.updateGoogle({accountId: 'account', email: 'a@example.com'});
+  const workspaceId = store.currentWorkspace().id;
+  await store.bindCalendar({id: 'source', accountId: 'account', calendarId: 'calendar', name: '學程月曆', color: '#123456', workspaceIds: [], visible: true}, workspaceId, true);
+  const selected = await store.backupForExport('workspaces', [workspaceId]);
+  await store.importBackup(selected);
+  const copied = store.currentWorkspace().id;
+  assert.notEqual(copied, workspaceId);
+  assert.notEqual(store.google().sources[1].id, 'source');
+  assert.deepEqual(store.google().sources[1].workspaceIds, [copied]);
+  assert.equal(store.google().sources[1].calendarId, 'calendar');
+  const portable = await store.backupForExport('workspaces', [copied], true);
+  portable.google.clientId = '456-portable.apps.googleusercontent.com';
+  await store.importBackup(portable);
+  assert.equal(store.google().clientId, '123-example.apps.googleusercontent.com');
+  await store.importBackup(portable, undefined, true);
+  assert.equal(store.google().clientId, portable.google.clientId);
+  assert.equal(store.google().refreshMinutes, 0);
+  const full = await store.backupForExport('full');
+  await store.importBackup(full, store.revision());
+  assert.equal(store.google().refreshMinutes, 0);
+  assert.equal(store.google().clientId, full.google.clientId);
+  await store.resetData(false, store.revision());
+  assert.equal(store.google().sources.length, 0);
+  assert.equal(store.google().clientId, full.google.clientId);
+  await store.resetData(true, store.revision());
+  assert.equal(store.google().clientId, '');
+});
 
 test('儲存服務升級既有看板，保留舊儲存鍵與任務，封存不影響原有完成比例', async () => {
   const original = JSON.stringify(legacy);

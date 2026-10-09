@@ -100,18 +100,20 @@ test('跨月與跨年任務在區間內每一天顯示，包含首尾日期', ()
   assert.equal(taskOccursOn(task(), '2026-10-08'), false);
 });
 
-test('月曆以週一開始，正確包含閏日與完整週數', () => {
+test('月曆以週日開始，正確包含閏日與完整週數', () => {
   const days = monthDates(new Date(2024, 1, 15));
-  assert.equal(days[0].getDay(), 1);
+  assert.equal(days[0].getDay(), 0);
   assert.equal(days.length % 7, 0);
   assert.equal(days.filter(day => day.getMonth() === 1).length, 29);
   assert.equal(validDate('2024-02-29'), true);
   assert.equal(validDate('2026-02-29'), false);
-  assert.equal(monthDates(new Date(2026, 1, 15)).length, 35);
-  assert.equal(monthDates(new Date(2026, 2, 15)).length, 42);
+  assert.equal(monthDates(new Date(2026, 1, 15)).length, 28);
+  assert.equal(monthDates(new Date(2026, 2, 15)).length, 35);
+  assert.equal(monthDates(new Date(2026, 7, 15)).length, 42);
 });
 
-test('週視圖維持週一至週日並正確跨年', () => {
-  assert.deepEqual(weekDates(new Date(2027, 0, 1)).map(dateKey), ['2026-12-28', '2026-12-29', '2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02', '2027-01-03']);
-  assert.equal(dateKey(weekDates(new Date(2026, 9, 11))[0]), '2026-10-05');
+test('週視圖維持週日至週六並正確跨年，週日屬於新的一週', () => {
+  assert.deepEqual(weekDates(new Date(2027, 0, 1)).map(dateKey), ['2026-12-27', '2026-12-28', '2026-12-29', '2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']);
+  assert.equal(dateKey(weekDates(new Date(2026, 9, 11))[0]), '2026-10-11');
+  assert.equal(dateKey(weekDates(new Date(2026, 9, 10))[0]), '2026-10-04');
 });

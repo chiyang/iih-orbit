@@ -1,0 +1,28 @@
+  <div class="reminder-center-tabs" role="group" aria-label="提醒範圍">@for (tab of tabs(); track tab.id) {<button [class.selected]="activeTab() === tab.id" [attr.aria-pressed]="activeTab() === tab.id" (click)="activeTab.set(tab.id)">{{ tab.label }}<small>{{ tab.count }}</small></button>}</div>
+  <div class="reminder-center-content">
+    <div class="reminder-range"><p>{{ rangeLabel() }}</p><button (click)="openSettings.emit()"><app-icon name="settings" />提醒設定</button></div>
+    @if (activeTab() === 'due-soon') {<div class="reminder-presets" role="group" aria-label="到期天數">@for (days of presets; track days) {<button [class.selected]="dueDays() === days" [attr.aria-pressed]="dueDays() === days" (click)="dueDays.set(days)">{{ days }} 天</button>}<button class="deadline-list" (click)="showDeadline.emit(dueDays())"><app-icon name="list" />查看任務清單</button></div>}
+    @if (hasMixedSources() || showCalendarFilter()) {
+      <div class="reminder-list-filters">
+        @if (hasMixedSources()) {<div class="reminder-source-filters" role="group" aria-label="此列表的提醒來源">@for (source of sources; track source.id) {<button [class.selected]="effectiveSource() === source.id" [attr.aria-pressed]="effectiveSource() === source.id" (click)="selectSource(source.id)">{{ source.label }}</button>}</div>}
+        @if (showCalendarFilter()) {
+          <details class="reminder-calendar-filter" (keydown)="calendarFilterKeydown($event)">
+            <summary><app-icon name="calendar" /><span>篩選月曆</span><small>{{ selectedCalendarIds().length }}/{{ calendars().length }}</small><app-icon name="chevron" /></summary>
+            <div class="calendar-filter-options">
+              <div class="calendar-filter-actions"><button type="button" (click)="selectCalendars(true)">全選</button><button type="button" (click)="selectCalendars(false)">全部取消</button></div>
+              <fieldset><legend class="visually-hidden">選擇此列表顯示的 Google 月曆，可複選</legend>@for (calendar of calendars(); track calendar.id) {<label [orbitColor]="calendar.color"><input type="checkbox" [checked]="selectedCalendarIds().includes(calendar.id)" (change)="toggleCalendar(calendar.id, $any($event.target).checked)"><i aria-hidden="true"></i><span>{{ calendar.name }}</span><small>{{ calendar.count }} 筆</small></label>}</fieldset>
+              <p>只調整此列表的顯示。</p>
+            </div>
+          </details>
+        }
+      </div>
+    }
+    @if (listItems().length) {<p class="reminder-result-count" role="status">顯示 {{ visibleItems().length }}／{{ listItems().length }} 筆@if (visibleItems().length !== listItems().length) {<button (click)="clearFilters()">清除此列表篩選</button>}</p>}
+    <div class="reminder-items">
+      @for (item of visibleItems(); track item.id) {
+        <button class="reminder-item" [orbitColor]="color(item)" (click)="open(item)"><span class="reminder-source" [class.google-source]="item.external">{{ item.external ? 'G' : 'O' }}</span><span class="reminder-item-content"><strong>{{ item.task.title }}</strong><span>{{ dateLabel(item) }}</span><small>{{ item.external ? 'Google・' + item.external.source.name + '・唯讀' : 'Orbit 任務' }}</small></span><app-icon name="chevron" /></button>
+      } @empty {<div class="reminder-empty"><app-icon name="circleCheck" /><strong>{{ listItems().length ? '目前篩選沒有符合的提醒' : '這個範圍沒有提醒' }}</strong><p>{{ listItems().length ? '可調整來源與月曆選擇，或清除此列表篩選。' : '可切換其他日期或查看到期任務。' }}</p></div>}
+    </div>
+    @if (activeTab() === 'today' || activeTab() === 'tomorrow' || activeTab() === 'next-week') {<p class="reminder-help">依開始日期整理，包含全天安排；跨日項目只在開始日列入。Google 活動為唯讀。</p>}
+    @if (reminders.warning()) {<p class="reminder-warning" role="status">{{ reminders.warning() }}</p>}
+  </div>

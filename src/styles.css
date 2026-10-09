@@ -80,10 +80,6 @@ button { border: 0; }
 .cdk-drop-list-dragging .task-card:not(.cdk-drag-placeholder) { transition: transform 180ms cubic-bezier(.2, 0, 0, 1); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
 
-.workspace-details { flex: 1; min-width: 0; color: var(--text-muted); font-size: var(--font-9); }
-.workspace-details > span { display: block; margin-bottom: 3px; }
-.workspace-details select { width: 100%; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: var(--font-11); font-weight: 600; cursor: pointer; padding: 4px 0; }
-.workspace-switch > .tiny-icon { flex-shrink: 0; }
 .workspace-crumb { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-button { border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; background: var(--surface-soft); color: var(--text-muted); display: inline-flex; gap: 6px; align-items: center; font-size: var(--font-10); white-space: nowrap; }
 .settings-button app-icon { width: 15px; height: 15px; }
