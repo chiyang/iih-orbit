@@ -34,7 +34,21 @@ jobs:
       - name: Check TypeScript and Angular templates
         run: npm run check
       - name: Run tests
-        run: npm test
+        run: |
+          if npm test > "$RUNNER_TEMP/orbit-tests.log" 2>&1; then
+            cat "$RUNNER_TEMP/orbit-tests.log"
+          else
+            cat "$RUNNER_TEMP/orbit-tests.log"
+            node --input-type=module - "$RUNNER_TEMP/orbit-tests.log" <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const log = readFileSync(process.argv[2], 'utf8');
+          const failures = log.lastIndexOf('✖ failing tests:');
+          const detail = (failures < 0 ? log.slice(-10000) : log.slice(failures)).slice(0, 10000);
+          const escaped = detail.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+          console.log(`::error title=Test failures::${escaped}`);
+          NODE
+            exit 1
+          fi
       - name: Build for GitHub Pages
         run: npm run build:pages
       - name: Upload the static site
