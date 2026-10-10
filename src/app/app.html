@@ -16,7 +16,7 @@
       <button [class.active]="scope() === 'all' && categoryFilter() === 'all'" (click)="selectScope('all')"><app-icon name="board" /><span>專案看板</span><span class="nav-count">{{ store.tasks().length }}</span></button>
       <button [class.active]="scope() === 'active'" (click)="selectScope('active')"><app-icon name="clock" /><span>待完成任務</span><span class="nav-count">{{ activeTaskCount() }}</span></button>
       <button [class.active]="scope() === 'done'" (click)="selectScope('done')"><app-icon name="circleCheck" /><span>已完成任務</span></button>
-      <button [class.active]="scope() === 'archived'" (click)="selectScope('archived')"><app-icon name="archive" /><span>封存任務</span><span class="nav-count">{{ archivedTaskCount() }}</span></button>
+      <button [class.active]="scope() === 'archived'" (click)="selectScope('archived')"><app-icon name="archive" /><span>封存任務</span></button>
     </nav>
     <div class="sidebar-divider"></div>
     <div class="nav-label category-heading"><span>任務分類</span><button class="tiny-icon" aria-label="管理任務分類" title="管理任務分類" (click)="openCategories()"><app-icon name="plus" /></button></div>

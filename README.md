@@ -95,7 +95,7 @@ Google 提醒保留目前月份及前後週的獨立查詢需求，與月曆檢�
 5. 複製 OAuth Client ID 貼進設定頁並保存，等待授權元件載入後按「連線 Google」。使用 Google Identity Services Token Model，僅請求月曆讀取及帳號識別；直接呼叫 REST API，無須 API Key 或 Client Secret。[Token Model 說明](https://developers.google.com/identity/oauth2/web/guides/use-token-model)
 6. 勾選各月曆要顯示的工作空間。左側「外部月曆」提供「連線 Google」「立即同步」、來源顯示開關及更新狀態；活動以 Google 標示，可查看唯讀明細及在 Google Calendar 開啟。重新開啟程式會先準備授權元件，點擊連線按鈕才啟動授權。
 
-「在 Google Calendar 開啟」會使用 Orbit 連線帳號的電子郵件，先經 Google 帳號入口，再開啟 API 提供的該活動網址。明細顯示預期開啟的帳號；來源與目前帳號不符時要求重新連線。瀏覽器未登入目標帳號時可能需要先登入或選擇帳號。Google 活動明細的呈現方式由 Google 決定，無法保證一定使用浮動彈窗。
+「在 Google Calendar 開啟」會使用 Orbit 連線帳號的電子郵件，先經 Google 帳號入口，再開啟 API 提供的該活動網址。來源與目前帳號不符時要求重新連線。瀏覽器未登入目標帳號時可能需要先登入或選擇帳號。Google 活動明細的呈現方式由 Google 決定，無法保證一定使用浮動彈窗。
 
 直接顯示 Google 活動不會自動建立 Orbit 任務、專案或分類，也不改動看板、清單及完成比例。明確選擇「移至 Google Calendar」或「複製為 Orbit 任務」才會改動本機卡片。活動顯示依工作空間綁定，搜尋、專案及分類篩選只套用本機任務；截止篩選另暫時隱藏外部活動。全天及午夜結束使用 Google 的 exclusive end；跨日完整日放全天區，部分日留在時間格。本機時區及夏令時間轉換保留實際區間，回撥時鐘的時段標示時區轉換。
 

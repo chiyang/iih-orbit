@@ -171,7 +171,6 @@ export class App {
     return this.scope() === 'all' && this.categoryFilter() !== 'all' ? this.category(this.categoryFilter()).name : labels[this.scope()];
   });
   readonly activeTaskCount = computed(() => this.store.activeTasks().filter(task => !this.store.isDone(task)).length);
-  readonly archivedTaskCount = computed(() => this.store.tasks().filter(task => this.store.isArchived(task)).length);
   readonly calendarTasks = computed(() => this.visibleTasks().filter(task => !this.store.isArchived(task)));
   readonly effectiveSortKey = computed(() => this.sortKey() ?? (this.deadlineFilter() === 'all' ? null : 'dueDate'));
   readonly sortedTasks = computed(() => sortTasks(this.visibleTasks(), this.store.categories(), this.effectiveSortKey(), this.sortKey() ? this.sortDirection() : 'asc', this.statuses(), this.store.projects()));

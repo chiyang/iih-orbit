@@ -1,13 +1,15 @@
-:host {display: inline-block; max-width: 100%; vertical-align: middle;}
+/* Use the available cell width so button padding and icons do not squeeze the text. */
+:host {display: block; min-width: 0;}
 button, input, select {font: inherit; color: var(--text);}
 .cell-value {display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 6px; margin: -5px -6px; background: transparent; text-align: left; border-radius: 5px; font-size: var(--font-11); line-height: 1.6;}
 .cell-value:hover {background: var(--surface-hover); box-shadow: 0 0 0 1px var(--border);}
-.cell-value > span {overflow-wrap: anywhere;}
+.cell-value > span {min-width: 0; overflow-wrap: anywhere;}
 .title-value {font-weight: 600; font-size: var(--font-12);}
 .category-value {color: var(--category-text); background: var(--category-bg); font-size: var(--font-10); white-space: nowrap;}
 .category-value i {width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: var(--category-color);}
 .project-value {color: var(--text-muted); font-size: var(--font-10);}
 .cell-value app-icon {width: 12px; height: 12px; flex-shrink: 0;}
+.cell-value[data-priority] {white-space: nowrap;}
 .cell-value[data-priority='high'], .cell-value.overdue {color: var(--danger-text);}
 .cell-value[data-priority='low'] {color: var(--text-muted);}
 .cell-value small {font-size: var(--font-8); background: var(--overdue-bg); padding: 2px 4px; border-radius: 3px;}
