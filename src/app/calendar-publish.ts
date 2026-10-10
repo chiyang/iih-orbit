@@ -1,4 +1,6 @@
 import { Component, computed, effect, inject, input, output } from '@angular/core';
+import { ScheduleTime } from './schedule-time';
+import { DatePickerTrigger, adjacentHour } from './schedule-controls';
 import { FormsModule } from '@angular/forms';
 import { CalendarTransferService } from './calendar-transfer';
 import type { TaskEditContext } from './board-store';
@@ -7,7 +9,7 @@ import { eventSchedule, RESERVE_MINUTES, taskFingerprint } from './calendar-tran
 import type { TransferSchedule } from './calendar-transfer-data';
 
 @Component({
-  selector: 'app-calendar-publish', imports: [FormsModule],
+  selector: 'app-calendar-publish', imports: [FormsModule, ScheduleTime, DatePickerTrigger],
   template: `<div class="transfer-body">
     <h3>{{ task().title }}</h3><p>移轉成功後，Orbit 任務卡片會移除，改由 Google Calendar 管理。子任務與完成狀態會記錄在活動描述中。</p>
     @if (!service.store.google().accountId) {<p class="notice">請先到「設定 → Google 月曆」連線帳號，再回來移轉任務。</p>}
@@ -20,11 +22,11 @@ import type { TransferSchedule } from './calendar-transfer-data';
       @else {<fieldset [disabled]="service.busy()"><legend>活動時段</legend>
       @if (needsOptions()) {
       <label class="choice"><input type="radio" name="mode" [(ngModel)]="choice.mode" value="reserve">截止前預留時間</label>
-      @if (choice.mode === 'reserve') {<label class="form-field reserve-duration">預留時間<select [(ngModel)]="choice.minutes">@for (minutes of minutes; track minutes) {<option [ngValue]="minutes">{{ minutes < 60 ? minutes + ' 分鐘' : minutes / 60 + ' 小時' }}</option>}</select></label><div class="date-time-row"><label class="form-field">截止日期<input type="date" [(ngModel)]="choice.endDate" [disabled]="!!task().dueDate"></label><label class="form-field">截止時間<input type="time" [(ngModel)]="choice.endTime" [disabled]="!!task().dueTime"></label></div>}
+      @if (choice.mode === 'reserve') {<label class="form-field reserve-duration">預留時間<select [(ngModel)]="choice.minutes">@for (minutes of minutes; track minutes) {<option [ngValue]="minutes">{{ minutes < 60 ? minutes + ' 分鐘' : minutes / 60 + ' 小時' }}</option>}</select></label><div class="date-time-row"><label class="form-field">截止日期<input type="date" [(ngModel)]="choice.endDate" [disabled]="!!task().dueDate"></label><label class="form-field">截止時間<app-schedule-time label="截止時間" [value]="choice.endTime" (valueChange)="timeChanged('end', $event)" [disabled]="!!task().dueTime" /></label></div>}
       <label class="choice"><input type="radio" name="mode" [(ngModel)]="choice.mode" value="all-day">當天全天截止提醒</label>
       <label class="choice"><input type="radio" name="mode" [(ngModel)]="choice.mode" value="custom">自行安排時段</label>
       } @else {<p class="note">請確認活動的起訖日期與時間。</p>}
-      @if (choice.mode === 'custom') {<div class="date-time-row"><label class="form-field">開始日期<input type="date" [(ngModel)]="choice.startDate"></label><label class="form-field">開始時間<input type="time" [(ngModel)]="choice.startTime"></label><label class="form-field">結束日期<input type="date" [(ngModel)]="choice.endDate"></label><label class="form-field">結束時間<input type="time" [(ngModel)]="choice.endTime"></label></div>}
+      @if (choice.mode === 'custom') {<div class="date-time-row"><label class="form-field">開始日期<input type="date" [(ngModel)]="choice.startDate"></label><label class="form-field">開始時間<app-schedule-time label="開始時間" [value]="choice.startTime" (valueChange)="timeChanged('start', $event)" /></label><label class="form-field">結束日期<input type="date" [(ngModel)]="choice.endDate"></label><label class="form-field">結束時間<app-schedule-time label="結束時間" [value]="choice.endTime" (valueChange)="timeChanged('end', $event)" /></label></div>}
     </fieldset>}<p class="preview" aria-live="polite">{{ preview() }}</p>}
     <p class="note">時區：{{ timeZone }} · 顯示為有空，不標示忙碌。移轉失敗時 Orbit 任務保留。</p>
     @if (service.error()) {<p role="alert" class="form-error">{{ service.error() }}</p>}
@@ -62,9 +64,22 @@ export class CalendarPublish {
       this.choice.endDate = [end.getFullYear(), String(end.getMonth() + 1).padStart(2, '0'), String(end.getDate()).padStart(2, '0')].join('-');
       this.choice.endTime = String(end.getHours()).padStart(2, '0') + ':' + String(end.getMinutes()).padStart(2, '0');
     }
+    if (!this.choice.startTime && task.dueTime && task.dueDate) {
+      const start = adjacentHour(task.dueDate, task.dueTime, -1);
+      if (start) { this.choice.startDate = start.date; this.choice.startTime = start.time; }
+    }
     this.calendarId = this.pending()?.calendarId ?? this.service.calendars().find(this.service.writable)?.id ?? '';
     this.service.error.set('');
     if (this.service.google.auth.connected()) void this.service.loadCalendars();
+  }
+  timeChanged(kind: 'start' | 'end', time: string): void {
+    if (kind === 'start') {
+      this.choice.startTime = time;
+      if (!this.choice.endTime) { const end = adjacentHour(this.choice.startDate, time, 1); if (end) {this.choice.endDate = end.date; this.choice.endTime = end.time;} }
+    } else {
+      this.choice.endTime = time;
+      if (!this.choice.startTime) { const start = adjacentHour(this.choice.endDate, time, -1); if (start) {this.choice.startDate = start.date; this.choice.startTime = start.time;} }
+    }
   }
   preview(): string {
     try { return this.scheduleLabel(eventSchedule(this.task(), this.choice)); }

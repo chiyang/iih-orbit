@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { COLUMNS } from '../src/app/models.ts';
-import { copyEventTask, createEventBody, eventSchedule, formatCalendarDescription, parseCalendarDescription, taskMetadata } from '../src/app/calendar-transfer-data.ts';
+import { copyEventTask, createEventBody, eventSchedule, formatCalendarDescription, parseCalendarDescription, plainGoogleDescription, taskMetadata } from '../src/app/calendar-transfer-data.ts';
 import { CalendarTransferApi } from '../src/app/calendar-transfer-api.ts';
 import { CalendarApi, GoogleHttpError, writableCalendar } from '../src/app/google-api.ts';
 import { externalEvent, readGoogleEvent } from '../src/app/google-data.ts';
@@ -383,4 +383,12 @@ test('複製只能建立新任務，不能覆寫現有副本，Google 與 Orbit 
     assert.equal(saved.title, task.title); assert.equal(saved.priority, task.priority); assert.equal(f.events.size, 1);
     assert.equal(f.calls.every(call => call.method === 'GET'), true);
   } finally { f.close(); }
+});
+
+test('移至 Calendar 的 Markdown 原信連結轉為可辨識網址，不含會被誤解成 HTML 的網址尖括號', () => {
+  const url = 'https://accounts.google.com/AccountChooser?Email=me%40example.test&continue=https%3A%2F%2Fmail.google.com%2Fmail%2F';
+  const description = formatCalendarDescription({...task, description: '郵件預覽\n\n[在 Gmail 開啟原信 ↗](<' + url + '>)'}, taskMetadata(task, workspace));
+  assert.ok(description.includes('在 Gmail 開啟原信 ↗：' + url)); assert.equal(description.includes('<https://'), false);
+  const parsed = parseCalendarDescription(description); assert.equal(parsed.valid, true); assert.ok(parsed.description.includes(url));
+  assert.equal(plainGoogleDescription(parsed.description).includes(url), true);
 });

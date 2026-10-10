@@ -1,0 +1,7 @@
+.google-services {display: grid; gap: var(--sp14); margin: var(--sp22) 0;}
+.google-service {padding: var(--sp18); border: 1px solid var(--border); border-radius: 9px; background: var(--section-bg);}
+.service-heading {display: flex; align-items: center; justify-content: space-between; gap: var(--sp12);}
+h4 {margin: 0; font-size: var(--font-13);}
+.service-heading span {font-size: var(--font-10); color: var(--text-muted);}
+.service-heading .connected {color: var(--accent-text);}
+.service-account {font-weight: 600; overflow-wrap: anywhere;}

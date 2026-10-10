@@ -1,23 +1,23 @@
-.transfer-body {padding: 24px 30px; font-size: var(--font-12); line-height: 1.8; overflow-wrap: anywhere;}
-.transfer-body h3 {margin: 0 0 12px; font-size: var(--font-18);}
-.transfer-body fieldset {border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-top: 18px;}
-.transfer-body legend {font-weight: 700; padding: 0 6px;}
-.choice {display: flex; gap: 10px; align-items: center; margin: 12px 0; cursor: pointer;}
+.transfer-body {padding: var(--sp24) var(--sp30); font-size: var(--font-12); line-height: 1.8; overflow-wrap: anywhere;}
+.transfer-body h3 {margin: 0 0 var(--sp12); font-size: var(--font-18);}
+.transfer-body fieldset {border: 1px solid var(--border); border-radius: 10px; padding: var(--sp14); margin-top: var(--sp18);}
+.transfer-body legend {font-weight: 700; padding: 0 var(--sp6);}
+.choice {display: flex; gap: var(--sp10); align-items: center; margin: var(--sp12) 0; cursor: pointer;}
 .choice input {accent-color: var(--accent);}
-.transfer-actions {display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 22px;}
-.button {display: inline-flex; justify-content: center; align-items: center; gap: 7px; padding: 10px 16px; border: 1px solid transparent; border-radius: 7px; font-size: var(--font-12); font-weight: 500; cursor: pointer;}
+.transfer-actions {display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp10); margin-top: var(--sp22);}
+.button {display: inline-flex; justify-content: center; align-items: center; gap: var(--sp7); padding: var(--sp10) var(--sp16); border: 1px solid transparent; border-radius: 7px; font-size: var(--font-12); font-weight: 500; cursor: pointer;}
 .button.primary {background: var(--accent-strong); color: var(--on-accent);}
 .button.secondary {border-color: var(--accent-border); color: var(--accent-text); background: var(--control-bg);}
 .button:hover {filter: brightness(.95);}
 .button:disabled {opacity: .5; cursor: default;}
 .button:focus-visible, .text-button:focus-visible {outline: 2px solid var(--accent-strong); outline-offset: 3px;}
-.text-button {border: 0; color: var(--accent-text); background: none; padding: 8px 0; cursor: pointer; font-size: var(--font-12);}
-.notice, .preview {padding: 12px 15px; background: var(--section-bg); border-radius: 8px;}
+.text-button {border: 0; color: var(--accent-text); background: none; padding: var(--sp8) 0; cursor: pointer; font-size: var(--font-12);}
+.notice, .preview {padding: var(--sp12) var(--sp15); background: var(--section-bg); border-radius: 8px;}
 .note {color: var(--text-muted); font-size: var(--font-11);}
-.copy-preview {border-top: 1px solid var(--border); margin-top: 18px; padding-top: 14px;}
-.copy-preview ul {padding-left: 20px;}
+.copy-preview {border-top: 1px solid var(--border); margin-top: var(--sp18); padding-top: var(--sp14);}
+.copy-preview ul {padding-left: var(--sp20);}
 .copy-preview p {white-space: pre-wrap;}
 .pending-content {white-space: pre-wrap;}
-@media (max-width: 700px) {.transfer-body {padding: 20px;} .transfer-actions .button {flex: 1;}}
-.date-time-row {display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px;}
-.reserve-duration {margin: 8px 0 16px;}
+@media (max-width: 700px) {.transfer-body {padding: var(--sp20);} .transfer-actions .button {flex: 1;}}
+.date-time-row {display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp16);}
+.reserve-duration {margin: var(--sp8) 0 var(--sp16);}

@@ -1,0 +1,27 @@
+app-rich-content { display: block; min-width: 0; }
+.orbit-rich-content { color: var(--text); font-size: var(--font-12); line-height: 1.85; overflow-wrap: anywhere; }
+.orbit-rich-content > :first-child { margin-top: 0; }
+.orbit-rich-content > :last-child { margin-bottom: 0; }
+.orbit-rich-content p { margin: 0 0 1em; }
+.orbit-rich-content h1, .orbit-rich-content h2, .orbit-rich-content h3, .orbit-rich-content h4, .orbit-rich-content h5, .orbit-rich-content h6 { line-height: 1.5; margin: 1.2em 0 .5em; font-weight: 600; }
+.orbit-rich-content h1 { font-size: 1.6em; }
+.orbit-rich-content h2 { font-size: 1.4em; }
+.orbit-rich-content h3 { font-size: 1.2em; }
+.orbit-rich-content h4, .orbit-rich-content h5, .orbit-rich-content h6 { font-size: 1em; }
+.orbit-rich-content a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 3px; }
+.orbit-rich-content a:hover { color: var(--text); }
+.orbit-rich-content a:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.orbit-rich-content ul, .orbit-rich-content ol { margin: .6em 0 1em; padding-left: 1.7em; }
+.orbit-rich-content ul { list-style: disc; }
+.orbit-rich-content ol { list-style: decimal; }
+.orbit-rich-content li { margin: .3em 0; }
+.orbit-rich-content blockquote { margin: 1em 0; padding: .2em 1em; border-left: 3px solid var(--border); color: var(--text-muted); }
+.orbit-rich-content pre { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 7px; padding: var(--sp14); overflow: auto; white-space: pre-wrap; }
+.orbit-rich-content code { background: var(--surface-soft); border-radius: 4px; padding: .1em .3em; font-size: .95em; }
+.orbit-rich-content pre code { padding: 0; }
+.orbit-rich-content table { border-collapse: collapse; width: 100%; table-layout: fixed; margin: 1em 0; }
+.orbit-rich-content th, .orbit-rich-content td { border: 1px solid var(--border); padding: var(--sp8) var(--sp10); vertical-align: top; text-align: left; }
+.orbit-rich-content th { background: var(--surface-soft); font-weight: 600; }
+.orbit-rich-content hr { border: 0; border-top: 1px solid var(--border); margin: 1.5em 0; }
+
+.mail-rich-content {max-width: 760px; margin-inline: auto;} .mail-rich-content table {table-layout: auto; width: auto; max-width: 100%;} .mail-rich-content td {border: 0; padding: var(--sp4) var(--sp8);} .mail-rich-content th {border: 0; border-bottom: 1px solid var(--border);} .mail-rich-content div {margin-block: .45em;} .mail-rich-content a {overflow-wrap: anywhere;}

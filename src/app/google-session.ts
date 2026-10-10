@@ -27,7 +27,7 @@ interface SessionCallbacks {
 const sameScope = (left: GoogleSessionContext, right: GoogleSessionContext) => left.clientId === right.clientId && left.generation === right.generation;
 const sameContext = (left: GoogleSessionContext, right: GoogleSessionContext) => sameScope(left, right) && left.accountId === right.accountId;
 const contextOf = (session: GoogleSession): GoogleSessionContext => ({clientId: session.clientId, generation: session.generation, accountId: session.account.id});
-export interface SessionOptions {scope: string; storageKey: string; controlPrefix: string}
+export interface SessionOptions {scope: string; storageKey: string; controlPrefix: string; sharedStorage?: boolean}
 
 export function readGoogleSession(value: unknown, context: GoogleSessionContext, nonce: string, now = Date.now(), scope = CALENDAR_SCOPE): GoogleSession | undefined {
   if (!value || typeof value !== 'object' || !nonce || !context.accountId) return undefined;
@@ -40,7 +40,7 @@ export function readGoogleSession(value: unknown, context: GoogleSessionContext,
   return {version: 1, id: session.id, clientId: session.clientId, generation: session.generation, account: {id: session.account.id, email: session.account.email}, scope: session.scope, token: session.token, expiresAt: session.expiresAt, nonce: session.nonce};
 }
 
-/** Credentials remain in tab storage; localStorage contains only a public invalidation nonce. */
+/** The caller chooses credential storage; public invalidation nonces coordinate all tabs. */
 export class GoogleSessionBridge {
   private context?: GoogleSessionContext;
   private readonly tabId = crypto.randomUUID();
@@ -98,7 +98,7 @@ export class GoogleSessionBridge {
 
   invalidate(message: string, expectedNonce?: string): string {
     this.requestId = '';
-    this.forget();
+    this.forget(expectedNonce);
     if (!this.context?.clientId || !this.control) return '';
     if (expectedNonce && this.marker() !== expectedNonce) return this.marker();
     const nonce = crypto.randomUUID();
@@ -114,7 +114,16 @@ export class GoogleSessionBridge {
     catch { this.warn(); }
     if (announce) this.send({type: 'available', context: contextOf(saved)});
   }
-  forget(): void { try { this.storage?.removeItem(this.options.storageKey); } catch { this.warn(); } }
+  forget(expectedNonce = this.callbacks.current()?.nonce || this.callbacks.pendingNonce()): void {
+    try {
+      if (this.options.sharedStorage) {
+        const saved = JSON.parse(this.storage?.getItem(this.options.storageKey) ?? 'null');
+        // An old tab must never remove the newly authorized credential in shared storage.
+        if (saved && (expectedNonce && saved.nonce !== expectedNonce || this.context && (saved.clientId !== this.context.clientId || saved.generation !== this.context.generation || saved.account?.id !== this.context.accountId))) return;
+      }
+      this.storage?.removeItem(this.options.storageKey);
+    } catch { this.warn(); }
+  }
   private controlKey(context: GoogleSessionContext): string { return this.options.controlPrefix + JSON.stringify([context.generation, context.clientId]); }
 
   verify(request = true): void {

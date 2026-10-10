@@ -24,30 +24,30 @@ import { ThemeColor } from './theme-color';
         <label class="source-item" [title]="source.name + '・唯讀・' + calendar.status(source)"><input type="checkbox" [checked]="source.visible" (change)="calendar.store.updateCalendarSource(source.id, {visible: $any($event.target).checked})"><i [orbitColor]="source.color"></i><span>{{ source.name }}<small>Google・唯讀</small><small class="source-status">{{ source.visible ? calendar.status(source) : '已隱藏' }}</small></span></label>
     }
     <button class="configure-source" (click)="configure.emit()"><app-icon name="calendar" />管理外部月曆</button>`,
-  styles: `:host {display: block; margin: 0 12px 24px; padding-top: 17px; border-top: 1px solid var(--border);}
-    .sources-heading {display: flex; align-items: center; justify-content: space-between; font-size: var(--font-10); font-weight: 600; color: var(--text-muted); margin-bottom: 10px;}
-    button {background: transparent; color: var(--text-muted); display: inline-flex; align-items: center; gap: 7px; padding: 4px; border-radius: 5px; font-size: var(--font-11);}
+  styles: `:host {display: block; margin: 0 var(--sp12) var(--sp24); padding-top: var(--sp17); border-top: 1px solid var(--border);}
+    .sources-heading {display: flex; align-items: center; justify-content: space-between; font-size: var(--font-10); font-weight: 600; color: var(--text-muted); margin-bottom: var(--sp10);}
+    button {background: transparent; color: var(--text-muted); display: inline-flex; align-items: center; gap: var(--sp7); padding: var(--sp4); border-radius: 5px; font-size: var(--font-11);}
     button:hover {color: var(--accent-text); background: var(--surface-hover);}
     button:disabled {opacity: .55; cursor: default;}
-    .sync-source {padding: 6px;}
+    .sync-source {padding: var(--sp6);}
     .syncing {animation: source-spin 1.2s linear infinite;}
     @keyframes source-spin {to {transform: rotate(360deg);}}
     @media (prefers-reduced-motion: reduce) {.syncing {animation: none;}}
     .source-actions:empty {display: none;}
-    .source-actions {display: grid; gap: 6px; margin-bottom: 8px;}
-    .source-actions button {justify-content: center; padding: 9px 7px; border: 1px solid var(--accent-border); min-width: 0; line-height: 1.5;}
+    .source-actions {display: grid; gap: var(--sp6); margin-bottom: var(--sp8);}
+    .source-actions button {justify-content: center; padding: var(--sp9) var(--sp7); border: 1px solid var(--accent-border); min-width: 0; line-height: 1.5;}
     .source-primary {background: var(--accent-strong); color: var(--on-accent);}
     .source-primary:hover {background: var(--accent-strong); color: var(--on-accent); filter: brightness(.96);}
-    .connection-status, .connection-error {font-size: var(--font-9); line-height: 1.65; overflow-wrap: anywhere; margin: 7px 0; color: var(--text-muted);}
+    .connection-status, .connection-error {font-size: var(--font-9); line-height: 1.65; overflow-wrap: anywhere; margin: var(--sp7) 0; color: var(--text-muted);}
     .connection-error {color: var(--danger-text);}
     app-icon {width: 14px; height: 14px; flex-shrink: 0;}
-    .source-item {display: flex; align-items: center; gap: 7px; padding: 9px 0; font-size: var(--font-11); cursor: pointer;}
+    .source-item {display: flex; align-items: center; gap: var(--sp7); padding: var(--sp9) 0; font-size: var(--font-11); cursor: pointer;}
     input {accent-color: var(--accent-strong); width: 14px; height: 14px; margin: 0; flex-shrink: 0;}
     i {width: 7px; height: 7px; border-radius: 50%; background: var(--category-color); flex-shrink: 0;}
     .source-item > span {min-width: 0; overflow-wrap: anywhere;}
-    small {display: block; font-size: var(--font-8); color: var(--text-soft); margin-top: 2px;}
+    small {display: block; font-size: var(--font-8); color: var(--text-soft); margin-top: var(--sp2);}
     .source-status {color: var(--text-muted); line-height: 1.5;}
-    .configure-source {margin-top: 7px; padding: 4px 0;}`
+    .configure-source {margin-top: var(--sp7); padding: var(--sp4) 0;}`
 })
 export class CalendarSources {
   readonly calendar = inject(GoogleCalendarService);

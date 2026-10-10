@@ -1,0 +1,42 @@
+@if (expired()) {
+  <p class="mail-read-error mail-expired" role="alert">Gmail 帳號或連線已變更，請關閉視窗後重新選擇郵件。</p>
+} @else {
+  <div class="mail-preview-toolbar">
+    <button type="button" [disabled]="threadBusy()" [attr.aria-expanded]="threadOpen()" aria-controls="mail-thread-rail" (click)="toggleThread()">{{ threadBusy() ? '讀取討論串…' : threadOpen() ? '收合討論串' : '查看討論串' }}</button>
+    <small>預覽不會更改已讀狀態</small>
+    <span class="mail-read-marker" [class.is-unread]="shown().labelIds.includes('UNREAD')" role="img" [attr.aria-label]="shown().labelIds.includes('UNREAD') ? '未讀郵件' : '已讀郵件'" [attr.title]="shown().labelIds.includes('UNREAD') ? '未讀郵件' : '已讀郵件'"></span>
+  </div>
+  @if (threadError()) {<p class="mail-read-error mail-thread-error" role="alert">{{ threadError() }}</p>}
+  <div class="mail-preview-layout" [class.thread-expanded]="threadOpen()">
+    @if (threadOpen()) {
+      <aside class="mail-thread-rail" id="mail-thread-rail" aria-label="討論串郵件">
+        <div class="mail-thread-heading"><strong>{{ threadBusy() && messages().length === 1 ? '讀取討論串…' : messages().length + ' 封郵件' }}</strong><button type="button" [disabled]="threadBusy()" (click)="openThread(true)">{{ threadBusy() ? '更新中…' : '更新' }}</button><small>首封在前，回覆依時間排列</small></div>
+        <div class="mail-thread-list" role="group" aria-label="選擇討論串中的郵件" [attr.aria-busy]="threadBusy()">
+          @for (item of messages(); track item.id; let i = $index) {
+            <button type="button" class="mail-thread-item" [class.unread]="item.labelIds.includes('UNREAD')" [attr.aria-pressed]="shown().id === item.id" (click)="selectMessage(item)">
+              <span class="mail-thread-item-meta"><span>{{ i === 0 ? '首封郵件' : '回覆 ' + i }}</span><span class="mail-read-marker" [class.is-unread]="item.labelIds.includes('UNREAD')" role="img" [attr.aria-label]="item.labelIds.includes('UNREAD') ? '未讀郵件' : '已讀郵件'" [attr.title]="item.labelIds.includes('UNREAD') ? '未讀郵件' : '已讀郵件'"></span></span>
+              <strong>{{ item.subject }}</strong><span class="mail-thread-sender">{{ item.senderName || item.senderEmail || '寄件人' }}</span><time>{{ messageDate(item) }}</time>
+            </button>
+          }
+        </div>
+      </aside>
+    }
+    <div class="mail-reading-pane" #readingPane>
+      <div class="mail-read-heading">
+        <h3>{{ shown().subject }}</h3>
+        <dl><div><dt>寄件人</dt><dd><strong>{{ shown().senderName }}</strong><span>{{ shown().senderEmail || shown().from || '未提供寄件地址' }}</span></dd></div><div><dt>收信時間</dt><dd>{{ date() }}</dd></div>@if (content()?.to) {<div><dt>收件人</dt><dd>{{ content()!.to }}</dd></div>}@if (content()?.cc) {<div><dt>副本</dt><dd>{{ content()!.cc }}</dd></div>}</dl>
+        <div class="mail-read-actions"><a [href]="link()" target="_blank" rel="noopener noreferrer">在 Gmail 開啟 ↗</a><button type="button" (click)="createTask.emit(shown())">建立 Orbit 任務</button></div>
+      </div>
+      <div class="mail-read-body" [attr.aria-busy]="busy()">
+        @if (busy()) {<p class="mail-read-note" role="status">正在讀取郵件內文…</p>}
+        @if (error()) {<p class="mail-read-error" role="alert">{{ error() }} <button type="button" (click)="load()">重試</button></p>}
+        @if (content(); as body) {
+          @if (body.warning) {<p class="mail-read-note" role="status">{{ body.warning }}</p>}
+          @if (body.html.trim()) {<app-rich-content [value]="body.html" format="html" />} @else if (body.plain.trim()) {<div class="plain-mail">{{ body.plain }}</div>} @else {<p class="mail-read-note">這封信沒有可顯示的文字內文，請在 Gmail 查看。</p><div class="plain-mail">{{ shown().snippet }}</div>}
+          @if (body.attachments.length) {<div class="mail-read-attachments"><strong>附件（請在 Gmail 查看）</strong><ul>@for (attachment of body.attachments; track $index) {<li>{{ attachment.name }}</li>}</ul></div>}
+        } @else {<div class="plain-mail">{{ shown().snippet || '（沒有預覽文字）' }}</div>}
+      </div>
+      <p class="mail-read-note mail-read-footnote">內文顯示文字、連結與表格；圖片及附件請在 Gmail 查看。建立任務仍帶入精簡的郵件預覽與原信連結。</p>
+    </div>
+  </div>
+}

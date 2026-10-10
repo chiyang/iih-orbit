@@ -7,7 +7,6 @@ import { DriveDocument, DriveFile, DriveSettings } from './drive-data';
 import { DriveService, type DriveRemovalReview } from './drive-service';
 import { driveCatalog, fileScope } from './drive-catalog';
 import { Icon } from './icon';
-import { validClientId } from './google-data';
 import { TEXT_SIZES } from './ui-preferences';
 
 @Component({selector: 'app-drive-panel', imports: [FormsModule, Icon, DatePipe, DecimalPipe, NgTemplateOutlet], templateUrl: './drive-panel.html', styleUrl: './drive-panel.css'})
@@ -15,6 +14,7 @@ export class DrivePanel {
   readonly drive = inject(DriveService);
   readonly store = this.drive.store;
   readonly restored = output<void>();
+  readonly configure = output<void>();
   readonly kind = signal<BackupKind>('full');
   readonly ids = signal<string[]>([this.store.currentWorkspace().id]);
   readonly mode = signal<'backup' | 'sync'>('sync');
@@ -95,8 +95,6 @@ export class DrivePanel {
   });
   confirmation = '';
   removalConfirmation = '';
-  clientId = this.store.google().clientId;
-  private savedClientId = this.clientId;
   private modeContext = '';
   private loadedConnection = '';
   private readonly revision = signal('');
@@ -109,7 +107,6 @@ export class DrivePanel {
   private readonly previewPanel = viewChild<ElementRef<HTMLElement>>('previewPanel');
   private readonly cloudList = viewChild<ElementRef<HTMLElement>>('cloudList');
   constructor() {
-    effect(() => {const clientId = this.store.google().clientId; untracked(() => {if (this.clientId === this.savedClientId) this.clientId = clientId; this.savedClientId = clientId;});});
     void this.drive.prepare();
     effect(() => {
       const key = JSON.stringify([this.store.google().clientId, this.store.generation(), this.store.drive().accountId, this.drive.auth.connectionVersion()]);
@@ -186,12 +183,6 @@ export class DrivePanel {
     try {await this.drive.manual(this.kind(), this.ids());} finally {this.saving.set(false);}
   }
   toggle(id: string, selected: boolean): void { this.ids.update(ids => selected ? [...new Set([...ids, id])] : ids.filter(value => value !== id)); }
-  async saveClientId(): Promise<void> {
-    const clientId = this.clientId.trim();
-    if (!validClientId(clientId)) { this.error.set('請輸入 Google OAuth 網頁應用程式的 Client ID。'); return; }
-    this.error.set(''); const result = await this.store.updateGoogle({clientId});
-    if (!result.ok) this.error.set(result.message);
-  }
   async options(patch: Partial<DriveSettings>): Promise<void> {
     this.error.set(''); const result = await this.store.updateDrive(patch); if (!result.ok) this.error.set(result.message);
   }

@@ -1,29 +1,8 @@
 <section class="google-settings" aria-labelledby="google-title">
   <h3 id="google-title">Google Calendar</h3>
   <p>將 Google 活動顯示在月曆與週視圖。Orbit 任務可移至可寫入月曆；Google 活動可複製為 Orbit 任務。</p>
-  <details class="google-guide"><summary>首次設定：建立自己的 Google Client ID</summary>
-    <ol>
-      <li>使用自己的 Google 帳號，到 <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> 建立或選擇專案，申請自己的 Client ID。</li>
-      <li>在 API 程式庫啟用 <strong>Google Calendar API</strong>；需要雲端備份時，也啟用 <strong>Google Drive API</strong>。</li>
-      <li>設定 Google Auth Platform 的品牌資訊、對象及資料存取權。外部測試模式請將自己的 Google 帳號加入測試使用者。</li>
-      <li>在「用戶端」建立 OAuth 用戶端，類型選擇「網頁應用程式」。在「已授權的 JavaScript 來源」加入 <code>https://chiyang.github.io</code>，不包含 /iih-orbit/ 路徑。</li>
-      <li>複製 OAuth Client ID，貼到下方並保存，再按「連線 Google」。授權讀取月曆及識別帳號後，選擇要顯示的月曆與工作空間。</li>
-    </ol>
-    <p>正式站台：<a href="https://chiyang.github.io/iih-orbit/" target="_blank" rel="noopener noreferrer">https://chiyang.github.io/iih-orbit/</a>。每位使用者使用自己申請的 Client ID；這個工具只需要 Client ID，不需要 API Key 或 Client Secret。</p>
-    @if (origin && origin !== 'https://chiyang.github.io') {<p class="google-note">目前開啟的來源是 <code>{{ origin }}</code>。若也要在這個網址連線 Google，需將此來源另行加入同一個 Client ID。</p>}
-    @if (localAddress) {<p class="google-origin-note">Google 官方本機設定使用 http://localhost:4200（另加入 http://localhost）。若目前的 127.0.0.1 來源無法授權，請先匯出全部備份，再以 localhost 開啟並匯入；兩個網址的本機資料各自獨立。</p>}
-    <a href="https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid" target="_blank" rel="noopener noreferrer">Google 官方設定說明</a>
-  </details>
-  <label class="google-field">OAuth Client ID<input type="text" autocomplete="off" spellcheck="false" aria-label="Google OAuth Client ID" [ngModel]="draft()" (ngModelChange)="draft.set($event)" placeholder="…apps.googleusercontent.com"></label>
-  <div class="google-actions"><button type="button" [disabled]="saving() || calendar.auth.authorizing()" (click)="saveClientId()">保存 Client ID</button>
-    @if (store.google().clientId) {
-      <button type="button" class="google-primary" [disabled]="!calendar.auth.ready() || calendar.auth.authorizing() || saving() || draft().trim() !== store.google().clientId" (click)="calendar.connect()">{{ calendar.auth.authorizing() ? '等待授權…' : calendar.auth.connected() ? '重新授權／切換帳號' : '連線 Google' }}</button>
-      @if (!calendar.auth.ready() && !loadingLibrary()) {<button type="button" (click)="prepare()">重新載入授權元件</button>}
-      @if (calendar.auth.connected() || calendar.auth.authorizing()) {<button type="button" (click)="disconnect()">解除本機連線</button>}
-    }
-  </div>
-  @if (store.google().clientId && draft().trim() !== store.google().clientId) {<p class="google-note">更換 Client ID 會解除原有月曆來源綁定，需重新授權及選擇月曆。</p>}
-  <p class="google-status" role="status">{{ loadingLibrary() ? '正在載入 Google 授權元件…' : calendar.auth.message() }}@if (store.google().email) {<span> · {{ store.google().email }}</span>}</p>
+  <div class="google-actions"><button type="button" (click)="configure.emit()">{{ calendar.auth.connected() ? '管理 Google 連線' : '前往 Google 連線' }}</button></div>
+  <p class="google-status" role="status">{{ calendar.auth.connected() ? '已連線' : '尚未連線' }}@if (store.google().email) { · {{ store.google().email }}}</p>
   <label class="google-field">月曆更新頻率<select aria-label="Google 月曆更新頻率" [ngModel]="store.google().refreshMinutes" (ngModelChange)="interval($event)"><option [ngValue]="0">手動更新</option><option [ngValue]="1">每 1 分鐘</option><option [ngValue]="5">每 5 分鐘</option><option [ngValue]="15">每 15 分鐘</option></select></label>
   <p class="google-note">切換日期時會讀取該段活動。自動更新限程式開啟、網路可用及授權有效期間；授權到期後需點擊重新連線。</p>
   @if (calendar.auth.connected()) {
@@ -35,9 +14,7 @@
   @for (source of calendar.sources(); track source.id) {
     <div class="calendar-source"><div><strong>{{ source.name }} <small>Google 來源</small></strong><p>{{ calendar.status(source) }}</p></div><label>顯示色<input type="color" [attr.aria-label]="source.name + ' 顯示色'" [value]="source.color" (change)="changeColor(source.id, $any($event.target).value)"></label><label class="source-visible"><input type="checkbox" [checked]="source.visible" (change)="store.updateCalendarSource(source.id, {visible: $any($event.target).checked})">顯示</label><button type="button" (click)="store.removeCalendarSource(source.id)">解除綁定</button></div>
   }
-  <p class="google-note">未過期的授權會在此分頁暫存，重新整理可恢復，同來源的新分頁可接續已開啟分頁的連線。到期後需重新連線；授權憑證不會放進備份檔。</p>
-  <p class="google-note">解除本機連線會停止此瀏覽器同來源分頁的讀取。可到 <a href="https://myaccount.google.com/connections" target="_blank" rel="noopener noreferrer">Google 帳號管理存取權</a> 撤銷授權。活動離線快取不包含在備份檔中，在新瀏覽器匯入或全部還原後需重新連線。</p>
-  @if (message()) {<p class="google-status" role="status">{{ message() }}</p>}
+  <p class="google-note">活動離線快取只保存在目前瀏覽器，不包含在備份檔。匯入或全部還原後，需重新取得活動。</p>
   @if (error() || calendar.error()) {<p class="google-error" role="alert">{{ error() || calendar.error() }}</p>}
   @if (calendar.cacheWarning()) {<p class="google-error" role="status">{{ calendar.cacheWarning() }}</p>}
   @if (calendar.auth.sessionWarning()) {<p class="google-error" role="status">{{ calendar.auth.sessionWarning() }}</p>}

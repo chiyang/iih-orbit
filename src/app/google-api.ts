@@ -4,10 +4,43 @@ import { validHex } from './appearance-data.ts';
 
 export class GoogleHttpError extends Error {
   readonly status: number;
-  constructor(status: number, resource = '月曆') {
-    super(status === 401 ? 'Google 授權已到期，請重新連線。' : status === 403 ? `無法存取${resource}，請檢查 API 是否啟用、授權權限與存取權。` : status === 429 ? 'Google 暫時限制讀取次數，請稍後再試。' : status === 404 ? `${resource}已不存在或無法存取，請重新選擇。` : 'Google 暫時無法回應，請稍後再試。');
+  readonly reason: string;
+  readonly retryAfterMs: number;
+  readonly retryable: boolean;
+  constructor(status: number, resource = '月曆', details: {reason?: string; retryAfterMs?: number} = {}) {
+    const reason = details.reason ?? '', rateLimited = status === 429 || status === 403 && ['rateLimitExceeded', 'userRateLimitExceeded', 'RATE_LIMIT_EXCEEDED', 'USER_RATE_LIMIT_EXCEEDED'].includes(reason);
+    super(status === 401 ? 'Google 授權已到期，請重新連線。' : rateLimited ? 'Google 暫時限制讀取次數，請稍後再試。' : status === 403 && ['dailyLimitExceeded', 'DAILY_LIMIT_EXCEEDED'].includes(reason) ? 'Google API 今日配額已用完，請等待配額恢復或調整 Google Cloud 配額。' : status === 403 && reason === 'domainPolicy' ? '這個帳號的管理員限制了 Gmail 存取，請洽帳號管理員。' : status === 403 ? `無法存取${resource}，請檢查 API 是否啟用、授權權限與存取權。` : status === 404 ? `${resource}已不存在或無法存取，請重新選擇。` : 'Google 暫時無法回應，請稍後再試。');
     this.status = status;
+    this.reason = reason;
+    this.retryAfterMs = Math.max(0, Number.isFinite(details.retryAfterMs) ? details.retryAfterMs! : 0);
+    this.retryable = rateLimited || [500, 502, 503, 504].includes(status);
   }
+}
+/** Preserve the reason, not Google's raw message or account details. Error bodies are bounded. */
+export async function readGoogleHttpError(response: Response, resource: string): Promise<GoogleHttpError> {
+  let payload: unknown;
+  try {
+    if (response.body) {
+      const reader = response.body.getReader(), decoder = new TextDecoder();
+      let content = '', size = 0;
+      try {
+        for (;;) {
+          const part = await reader.read(); if (part.done) break;
+          size += part.value.byteLength;
+          if (size > 16384) { await reader.cancel(); throw new Error('Error response too large'); }
+          content += decoder.decode(part.value, {stream: true});
+        }
+        payload = JSON.parse(content + decoder.decode());
+      } finally { reader.releaseLock(); }
+    }
+  } catch { /* Non-JSON, cancelled or oversized responses still retain their HTTP status. */ }
+  const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const error = object(object(payload)['error']);
+  const entries = [...(Array.isArray(error['errors']) ? error['errors'] : []), ...(Array.isArray(error['details']) ? error['details'] : [])];
+  const reason = entries.map(item => object(item)['reason']).find(value => typeof value === 'string' && /^[a-zA-Z_]{1,100}$/.test(value)) as string | undefined;
+  const retry = response.headers?.get('Retry-After') ?? '';
+  const retryAfterMs = /^\d+(?:\.\d+)?$/.test(retry) ? Number(retry) * 1000 : Math.max(0, Date.parse(retry) - Date.now()) || 0;
+  return new GoogleHttpError(response.status, resource, {reason, retryAfterMs});
 }
 export interface AvailableCalendar {id: string; name: string; color: string; timeZone: string; accessRole?: string}
 export function writableCalendar(calendar: Pick<AvailableCalendar, 'accessRole'>): boolean { return ['writerWithoutPrivateAccess', 'writer', 'owner'].includes(calendar.accessRole ?? ''); }

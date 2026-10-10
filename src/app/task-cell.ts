@@ -1,4 +1,6 @@
 import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, Directive, ElementRef, inject, input, output, signal } from '@angular/core';
+import { ScheduleTime } from './schedule-time';
+import { DatePickerTrigger, adjacentHour } from './schedule-controls';
 import { FormsModule } from '@angular/forms';
 import { BoardStore, TaskEditContext } from './board-store';
 import { Icon } from './icon';
@@ -15,7 +17,7 @@ export class CellFocus {
 }
 
 @Component({
-  selector: 'app-task-cell', imports: [FormsModule, Icon, ThemeColor, CellFocus],
+  selector: 'app-task-cell', imports: [ScheduleTime, DatePickerTrigger, FormsModule, Icon, ThemeColor, CellFocus],
   templateUrl: './task-cell.html', styleUrl: './task-cell.css', changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class TaskCell {
@@ -82,7 +84,12 @@ export class TaskCell {
   }
   toggleTime(enabled: boolean): void {
     this.includeTime = enabled;
-    if (enabled && !this.time) this.time = this.field() === 'startDate' ? '09:00' : '17:00';
+    if (enabled && !this.time) {
+      const task = this.context?.original ?? this.task();
+      const other = this.field() === 'startDate' ? adjacentHour(task.dueDate, task.dueTime, -1) : adjacentHour(task.startDate, task.startTime, 1);
+      if (other && (!this.value || this.value === (this.field() === 'startDate' ? task.dueDate : task.startDate))) this.value = other.date;
+      this.time = other?.time ?? (this.field() === 'startDate' ? '09:00' : '17:00');
+    }
   }
   async selectStatus(value: string): Promise<void> {
     if (!this.editing()) this.begin();

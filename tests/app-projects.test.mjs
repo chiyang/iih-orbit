@@ -1,5 +1,5 @@
 import '@angular/compiler';
-import { createEnvironmentInjector, runInInjectionContext, signal } from '@angular/core';
+import { createEnvironmentInjector, runInInjectionContext, signal, ɵChangeDetectionScheduler, ɵEffectScheduler } from '@angular/core';
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { createRequire } from 'node:module';
@@ -26,15 +26,62 @@ function application() {
   const values = new Map([['orbit-workspaces-v1', JSON.stringify(state)]]);
   globalThis.localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key)};
   const store = new BoardStore();
-  const injector = createEnvironmentInjector([{provide: BoardStore, useValue: store}, {provide: UiPreferences, useValue: {textSize: () => 'standard'}}]);
+  const effects = new Set();
+  const scheduler = {add(effect) {effects.add(effect);}, schedule() {}, remove(effect) {effects.delete(effect);}};
+  const injector = createEnvironmentInjector([{provide: BoardStore, useValue: store}, {provide: UiPreferences, useValue: {textSize: () => 'standard'}}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   // Only the viewport value is needed to construct the action controller; no DOM or browser is used.
   globalThis.window = {innerWidth: 1440};
   let app;
+  globalThis.ngServerMode = true;
   try { app = runInInjectionContext(injector, () => new App()); }
-  finally { delete globalThis.window; }
+  finally { delete globalThis.window; delete globalThis.ngServerMode; }
   const settings = runInInjectionContext(injector, () => new Settings());
-  return {app, settings, store, close: () => { clearTimeout(app.toastTimer); injector.destroy(); }};
+  const flush = () => {for (let round = 0; round < 30 && [...effects].some(effect => effect.dirty); round++) for (const effect of effects) if (effect.dirty) effect.run();};
+  const reopen = () => {
+    globalThis.window = {innerWidth: 1440}; globalThis.ngServerMode = true;
+    try {return runInInjectionContext(injector, () => new App());}
+    finally {delete globalThis.window; delete globalThis.ngServerMode;}
+  };
+  return {app, settings, store, values, flush, reopen, close: () => { clearTimeout(app.toastTimer); injector.destroy(); }};
 }
+
+test('重新建立畫面保留視圖、月曆日期、篩選排序與右側欄；不同工作空間分開保存', () => {
+  const f = application();
+  try {
+    f.app.view.set('week'); f.app.calendarDate.set('2027-01-03'); f.app.calendarScrollHour.set(13.5);
+    f.app.projectFilter.set('website'); f.app.categoryFilter.set('design'); f.app.scope.set('done'); f.app.query.set('網站');
+    f.app.sortKey.set('dueDate'); f.app.sortDirection.set('desc'); f.app.calendarShowGoogle.set(false); f.app.openMail(); f.flush();
+    const restored = f.reopen();
+    assert.equal(restored.view(), 'week'); assert.equal(restored.calendarDate(), '2027-01-03'); assert.equal(restored.calendarScrollHour(), 13.5);
+    assert.equal(restored.projectFilter(), 'website'); assert.equal(restored.categoryFilter(), 'design'); assert.equal(restored.scope(), 'done'); assert.equal(restored.query(), '網站');
+    assert.equal(restored.sortKey(), 'dueDate'); assert.equal(restored.sortDirection(), 'desc'); assert.equal(restored.calendarShowGoogle(), false); assert.equal(restored.mailOpen(), true);
+    f.app.selectWorkspace('second'); f.flush(); assert.equal(f.app.view(), 'week'); assert.equal(f.app.query(), '');
+    assert.equal(f.app.calendarShowGoogle(), false); assert.equal(f.app.mailOpen(), true);
+    f.app.view.set('month'); f.app.calendarDate.set('2027-02-01'); f.flush();
+    f.app.selectWorkspace('first'); f.flush(); assert.equal(f.app.view(), 'week'); assert.equal(f.app.calendarDate(), '2027-01-03'); assert.equal(f.app.projectFilter(), 'website');
+    f.app.view.set('list'); f.app.rememberBrowse(); assert.equal(f.reopen().view(), 'list');
+  } finally {f.close();}
+});
+
+test('瀏覽狀態排除已移除的篩選，新資料世代不接續舊畫面；指定一週不回到月初', async () => {
+  const f = application();
+  try {
+    f.app.projectFilter.set('removed'); f.app.categoryFilter.set('removed'); f.flush();
+    const restored = f.reopen(); assert.equal(restored.projectFilter(), 'all'); assert.equal(restored.categoryFilter(), 'all');
+    f.app.openCalendarWeek('2026-10-18'); assert.equal(f.app.view(), 'week'); assert.equal(f.app.calendarDate(), '2026-10-18');
+    f.app.openCalendarWeek('not-a-date'); assert.equal(f.app.calendarDate(), '2026-10-18');
+    f.app.calendarScrollHour.set(13.5); f.app.calendarShowGoogle.set(false);
+    f.app.openCalendarMonth('2027-01-07'); f.flush();
+    assert.equal(f.app.view(), 'month'); assert.equal(f.app.calendarDate(), '2027-01-07');
+    f.app.rememberBrowse();
+    const month = f.reopen();
+    assert.equal(month.view(), 'month'); assert.equal(month.calendarDate(), '2027-01-07');
+    assert.equal(month.calendarScrollHour(), 13.5); assert.equal(month.calendarShowGoogle(), false);
+    f.app.openCalendarMonth('not-a-date'); assert.equal(f.app.calendarDate(), '2027-01-07');
+    f.flush(); await f.store.resetData(true, f.store.revision()); f.flush();
+    assert.equal(f.app.view(), 'board'); assert.equal(f.app.query(), ''); assert.equal(f.app.mailOpen(), false);
+  } finally {f.close();}
+});
 
 test('進入 Calendar 移轉先保存草稿，未改動任務不建立額外保存紀錄', async () => {
   const {app, store, close} = application();
@@ -368,13 +415,14 @@ test('側欄入口直接開啟月曆設定，設定分頁支援左右鍵與首�
     settings.initialTab = signal('calendar'); assert.equal(settings.activeTab(), 'calendar');
     let focused = '', prevented = 0;
     const key = name => settings.tabKeydown({key: name, preventDefault() { prevented++; }, currentTarget: {closest: () => ({querySelector: selector => ({focus() { focused = selector; }})})}});
+    key('ArrowRight'); assert.equal(settings.activeTab(), 'gmail'); assert.match(focused, /gmail/);
     key('ArrowRight'); assert.equal(settings.activeTab(), 'drive'); assert.match(focused, /drive/);
     settings.beginReset('all'); settings.confirmation = '重置整個 Orbit';
     key('End'); assert.equal(settings.activeTab(), 'reset');
     key('ArrowRight'); assert.equal(settings.activeTab(), 'appearance');
     key('ArrowLeft'); assert.equal(settings.activeTab(), 'reset');
     key('Home'); assert.equal(settings.activeTab(), 'appearance');
-    assert.equal(settings.confirmation, '重置整個 Orbit'); assert.equal(settings.resetMode(), 'all'); assert.equal(prevented, 5);
+    assert.equal(settings.confirmation, '重置整個 Orbit'); assert.equal(settings.resetMode(), 'all'); assert.equal(prevented, 6);
     app.openSettings(); assert.equal(app.settingsTab(), 'appearance');
   } finally { close(); }
 });

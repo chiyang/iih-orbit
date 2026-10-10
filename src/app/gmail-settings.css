@@ -1,0 +1,18 @@
+:host {display: block; color: var(--text); font-size: var(--font-11);}
+h3 {margin: 0 0 var(--sp8); font-size: var(--font-15);}
+p, li {line-height: 1.8; color: var(--text-muted);}
+.mail-client-field {display: grid; gap: var(--sp8); margin-top: var(--sp20);}
+input {width: 100%; min-width: 0; padding: var(--sp10) var(--sp12); border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font: inherit;}
+.mail-settings-actions {display: flex; flex-wrap: wrap; gap: var(--sp8); margin: var(--sp14) 0;}
+button {padding: var(--sp9) var(--sp12); border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font: inherit;}
+button:hover:not(:disabled) {background: var(--surface-hover);}
+button:disabled {opacity: .55; cursor: default;}
+.mail-account {display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp10); overflow-wrap: anywhere;}
+.mail-account strong {color: var(--text);}
+.mail-account span {color: var(--accent-text);}
+.mail-guide {margin-top: var(--sp22); padding-top: var(--sp16); border-top: 1px solid var(--border);}
+summary {cursor: pointer; line-height: 1.8;}
+ol {padding-left: var(--sp22);}
+a {color: var(--accent-text);}
+code {overflow-wrap: anywhere;}
+.mail-settings-error {color: var(--danger-text);}

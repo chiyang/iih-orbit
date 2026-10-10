@@ -1,53 +1,53 @@
 :host { display: flex; flex-direction: column; min-height: 0; }
 button { color: var(--text); }
-.reminder-center-tabs { display: flex; flex-shrink: 0; gap: 5px; padding: 12px 16px; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--header-bg); }
-.reminder-center-tabs button, .reminder-presets button { flex-shrink: 0; display: inline-flex; align-items: center; gap: 7px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: var(--font-11); }
+.reminder-center-tabs { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: var(--sp5); padding: var(--sp12); border-bottom: 1px solid var(--border); background: var(--header-bg); }
+.reminder-center-tabs button, .reminder-presets button { flex-shrink: 0; display: inline-flex; align-items: center; gap: var(--sp7); padding: var(--sp9) var(--sp12); border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: var(--font-11); }
 .reminder-center-tabs .selected, .reminder-presets .selected { background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-text); }
 .reminder-center-tabs small { font-variant-numeric: tabular-nums; font-size: var(--font-9); }
-.reminder-center-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px; scrollbar-width: thin; }
-.reminder-range { display: flex; align-items: start; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+.reminder-center-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp16); scrollbar-width: thin; }
+.reminder-range { display: flex; align-items: start; flex-wrap: wrap; gap: var(--sp12); margin-bottom: var(--sp18); }
 .reminder-range p { flex: 1; margin: 0; color: var(--text-muted); font-size: var(--font-11); line-height: 1.6; }
-.reminder-range button { display: inline-flex; align-items: center; gap: 5px; color: var(--accent-text); background: transparent; font-size: var(--font-10); padding: 2px; }
+.reminder-range button { display: inline-flex; align-items: center; gap: var(--sp5); color: var(--accent-text); background: transparent; font-size: var(--font-10); padding: var(--sp2); }
 .reminder-range app-icon, .reminder-presets app-icon { width: 14px; height: 14px; }
-.reminder-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-.reminder-items { display: flex; flex-direction: column; gap: 8px; }
-.reminder-item { display: flex; align-items: center; gap: 13px; width: 100%; padding: 14px; border: 1px solid var(--border); border-radius: 8px; text-align: left; background: var(--event-bg); border-left: 3px solid var(--event-line); }
+.reminder-presets { display: flex; flex-wrap: wrap; gap: var(--sp8); margin-bottom: var(--sp18); }
+.reminder-items { display: flex; flex-direction: column; gap: var(--sp8); }
+.reminder-item { display: flex; align-items: center; gap: var(--sp13); width: 100%; padding: var(--sp14); border: 1px solid var(--border); border-radius: 8px; text-align: left; background: var(--event-bg); border-left: 3px solid var(--event-line); }
 .reminder-item:hover { background: var(--surface-hover); border-color: var(--accent-border); }
 .reminder-source { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px; background: var(--event-line); color: var(--on-category); font-size: var(--font-11); font-weight: 700; }
 .google-source { border: 1px dashed var(--accent-border); }
-.reminder-item-content { display: grid; gap: 5px; min-width: 0; flex: 1; }
+.reminder-item-content { display: grid; gap: var(--sp5); min-width: 0; flex: 1; }
 .reminder-item-content strong { color: var(--text); font-size: var(--font-13); line-height: 1.5; overflow-wrap: anywhere; }
 .reminder-item-content > span { color: var(--text-muted); font-size: var(--font-11); }
 .reminder-item-content small { color: var(--text-muted); font-size: var(--font-9); overflow-wrap: anywhere; }
 .reminder-item > app-icon { width: 15px; height: 15px; color: var(--text-muted); }
-.reminder-empty { text-align: center; padding: 50px 16px; color: var(--text-muted); }
-.reminder-empty app-icon { width: 32px; height: 32px; display: flex; margin: 0 auto 15px; color: var(--accent-text); }
+.reminder-empty { text-align: center; padding: 50px var(--sp16); color: var(--text-muted); }
+.reminder-empty app-icon { width: 32px; height: 32px; display: flex; margin: 0 auto var(--sp15); color: var(--accent-text); }
 .reminder-empty strong { font-size: var(--font-13); }
 .reminder-empty p, .reminder-help, .reminder-warning { font-size: var(--font-10); color: var(--text-muted); line-height: 1.7; }
-.reminder-help { margin: 18px 0 8px; }
+.reminder-help { margin: var(--sp18) 0 var(--sp8); }
 .reminder-warning { color: var(--warning-text); }
-@media (max-width: 700px) {.reminder-center-tabs {padding: 12px;} .reminder-center-content {padding: 16px;}}
+@media (max-width: 700px) {.reminder-center-tabs {padding: var(--sp12);} .reminder-center-content {padding: var(--sp16);}}
 
-.reminder-list-filters {display: flex; flex-wrap: wrap; align-items: start; gap: 10px; margin-bottom: 12px;}
-.reminder-source-filters {display: flex; flex-wrap: wrap; gap: 6px;}
-.reminder-source-filters button {padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: var(--font-10);}
+.reminder-list-filters {display: flex; flex-wrap: wrap; align-items: start; gap: var(--sp10); margin-bottom: var(--sp12);}
+.reminder-source-filters {display: flex; flex-wrap: wrap; gap: var(--sp6);}
+.reminder-source-filters button {padding: var(--sp7) var(--sp10); border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: var(--font-10);}
 .reminder-source-filters .selected {background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-text);}
 .reminder-calendar-filter {flex: 1; min-width: 180px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: var(--font-10);}
-.reminder-calendar-filter summary {display: flex; align-items: center; gap: 7px; padding: 7px 10px; list-style: none; cursor: pointer; color: var(--text);}
+.reminder-calendar-filter summary {display: flex; align-items: center; gap: var(--sp7); padding: var(--sp7) var(--sp10); list-style: none; cursor: pointer; color: var(--text);}
 .reminder-calendar-filter summary::-webkit-details-marker {display: none;}
 .reminder-calendar-filter summary > span {flex: 1;}
 .reminder-calendar-filter summary app-icon {width: 13px; height: 13px; flex-shrink: 0;}
 .reminder-calendar-filter summary small {font-size: var(--font-9); color: var(--text-muted); font-variant-numeric: tabular-nums;}
 .reminder-calendar-filter[open] summary {border-bottom: 1px solid var(--border);}
 .reminder-calendar-filter[open] summary > app-icon:last-child {transform: rotate(180deg);}
-.calendar-filter-options {padding: 10px;}
-.calendar-filter-actions {display: flex; gap: 12px; margin-bottom: 10px;}
+.calendar-filter-options {padding: var(--sp10);}
+.calendar-filter-actions {display: flex; gap: var(--sp12); margin-bottom: var(--sp10);}
 .calendar-filter-actions button, .reminder-result-count button {background: transparent; color: var(--accent-text); font-size: var(--font-10); padding: 0;}
-.calendar-filter-options fieldset {display: grid; gap: 3px; max-height: 200px; overflow-y: auto; border: 0; padding: 0; margin: 0; scrollbar-width: thin;}
-.calendar-filter-options label {display: flex; align-items: center; gap: 7px; padding: 7px 0; cursor: pointer; color: var(--text);}
+.calendar-filter-options fieldset {display: grid; gap: var(--sp3); max-height: 200px; overflow-y: auto; border: 0; padding: 0; margin: 0; scrollbar-width: thin;}
+.calendar-filter-options label {display: flex; align-items: center; gap: var(--sp7); padding: var(--sp7) 0; cursor: pointer; color: var(--text);}
 .calendar-filter-options input {width: 15px; height: 15px; margin: 0; flex-shrink: 0; accent-color: var(--accent-strong);}
 .calendar-filter-options i {width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--event-line);}
 .calendar-filter-options label > span {flex: 1; min-width: 0; overflow-wrap: anywhere;}
 .calendar-filter-options small {color: var(--text-muted); font-size: var(--font-9); white-space: nowrap;}
-.calendar-filter-options p {margin: 8px 0 0; font-size: var(--font-9); color: var(--text-muted); line-height: 1.6;}
-.reminder-result-count {display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 12px; color: var(--text-muted); font-size: var(--font-10); line-height: 1.6;}
+.calendar-filter-options p {margin: var(--sp8) 0 0; font-size: var(--font-9); color: var(--text-muted); line-height: 1.6;}
+.reminder-result-count {display: flex; flex-wrap: wrap; gap: var(--sp10); margin: 0 0 var(--sp12); color: var(--text-muted); font-size: var(--font-10); line-height: 1.6;}

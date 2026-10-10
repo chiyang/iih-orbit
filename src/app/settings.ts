@@ -10,14 +10,16 @@ import { GoogleSettingsPanel } from './google-settings';
 import { DUE_DAY_PRESETS, START_LEAD_PRESETS } from './reminder-data';
 import type { ReminderPreferences } from './reminder-data';
 import { DrivePanel } from './drive-panel';
+import { GmailSettings } from './gmail-settings';
+import { GoogleConnection } from './google-connection';
 
-export type SettingsTab = 'appearance' | 'reminders' | 'calendar' | 'drive' | 'data' | 'reset';
+export type SettingsTab = 'appearance' | 'reminders' | 'google' | 'calendar' | 'gmail' | 'drive' | 'data' | 'reset';
 export const SETTINGS_TABS: {id: SettingsTab; label: string}[] = [
   {id: 'appearance', label: '外觀與閱讀'}, {id: 'reminders', label: '任務提醒'},
-  {id: 'calendar', label: 'Google 月曆'}, {id: 'drive', label: 'Google Drive'}, {id: 'data', label: '資料與備份'}, {id: 'reset', label: '資料重置'}
+  {id: 'google', label: 'Google 連線'}, {id: 'calendar', label: 'Google 月曆'}, {id: 'gmail', label: 'Gmail'}, {id: 'drive', label: 'Google Drive'}, {id: 'data', label: '資料與備份'}, {id: 'reset', label: '資料重置'}
 ];
 
-@Component({selector: 'app-settings', imports: [FormsModule, Icon, GoogleSettingsPanel, BackupPanel, DrivePanel], templateUrl: './settings.html', styleUrl: './settings.css'})
+@Component({selector: 'app-settings', imports: [FormsModule, Icon, GoogleSettingsPanel, BackupPanel, DrivePanel, GmailSettings, GoogleConnection], templateUrl: './settings.html', styleUrl: './settings.css'})
 export class Settings {
   readonly store = inject(BoardStore);
   readonly preferences = inject(UiPreferences);

@@ -3,19 +3,7 @@
     <div><h3 id="drive-title">Google Drive 備份</h3><p>先找回雲端已有的資料，再決定要使用哪一份。</p></div>
     <span class="state" role="status">{{ drive.status() }}</span>
   </div>
-  @if (drive.auth.connected()) {
-    <div class="connection-bar"><span class="account"><app-icon name="check" />{{ store.drive().email }}</span><button class="quiet" [disabled]="drive.busy() || importing() || saving() || removing()" (click)="drive.disconnect()">中斷連線</button></div>
-  } @else {
-    <div class="connect-prompt"><p>{{ store.google().clientId ? '連線後會自動讀取備份，也會顯示這台電腦之前使用的雲端資料。' : '第一次使用，請先完成下方的 Google 連線設定。' }}</p><button class="primary" [disabled]="!store.google().clientId || !drive.auth.ready() || drive.busy() || !drive.online()" (click)="drive.connect()">{{ drive.auth.preparing() ? '準備連線…' : drive.auth.authorizing() ? '等待 Google 授權…' : '連線 Google Drive' }}</button>@if (!drive.auth.ready() && !drive.auth.preparing()) {<button (click)="drive.prepare()">重新準備連線</button>}</div>
-  }
-  <details class="setup" [open]="!store.google().clientId">
-    <summary>{{ store.google().clientId ? 'Google 連線設定' : '首次連線設定' }}</summary>
-    <ol><li>使用自己的 Google 帳號，在 Google Cloud Console 啟用 <strong>Google Drive API</strong>。</li><li>申請「網頁應用程式」的 OAuth Client ID，在「已授權的 JavaScript 來源」加入 <code>https://chiyang.github.io</code>，不包含 /iih-orbit/ 路徑。月曆已設定時，可沿用自己申請的同一個 Client ID。</li><li>仍在測試中時，將使用的 Google 帳號加入測試使用者。</li><li>貼上 Client ID 並儲存，再按「連線 Google Drive」。本機測試時也需加入測試網址的來源。</li></ol>
-    <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener noreferrer">前往 Google 設定</a>
-    <label>Google Client ID<input type="text" autocomplete="off" [(ngModel)]="clientId" [disabled]="drive.busy() || importing() || saving()" placeholder="…apps.googleusercontent.com"></label>
-    <button [disabled]="drive.busy() || importing() || saving() || clientId.trim() === store.google().clientId" (click)="saveClientId()">儲存連線設定</button>
-    <p class="note">月曆與 Drive 共用這項設定。更換後需重新連線，月曆綁定會清除，自動儲存會暫停。不需要 Client Secret。</p>
-  </details>
+  <div class="connection-bar"><span class="account">{{ drive.auth.connected() ? store.drive().email : '尚未連線 Google Drive' }}</span><button class="quiet" [disabled]="drive.busy() || importing() || saving() || removing()" (click)="configure.emit()">{{ drive.auth.connected() ? '管理 Google 連線' : '前往 Google 連線' }}</button></div>
   @if (!drive.online()) {<p class="warning" role="status">目前離線。本機修改仍保留，恢復網路後再讀取或保存。</p>}
   @if (drive.auth.sessionWarning()) {<p class="warning">{{ drive.auth.sessionWarning() }}</p>}
   @if (drive.runtime().pending && !drive.unavailable()) {<div class="notice"><strong>還有一份資料等待上傳</strong><p>本機修改已保留。先完成這次上傳，再改用其他資料。</p><button [disabled]="drive.busy() || !drive.auth.connected() || !drive.online()" (click)="drive.retry()">重試上傳</button></div>}

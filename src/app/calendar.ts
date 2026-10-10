@@ -2,13 +2,14 @@ import { afterRenderEffect, Component, computed, DestroyRef, effect, ElementRef,
 import { BoardStatus, Category, COLUMNS, Task } from './models';
 import { Icon } from './icon';
 import { ThemeColor } from './theme-color';
-import { dateKey, monthDates, parseDate, taskDateRange, weekDates } from './task-schedule';
+import { dateKey, monthDates, parseDate, taskDateRange, validDate, weekDates } from './task-schedule';
 import { allDayRange, HOUR_HEIGHT, layoutAllDayTasks, minuteLabel, timedEventsOnDay } from './week-layout';
 import { UiPreferences } from './ui-preferences';
 import { GoogleCalendarService } from './google-calendar';
 import { ExternalEvent, externalOccursOn } from './google-data';
 import { CalendarPosition, moveCalendarTask, snapCalendarMinute } from './calendar-move';
 import type { TaskEditContext } from './board-store';
+import { GMAIL_MIME } from './gmail-data';
 
 export interface CalendarCreate {
   date: string;
@@ -28,6 +29,12 @@ export class Calendar {
   readonly categories = input.required<Category[]>();
   readonly statuses = input<BoardStatus[]>(COLUMNS);
   readonly mode = input.required<'month' | 'week'>();
+  readonly selectedDate = input<string>();
+  readonly savedScrollHour = input(7.75);
+  readonly dateChange = output<string>();
+  readonly scrollHourChange = output<number>();
+  readonly weekRequested = output<string>();
+  readonly monthRequested = output<string>();
   readonly showOrbit = input(true);
   readonly showGoogle = input(true);
   readonly deadlineFiltered = input(false);
@@ -37,7 +44,10 @@ export class Calendar {
   readonly editTask = output<Task>();
   readonly readExternal = output<ExternalEvent>();
   readonly createTask = output<CalendarCreate>();
+  readonly mailDragging = input(false);
+  readonly mailDrop = output<{event: DragEvent; position: CalendarPosition}>();
   readonly anchor = signal(new Date());
+  readonly hoveredMonthWeek = signal<number | null>(null);
   readonly expandedDays = signal(new Set<string>());
   readonly expandAll = signal(false);
   readonly monthPreviewLimit = 4;
@@ -64,7 +74,8 @@ export class Calendar {
   readonly days = computed(() => {
     const anchor = this.anchor();
     const dates = this.mode() === 'month' ? monthDates(anchor) : weekDates(anchor);
-    return dates.map(date => {
+    const selected = dateKey(anchor);
+    return dates.map((date, index) => {
       const key = dateKey(date);
       const timedEvents = timedEventsOnDay(this.combinedTasks(), key);
       const times = new Map(timedEvents.map(event => [event.task.id, event.startMinute]));
@@ -84,6 +95,8 @@ export class Calendar {
         number: date.getDate(),
         currentMonth: date.getMonth() === anchor.getMonth() && date.getFullYear() === anchor.getFullYear(),
         today: key === this.today(),
+        selected: key === selected,
+        weekIndex: Math.floor(index / 7),
         tasks,
         timedEvents,
         visibleTasks: this.mode() === 'week' || this.expandAll() || this.expandedDays().has(key) ? tasks : tasks.slice(0, this.monthPreviewLimit)
@@ -121,23 +134,30 @@ export class Calendar {
 
   constructor() {
     effect(() => {
+      const date = this.selectedDate(), parsed = date && validDate(date) ? parseDate(date) : null;
+      if (parsed) untracked(() => { if (dateKey(this.anchor()) !== date) this.anchor.set(parsed); });
+    });
+    effect(() => {
       const anchor = this.anchor();
-      untracked(() => this.google.setMonthRange(anchor));
+      untracked(() => { this.hoveredMonthWeek.set(null); this.google.setMonthRange(anchor); this.dateChange.emit(dateKey(anchor)); });
     });
     const timer = setInterval(() => this.now.set(new Date()), 60000);
     inject(DestroyRef).onDestroy(() => { clearInterval(timer); this.endDrag(); });
     effect(() => {
       const generation = this.google.store.generation(), workspace = this.google.store.currentWorkspace().id, mode = this.mode(), showOrbit = this.showOrbit();
-      untracked(() => { if (this.drag && (!showOrbit || this.drag.context.generation !== generation || this.drag.context.workspaceId !== workspace || this.drag.origin.kind === 'month' && mode !== 'month')) this.endDrag(); });
+      untracked(() => { this.hoveredMonthWeek.set(null); if (this.drag && (!showOrbit || this.drag.context.generation !== generation || this.drag.context.workspaceId !== workspace || this.drag.origin.kind === 'month' && mode !== 'month')) this.endDrag(); });
     });
+    effect(() => { const dragging = this.mailDragging(); untracked(() => { if (!dragging && !this.drag) this.endDrag(); }); });
     afterRenderEffect(() => {
       const anchor = this.anchor();
       const hourHeight = this.hourHeight();
       const scroller = this.weekScroller()?.nativeElement;
       if (scroller) {
         const samePeriod = this.previousScroller === scroller && this.previousAnchor === anchor;
-        scroller.scrollTop = (samePeriod ? this.scrollHour : 7.75) * hourHeight;
+        const initialHour = this.previousScroller === scroller ? 7.75 : untracked(() => this.savedScrollHour());
+        scroller.scrollTop = (samePeriod ? this.scrollHour : initialHour) * hourHeight;
         this.scrollHour = scroller.scrollTop / hourHeight;
+        untracked(() => this.scrollHourChange.emit(this.scrollHour));
       }
       this.previousScroller = scroller;
       this.previousAnchor = anchor;
@@ -149,6 +169,7 @@ export class Calendar {
     const scroller = this.weekScroller()?.nativeElement;
     if (scroller && this.hourHeight() === this.previousHourHeight) {
       this.scrollHour = scroller.scrollTop / this.previousHourHeight;
+      this.scrollHourChange.emit(this.scrollHour);
     }
   }
 
@@ -195,6 +216,21 @@ export class Calendar {
     this.expandedDays.set(new Set());
   }
 
+  openWeek(date: string): void {
+    if (this.mode() !== 'month' || this.drag || this.mailDragging() || this.savingMove() || Date.now() < this.ignoreClickUntil || !date || !validDate(date)) return;
+    this.weekRequested.emit(date);
+  }
+
+  openMonth(): void {
+    if (this.mode() !== 'week' || this.drag || this.mailDragging() || this.savingMove() || Date.now() < this.ignoreClickUntil) return;
+    this.monthRequested.emit(dateKey(this.anchor()));
+  }
+
+  openWeekFromDay(event: MouseEvent, date: string): void {
+    if (event.defaultPrevented || event.button !== 0 || (event.target as Element | null)?.closest?.('button, a, input, select, textarea, [role="button"]')) return;
+    this.openWeek(date);
+  }
+
   toggleDay(key: string): void {
     if (this.expandAll()) {
       this.expandedDays.set(new Set(this.days().filter(day => day.key !== key).map(day => day.key)));
@@ -233,6 +269,11 @@ export class Calendar {
     return {kind: 'time', day, minute: snapCalendarMinute((y - element.getBoundingClientRect().top) / this.hourHeight() * 60 - (this.drag?.pointerOffset ?? 0))};
   }
   dragOver(event: DragEvent, position: CalendarPosition): void {
+    if (this.mailDragging() && event.dataTransfer?.types.includes(GMAIL_MIME)) {
+      event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; this.dropPosition.set(position); this.pointer = {x: event.clientX, y: event.clientY};
+      if (!this.dragScrollTimer) this.dragScrollTimer = setInterval(() => this.scrollWhileDragging(), 60);
+      return;
+    }
     if (!this.drag) return;
     event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
     this.dropPosition.set(position); this.pointer = {x: event.clientX, y: event.clientY};
@@ -240,7 +281,7 @@ export class Calendar {
   timeDragOver(event: DragEvent, day: string): void {
     const element = event.currentTarget as HTMLElement;
     this.dragOver(event, this.timePosition(day, element, event.clientY));
-    if (this.drag) this.pointer = {x: event.clientX, y: event.clientY, timeDay: element};
+    if (this.drag || this.mailDragging()) this.pointer = {x: event.clientX, y: event.clientY, timeDay: element};
   }
   allDayDragOver(event: DragEvent): void {
     const day = this.allDayAt(event.currentTarget as HTMLElement, event.clientX);
@@ -252,6 +293,7 @@ export class Calendar {
     if (day) void this.drop(event, {kind: 'all-day', day});
   }
   async drop(event: DragEvent, target: CalendarPosition): Promise<void> {
+    if (this.mailDragging() && event.dataTransfer?.types.includes(GMAIL_MIME)) { this.mailDrop.emit({event, position: target}); this.endDrag(); this.ignoreClickUntil = Date.now() + 350; return; }
     const drag = this.drag;
     if (!drag || this.savingMove()) return;
     event.preventDefault(); event.stopPropagation(); this.endDrag(); this.savingMove.set(true);
@@ -276,7 +318,7 @@ export class Calendar {
   }
   private scrollWhileDragging(): void {
     const scroller = this.weekScroller()?.nativeElement, pointer = this.pointer;
-    if (!this.drag || !scroller || !pointer?.timeDay) return;
+    if ((!this.drag && !this.mailDragging()) || !scroller || !pointer?.timeDay) return;
     const rect = scroller.getBoundingClientRect();
     const headerHeight = scroller.querySelector<HTMLElement>('.week-sticky-head')?.getBoundingClientRect().height ?? 0;
     const vertical = pointer.y > rect.bottom - 45 ? 16 : pointer.y < rect.top + headerHeight + 35 ? -16 : 0;

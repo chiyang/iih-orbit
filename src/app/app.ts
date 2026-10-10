@@ -1,7 +1,7 @@
 import { A11yModule } from '@angular/cdk/a11y';
 import { CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup } from '@angular/cdk/drag-drop';
 import { CdkScrollable } from '@angular/cdk/scrolling';
-import { Component, computed, DestroyRef, HostListener, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, effect, HostListener, inject, Injector, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BoardStore, StoreResult, TaskEditContext } from './board-store';
 import { Calendar } from './calendar';
@@ -13,7 +13,7 @@ import { Settings } from './settings';
 import type { SettingsTab } from './settings';
 import { colorHex, validHex } from './appearance-data';
 import { BoardStatus, Category, CategoryColor, CATEGORY_COLORS, PRIORITIES, Priority, Project, StatusKind, Task, TaskScope, TaskStatus, Workspace } from './models';
-import { dateKey, isTaskOverdue, parseDate, scheduleError, SortDirection, SortKey, sortTasks } from './task-schedule';
+import { dateKey, isTaskOverdue, parseDate, scheduleError, SortDirection, SortKey, sortTasks, validDate } from './task-schedule';
 import { minuteLabel, timeMinutes } from './week-layout';
 import { UiPreferences } from './ui-preferences';
 import { boardStatusesForScope } from './workspace-data';
@@ -32,18 +32,85 @@ import type { TaskCellField } from './task-cell';
 import { WorkspaceTemplatePicker } from './workspace-template-picker';
 import type { WorkspaceTemplateId } from './workspace-templates';
 import { CalendarPublish } from './calendar-publish';
+import { GmailPanel } from './gmail-panel';
+import { MailTasks } from './mail-tasks';
+import type { MailPreview } from './gmail-data';
+import type { CalendarPosition } from './calendar-move';
+import { MailPreview as MailPreviewDialog } from './mail-preview';
+import { MarkdownEditor } from './markdown-editor';
+import { ScheduleTime } from './schedule-time';
+import { DatePickerTrigger, adjacentHour } from './schedule-controls';
+import { RichContent } from './rich-content';
+import { loadBrowseState, readBrowseState, saveBrowseState, type BrowseState } from './browse-state';
 
-type Modal = 'task' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | null;
+type Modal = 'task' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish],
+  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger],
   templateUrl: './app.html',
-  styleUrls: ['./app.css', './forms.css']
+  styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css']
 })
 export class App {
   readonly store = inject(BoardStore);
+  private readonly savedBrowse = loadBrowseState(this.store.generation(), this.store.currentWorkspace().id);
+  private browseContext = JSON.stringify([this.store.generation(), this.store.currentWorkspace().id]);
+  private browseGeneration = this.store.generation();
+  private readonly injector = inject(Injector);
+  get mailTasks(): MailTasks { return this.injector.get(MailTasks); }
+  readonly mailOpen = signal(this.savedBrowse.panel === 'gmail');
+  readonly panelOpen = computed(() => this.mailOpen() || this.remindersOpen());
+  readonly panelOverlay = signal(window.innerWidth <= 700);
+  readonly narrowPanelViewport = signal(window.innerWidth <= 1100);
+  readonly compactNavigation = computed(() => this.mobileViewport() || this.panelOpen() && this.narrowPanelViewport());
+  readonly panelWidth = signal(this.readPanelWidth());
+  private resizingPanel = false;
+  private readPanelWidth(): number { try { return Math.min(520, Math.max(300, Number(localStorage.getItem('orbit-side-panel-width-v1')) || 360)); } catch { return 360; } }
+  openMail(): void { if (!this.modal()) { this.sidebarOpen.set(false); this.remindersOpen.set(false); this.mailOpen.set(true); } }
+  toggleMail(): void { if (this.mailOpen()) this.closePanel(); else this.openMail(); }
+  closePanel(): void { this.mailOpen.set(false); this.remindersOpen.set(false); }
+  startPanelResize(event: PointerEvent): void { event.preventDefault(); this.resizingPanel = true; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); }
+  @HostListener('document:pointermove', ['$event'])
+  resizePanel(event: PointerEvent): void { if (this.resizingPanel) this.panelWidth.set(Math.min(520, Math.max(300, window.innerWidth - event.clientX))); }
+  @HostListener('document:pointerup')
+  @HostListener('document:pointercancel')
+  finishPanelResize(): void { if (!this.resizingPanel) return; this.resizingPanel = false; this.persistPanelWidth(); }
+  panelResizeKey(event: KeyboardEvent): void { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); this.panelWidth.set(Math.min(520, Math.max(300, this.panelWidth() + (event.key === 'ArrowLeft' ? 20 : -20)))); this.persistPanelWidth(); }
+  private persistPanelWidth(): void { try { localStorage.setItem('orbit-side-panel-width-v1', String(this.panelWidth())); } catch { /* Width still applies to the current tab. */ } }
+  async dropMail(event: DragEvent, status?: string, position?: CalendarPosition): Promise<void> {
+    if (this.modal()) return;
+    const initialStatus = status ?? this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id;
+    await this.mailTasks.drop(event, this.emptyTask(initialStatus), position ? {date: position.day, ...(position.kind === 'time' ? {time: minuteLabel(position.minute ?? 0)} : {})} : {});
+  }
+  openMailTask(mail: MailPreview): void {
+    if (this.modal()) return;
+    this.openTask();
+    try { this.draft = this.mailTasks.draft(mail, this.draft); }
+    catch (error) { this.formError.set(error instanceof Error ? error.message : '無法建立郵件任務。'); }
+  }
+  readonly mailPreview = signal<{mail: MailPreview; identity: string; email: string} | null>(null);
+  openMailPreview(mail: MailPreview): void {
+    if (this.modal() || this.mailTasks.dragging()) return;
+    const gmail = this.mailTasks.gmail;
+    if (!gmail.isListed(mail)) return;
+    this.mailPreview.set({mail: structuredClone(mail), identity: gmail.previewIdentity(), email: gmail.preferences().email});
+    this.modal.set('mail-preview');
+  }
+  createPreviewTask(mail: MailPreview): void {
+    const preview = this.mailPreview();
+    if (!preview || this.modal() !== 'mail-preview' || preview.identity !== this.mailTasks.gmail.previewIdentity() || mail.threadId !== preview.mail.threadId) return;
+    this.closeModal(); this.openTask(); this.draft = this.mailTasks.draft(mail, this.draft, preview);
+  }
+  openCreatedMailTask(): void {
+    if (this.modal()) return;
+    const context = this.mailTasks.undoContext();
+    if (!context?.original || context.generation !== this.store.generation()) return;
+    const task = this.store.workspaces().find(workspace => workspace.id === context.workspaceId)?.tasks.find(task => task.id === context.original!.id);
+    if (!task) return;
+    if (context.workspaceId !== this.store.currentWorkspace().id) this.store.switchWorkspace(context.workspaceId);
+    this.openTask(task.status, task);
+  }
   readonly calendarPublishing = signal(false);
   calendarPublished(warning = ''): void {
     const retained = this.store.tasks().some(task => task.id === this.draft.id);
@@ -60,10 +127,10 @@ export class App {
   readonly priorities = PRIORITIES;
   readonly listFields: TaskCellField[] = ['title', 'projectId', 'categoryId', 'status', 'priority', 'startDate', 'dueDate'];
   readonly colors = CATEGORY_COLORS;
-  readonly query = signal('');
-  readonly categoryFilter = signal('all');
-  readonly projectFilter = signal('all');
-  readonly progressExpanded = signal(false);
+  readonly query = signal(this.savedBrowse.query);
+  readonly categoryFilter = signal(this.validCategoryFilter(this.savedBrowse.category));
+  readonly projectFilter = signal(this.validProjectFilter(this.savedBrowse.project));
+  readonly progressExpanded = signal(this.savedBrowse.progressExpanded);
   readonly selectedProjectId = computed(() => {
     const id = this.projectFilter();
     return id === '' || this.store.projects().some(project => project.id === id) ? id : 'all';
@@ -77,21 +144,23 @@ export class App {
   readonly selectedPendingCount = computed(() => tasksForProject(this.store.tasks(), this.selectedProjectId()).filter(task => !this.store.isDone(task) && !this.store.isArchived(task)).length);
   readonly projectEditing = signal<Project | null>(null);
   readonly projectToDelete = signal<Project | null>(null);
-  readonly priorityFilter = signal('all');
-  readonly deadlineFilter = signal<DeadlineFilter>('all');
-  readonly deadlineDays = signal<number | null>(null);
+  readonly priorityFilter = signal(this.savedBrowse.priority);
+  readonly deadlineFilter = signal<DeadlineFilter>(this.savedBrowse.deadline);
+  readonly deadlineDays = signal<number | null>(this.savedBrowse.deadlineDays);
   readonly effectiveDeadlineDays = computed(() => this.deadlineDays() ?? this.store.reminders().dueSoonDays);
   readonly deadlineSelection = computed(() => this.deadlineFilter() === 'due-soon' && this.deadlineDays() !== null ? 'due-' + this.deadlineDays() : this.deadlineFilter());
-  readonly reminderTab = signal<ReminderTab>('today');
-  readonly remindersOpen = signal(false);
+  readonly reminderTab = signal<ReminderTab>(this.savedBrowse.reminderTab);
+  readonly remindersOpen = signal(this.savedBrowse.panel === 'reminders');
   readonly now = signal(new Date());
   readonly settingsTab = signal<SettingsTab>('appearance');
-  readonly scope = signal<TaskScope>('all');
-  readonly view = signal<'board' | 'list' | 'month' | 'week'>('board');
-  readonly calendarShowOrbit = signal(true);
-  readonly calendarShowGoogle = signal(true);
-  readonly sortKey = signal<SortKey | null>(null);
-  readonly sortDirection = signal<SortDirection>('asc');
+  readonly scope = signal<TaskScope>(this.savedBrowse.scope);
+  readonly view = signal<BrowseState['view']>(this.savedBrowse.view);
+  readonly calendarDate = signal(this.savedBrowse.calendarDate);
+  readonly calendarScrollHour = signal(this.savedBrowse.calendarScrollHour);
+  readonly calendarShowOrbit = signal(this.savedBrowse.showOrbit);
+  readonly calendarShowGoogle = signal(this.savedBrowse.showGoogle);
+  readonly sortKey = signal<SortKey | null>(this.savedBrowse.sort);
+  readonly sortDirection = signal<SortDirection>(this.savedBrowse.direction);
   readonly sortHeaders: {key: SortKey; label: string}[] = [
     {key: 'title', label: '任務名稱'},
     {key: 'project', label: '專案'},
@@ -105,6 +174,7 @@ export class App {
   readonly mobileViewport = signal(window.innerWidth <= 700);
   readonly modal = signal<Modal>(null);
   readonly editing = signal(false);
+  readonly descriptionFocused = signal(false);
   readonly formError = signal('');
   readonly categoryError = signal('');
   readonly categoryEditingId = signal('');
@@ -183,9 +253,51 @@ export class App {
   readonly deadlinePresets = computed(() => DUE_DAY_PRESETS.map(days => ({days, count: this.store.tasks().filter(task => deadlineState(task, this.now(), days, this.statuses()) === 'due-soon').length})));
 
   constructor() {
+    effect(() => {
+      const generation = this.store.generation(), workspace = this.store.currentWorkspace().id;
+      const context = JSON.stringify([generation, workspace]);
+      if (context !== this.browseContext) untracked(() => {
+        const sameGeneration = generation === this.browseGeneration;
+        const fallback = sameGeneration ? readBrowseState({view: this.view(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour()}) : undefined;
+        this.browseGeneration = generation;
+        this.browseContext = context;
+        this.restoreBrowse(loadBrowseState(generation, workspace, fallback), sameGeneration);
+      });
+      const state = this.browseSnapshot();
+      untracked(() => saveBrowseState(generation, workspace, state));
+    });
     const timer = setInterval(() => this.now.set(new Date()), 30000);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
   }
+
+  private validProjectFilter(id: string): string { return id === '' || id === 'all' || this.store.projects().some(project => project.id === id) ? id : 'all'; }
+  private validCategoryFilter(id: string): string { return id === '' || id === 'all' || this.store.categories().some(category => category.id === id) ? id : 'all'; }
+  private browseSnapshot(): BrowseState {
+    return {view: this.view(), scope: this.scope(), query: this.query(), project: this.projectFilter(), category: this.categoryFilter(), priority: this.priorityFilter(), deadline: this.deadlineFilter(), deadlineDays: this.deadlineDays(), sort: this.sortKey(), direction: this.sortDirection(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour(), showOrbit: this.calendarShowOrbit(), showGoogle: this.calendarShowGoogle(), progressExpanded: this.progressExpanded(), panel: this.mailOpen() ? 'gmail' : this.remindersOpen() ? 'reminders' : 'closed', reminderTab: this.reminderTab()};
+  }
+  private restoreBrowse(state: BrowseState, preserveSharedControls = false): void {
+    this.view.set(state.view); this.scope.set(state.scope); this.query.set(state.query);
+    this.projectFilter.set(this.validProjectFilter(state.project)); this.categoryFilter.set(this.validCategoryFilter(state.category));
+    this.priorityFilter.set(state.priority); this.deadlineFilter.set(state.deadline); this.deadlineDays.set(state.deadlineDays);
+    this.sortKey.set(state.sort); this.sortDirection.set(state.direction); this.progressExpanded.set(state.progressExpanded);
+    this.calendarDate.set(state.calendarDate); this.calendarScrollHour.set(state.calendarScrollHour);
+    if (!preserveSharedControls) {
+      this.calendarShowOrbit.set(state.showOrbit); this.calendarShowGoogle.set(state.showGoogle);
+      this.mailOpen.set(state.panel === 'gmail'); this.remindersOpen.set(state.panel === 'reminders'); this.reminderTab.set(state.reminderTab);
+    }
+  }
+  openCalendarWeek(date: string): void {
+    if (!date || !validDate(date)) return;
+    this.calendarDate.set(date); this.calendarScrollHour.set(7.75); this.view.set('week');
+  }
+
+  openCalendarMonth(date: string): void {
+    if (!date || !validDate(date)) return;
+    this.calendarDate.set(date); this.view.set('month');
+  }
+
+  @HostListener('window:pagehide')
+  rememberBrowse(): void { saveBrowseState(this.store.generation(), this.store.currentWorkspace().id, this.browseSnapshot()); }
 
   @HostListener('window:focus')
   updateNow(): void { this.now.set(new Date()); }
@@ -211,7 +323,7 @@ export class App {
   }
   openReminders(tab: ReminderTab = 'today'): void {
     if (this.modal()) return;
-    this.reminderTab.set(tab); this.sidebarOpen.set(false); this.remindersOpen.set(true);
+    this.reminderTab.set(tab); this.sidebarOpen.set(false); this.mailOpen.set(false); this.remindersOpen.set(true);
   }
   toggleReminders(): void {
     if (this.modal()) return;
@@ -240,14 +352,18 @@ export class App {
     else if (this.statusToDelete()) this.statusToDelete.set(null);
     else if (this.workspaceToDelete()) this.workspaceToDelete.set(null);
     else if (this.categoryToDelete()) this.categoryToDelete.set(null);
+    else if (this.modal() === 'task' && this.descriptionFocused()) this.descriptionFocused.set(false);
     else if (this.modal()) this.closeModal();
-    else if (this.remindersOpen()) this.remindersOpen.set(false);
+    else if (this.sidebarOpen()) this.sidebarOpen.set(false);
+    else if (this.panelOpen()) this.closePanel();
     else this.sidebarOpen.set(false);
   }
 
   @HostListener('window:resize')
   resize(): void {
     this.mobileViewport.set(window.innerWidth <= 700);
+    this.panelOverlay.set(window.innerWidth <= 700);
+    this.narrowPanelViewport.set(window.innerWidth <= 1100);
   }
 
   category(id: string): Category {
@@ -362,6 +478,7 @@ export class App {
     this.taskEditContext.set(this.store.taskContext(this.draft.id));
     if (!task && this.categoryFilter() !== 'all') this.draft.categoryId = this.categoryFilter();
     this.editing.set(!!task);
+    this.descriptionFocused.set(false);
     this.formError.set('');
     this.subtaskDraft = '';
     this.hasStartTime = !!this.draft.startTime;
@@ -461,12 +578,15 @@ export class App {
   }
 
   timeToggled(kind: 'start' | 'due', enabled: boolean): void {
+    const other = kind === 'start' ? adjacentHour(this.draft.dueDate, this.draft.dueTime, -1) : adjacentHour(this.draft.startDate, this.draft.startTime, 1);
     if (kind === 'start') {
       this.hasStartTime = enabled;
-      this.draft.startTime = enabled ? this.draft.startTime || '09:00' : '';
+      if (enabled && !this.draft.startTime && other && (!this.draft.startDate || this.draft.startDate === this.draft.dueDate)) this.draft.startDate = other.date;
+      this.draft.startTime = enabled ? this.draft.startTime || other?.time || '09:00' : '';
     } else {
       this.hasDueTime = enabled;
-      this.draft.dueTime = enabled ? this.draft.dueTime || '18:00' : '';
+      if (enabled && !this.draft.dueTime && other && (!this.draft.dueDate || this.draft.dueDate === this.draft.startDate)) this.draft.dueDate = other.date;
+      this.draft.dueTime = enabled ? this.draft.dueTime || other?.time || '18:00' : '';
     }
   }
 
@@ -808,6 +928,8 @@ export class App {
     if (this.calendarPublishing()) return;
     if (this.modal() === 'settings' && this.store.pendingWrites() > 0) return;
     this.modal.set(null);
+    this.descriptionFocused.set(false);
+    this.mailPreview.set(null);
     this.externalEntry.set(null);
     this.categoryToDelete.set(null);
     this.taskToDelete.set(null);

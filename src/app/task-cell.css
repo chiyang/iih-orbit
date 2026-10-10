@@ -1,7 +1,7 @@
 /* Use the available cell width so button padding and icons do not squeeze the text. */
 :host {display: block; min-width: 0;}
 button, input, select {font: inherit; color: var(--text);}
-.cell-value {display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 6px; margin: -5px -6px; background: transparent; text-align: left; border-radius: 5px; font-size: var(--font-11); line-height: 1.6;}
+.cell-value {display: inline-flex; align-items: center; gap: var(--sp5); max-width: 100%; padding: var(--sp5) var(--sp6); margin: calc(-1 * var(--sp5)) calc(-1 * var(--sp6)); background: transparent; text-align: left; border-radius: 5px; font-size: var(--font-11); line-height: 1.6;}
 .cell-value:hover {background: var(--surface-hover); box-shadow: 0 0 0 1px var(--border);}
 .cell-value > span {min-width: 0; overflow-wrap: anywhere;}
 .title-value {font-weight: 600; font-size: var(--font-12);}
@@ -12,16 +12,16 @@ button, input, select {font: inherit; color: var(--text);}
 .cell-value[data-priority] {white-space: nowrap;}
 .cell-value[data-priority='high'], .cell-value.overdue {color: var(--danger-text);}
 .cell-value[data-priority='low'] {color: var(--text-muted);}
-.cell-value small {font-size: var(--font-8); background: var(--overdue-bg); padding: 2px 4px; border-radius: 3px;}
-.cell-editor {width: 220px; max-width: 100%; min-width: 150px; display: grid; gap: 8px; font-size: var(--font-11);}
-.cell-editor > label {display: grid; gap: 5px; font-size: var(--font-10); color: var(--text-muted);}
-.cell-editor input:not([type='checkbox']), .cell-editor select {width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); padding: 7px;}
-.cell-editor .time-choice {display: flex; align-items: center; gap: 7px;}
+.cell-value small {font-size: var(--font-8); background: var(--overdue-bg); padding: var(--sp2) var(--sp4); border-radius: 3px;}
+.cell-editor {width: 220px; max-width: 100%; min-width: 150px; display: grid; gap: var(--sp8); font-size: var(--font-11);}
+.cell-editor > label {display: grid; gap: var(--sp5); font-size: var(--font-10); color: var(--text-muted);}
+.cell-editor input:not([type='checkbox']), .cell-editor select {width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); padding: var(--sp7);}
+.cell-editor .time-choice {display: flex; align-items: center; gap: var(--sp7);}
 .time-choice input {accent-color: var(--accent-strong); margin: 0;}
-.cell-actions {display: flex; gap: 6px;}
-.cell-actions button, .cell-error button {padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); font-size: var(--font-10);}
+.cell-actions {display: flex; gap: var(--sp6);}
+.cell-actions button, .cell-error button {padding: var(--sp5) var(--sp8); border: 1px solid var(--border); border-radius: 5px; background: var(--surface); font-size: var(--font-10);}
 .cell-actions button:first-child {background: var(--accent-strong); color: var(--on-accent); border-color: var(--accent-strong);}
-.cell-status {border: 1px solid var(--category-color); border-radius: 5px; padding: 6px 8px; background: var(--category-bg); color: var(--category-text); font-size: var(--font-11); max-width: 150px;}
+.cell-status {border: 1px solid var(--category-color); border-radius: 5px; padding: var(--sp6) var(--sp8); background: var(--category-bg); color: var(--category-text); font-size: var(--font-11); max-width: 150px;}
 .cell-error {max-width: 230px; white-space: normal; color: var(--danger-text); font-size: var(--font-10); line-height: 1.6;}
-.cell-error button {margin: 5px 4px 0 0;}
+.cell-error button {margin: var(--sp5) var(--sp4) 0 0;}
 button:disabled, input:disabled, select:disabled {opacity: .55; cursor: default;}

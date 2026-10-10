@@ -7,6 +7,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { COLUMNS } from '../src/app/models.ts';
+import { JSDOM } from 'jsdom';
 import { externalEvent } from '../src/app/google-data.ts';
 import { copyEventTask, createEventBody } from '../src/app/calendar-transfer-data.ts';
 
@@ -47,6 +48,66 @@ function googleEntry(id, start, end, title = id) {
   const source = {id: 'source', accountId: 'account', calendarId: 'calendar', name: '行事曆', color: '#4385d8', visible: true, workspaceIds: ['workspace']};
   return externalEvent(source, {id, summary: title, start, end});
 }
+
+test('月週視圖往返保留選中日，跨年週導覽後返回正確月份', () => {
+  const f = calendarController();
+  try {
+    let selected = '';
+    f.calendar.weekRequested.subscribe(date => {selected = date;});
+    f.calendar.openWeek('2026-12-31'); assert.equal(selected, '2026-12-31');
+    f.calendar.openWeek('invalid'); assert.equal(selected, '2026-12-31');
+    f.calendar.selectedDate = signal('2026-12-31'); f.calendar.mode.set('week'); f.flush();
+    assert.equal(f.calendar.days()[0].key, '2026-12-27'); assert.equal(f.calendar.days()[6].key, '2027-01-02');
+    assert.deepEqual(f.calendar.weekDays().filter(day => day.selected).map(day => day.key), ['2026-12-31']);
+    f.calendar.navigate(1); f.flush(); assert.equal(f.calendar.days()[0].key, '2027-01-03');
+    assert.deepEqual(f.calendar.weekDays().filter(day => day.selected).map(day => day.key), ['2027-01-07']);
+    let monthDate = '';
+    f.calendar.monthRequested.subscribe(date => {monthDate = date;});
+    f.calendar.openMonth(); assert.equal(monthDate, '2027-01-07');
+    f.calendar.selectedDate.set(monthDate); f.calendar.mode.set('month'); f.flush();
+    assert.equal(f.calendar.periodTitle(), '2027 年 1 月');
+    assert.deepEqual(f.calendar.days().filter(day => day.selected).map(day => day.key), ['2027-01-07']);
+  } finally {f.close();}
+});
+
+test('月曆空白與日期開啟該週，任務、Google 活動、＋及展開按鈕不會連帶切換', () => {
+  const external = googleEntry('google-event', {dateTime: '2026-10-09T09:00:00'}, {dateTime: '2026-10-09T10:00:00'}), f = calendarController([base], [external]);
+  const dom = new JSDOM('<section><div class="heading"><button id="date">9</button><span id="label">今天</span><button id="add"><svg><path></path></svg></button></div><div id="blank"><button id="task"><span>任務</span></button><button id="external"><span>Google 活動</span></button><button id="more"><span>更多</span></button></div></section>');
+  const document = dom.window.document, selected = [], edits = [], reads = [], creates = [], date = '2026-10-09';
+  try {
+    f.calendar.weekRequested.subscribe(value => selected.push(value)); f.calendar.editTask.subscribe(value => edits.push(value.id)); f.calendar.readExternal.subscribe(value => reads.push(value.task.id)); f.calendar.createTask.subscribe(value => creates.push(value));
+    document.querySelector('section').addEventListener('click', event => f.calendar.openWeekFromDay(event, date));
+    document.querySelector('#date').addEventListener('click', () => f.calendar.openWeek(date));
+    document.querySelector('#add').addEventListener('click', () => f.calendar.createAt(date));
+    document.querySelector('#task').addEventListener('click', () => f.calendar.openEntry(base));
+    document.querySelector('#external').addEventListener('click', () => f.calendar.openEntry(external.task));
+    document.querySelector('#more').addEventListener('click', () => f.calendar.toggleDay(date));
+    const click = (selector, options = {}) => document.querySelector(selector).dispatchEvent(new dom.window.MouseEvent('click', {bubbles: true, cancelable: true, ...options}));
+    click('#task span'); click('#external span'); click('#add path'); click('#more span');
+    assert.deepEqual(edits, [base.id]); assert.deepEqual(reads, [external.task.id]); assert.deepEqual(creates, [{date}]); assert.equal(f.calendar.dayExpanded(date), true); assert.deepEqual(selected, []);
+    click('#blank'); click('#label'); click('#date'); assert.deepEqual(selected, [date, date, date]);
+    click('#blank', {button: 2}); assert.equal(selected.length, 3);
+    const prevented = new dom.window.MouseEvent('click', {bubbles: true, cancelable: true}); prevented.preventDefault(); document.querySelector('#blank').dispatchEvent(prevented); assert.equal(selected.length, 3);
+  } finally {dom.window.close(); f.close();}
+});
+test('月視圖各列對應完整一週，換月份清除懸停；拖曳中及結束後避免誤開週視圖', () => {
+  const f = calendarController(); let switches = 0;
+  try {
+    f.flush();
+    const days = f.calendar.days();
+    for (let index = 0; index < days.length / 7; index++) {
+      const row = days.filter(day => day.weekIndex === index); assert.equal(row.length, 7); assert.equal(row[0].date.getDay(), 0); assert.equal(row[6].date.getDay(), 6);
+    }
+    f.calendar.hoveredMonthWeek.set(1); f.calendar.navigate(1); f.flush(); assert.equal(f.calendar.hoveredMonthWeek(), null);
+    f.calendar.weekRequested.subscribe(() => switches++);
+    f.calendar.startDrag(dragEvent(), base, {kind: 'month', day: base.startDate}); f.calendar.openWeek(base.startDate); assert.equal(switches, 0);
+    f.calendar.endDrag(); f.calendar.openWeek(base.startDate); assert.equal(switches, 0);
+    f.calendar.ignoreClickUntil = 0; f.calendar.mailDragging = signal(true); f.calendar.openWeek(base.startDate); assert.equal(switches, 0);
+    f.calendar.mailDragging.set(false); f.calendar.savingMove.set(true); f.calendar.openWeek(base.startDate); assert.equal(switches, 0);
+    f.calendar.savingMove.set(false); f.calendar.openWeek(base.startDate); assert.equal(switches, 1);
+    f.calendar.mode.set('week'); f.calendar.openWeek(base.startDate); assert.equal(switches, 1);
+  } finally {f.close();}
+});
 
 test('月／週視圖相同內容也保留 Google 與 Orbit 各自的卡片，切換顯示來源不隱藏另一邊', () => {
   const source = {id: 'source', accountId: 'account', calendarId: 'calendar', name: '月曆', color: '#759acb', visible: true, workspaceIds: ['workspace']};

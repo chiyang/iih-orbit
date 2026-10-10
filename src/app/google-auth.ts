@@ -1,7 +1,7 @@
 import { DOCUMENT } from '@angular/common';
 import { inject, Injectable, OnDestroy, signal } from '@angular/core';
 import { CALENDAR_SCOPE } from './google-data';
-import { GoogleHttpError } from './google-api';
+import { GoogleHttpError, readGoogleHttpError } from './google-api';
 import { GOOGLE_SESSION_KEY, GoogleSession, GoogleSessionBridge, GoogleSessionContext, SessionChannel, SessionOptions } from './google-session';
 
 interface TokenResponse {access_token?: string; expires_in?: number; error?: string; scope?: string}
@@ -14,6 +14,7 @@ export interface GoogleAccount {id: string; email: string}
 @Injectable({providedIn: 'root'})
 export class GoogleAuth implements OnDestroy {
   protected get sessionOptions(): SessionOptions { return {scope: CALENDAR_SCOPE, storageKey: GOOGLE_SESSION_KEY, controlPrefix: 'iih-orbit-google-session-control-v1:'}; }
+  protected get sessionPersistence(): 'tab' | 'browser' { return 'tab'; }
   protected get sessionChannel(): string { return 'iih-orbit-google-session'; }
   protected get permissionMessage(): string { return '尚未取得月曆讀取權限，請重新連線並允許讀取月曆。'; }
   protected get networkMessage(): string { return '網路中斷或 Google 讀取逾時，已保留原有月曆資料。'; }
@@ -46,8 +47,18 @@ export class GoogleAuth implements OnDestroy {
 
   constructor() {
     const window = this.document.defaultView as (Window & {BroadcastChannel?: typeof BroadcastChannel}) | null;
-    let storage: Storage | undefined, control: Storage | undefined, channel: SessionChannel | undefined;
-    try { storage = window?.sessionStorage; control = window?.localStorage; }
+    let storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined, control: Storage | undefined, channel: SessionChannel | undefined;
+    try {
+      control = window?.localStorage;
+      if (this.sessionPersistence === 'browser' && control) {
+        const browserStorage = control;
+        storage = {
+          getItem: key => { const saved = browserStorage.getItem(key); if (saved) return saved; try { return window?.sessionStorage.getItem(key) ?? null; } catch { return null; } },
+          setItem: (key, value) => { browserStorage.setItem(key, value); try { window?.sessionStorage.removeItem(key); } catch { /* Validated browser storage remains available. */ } },
+          removeItem: key => { browserStorage.removeItem(key); try { window?.sessionStorage.removeItem(key); } catch { /* The invalidation nonce also rejects old tab copies. */ } }
+        };
+      } else storage = window?.sessionStorage;
+    }
     catch { this.sessionWarning.set('瀏覽器不允許保存 Google 連線，重新整理後需重新連線。'); }
     try { if (window?.BroadcastChannel) channel = new window.BroadcastChannel(this.sessionChannel); }
     catch { this.sessionWarning.set('瀏覽器無法接續其他分頁的 Google 連線，仍可在此分頁連線。'); }
@@ -176,23 +187,28 @@ export class GoogleAuth implements OnDestroy {
     if (Date.now() >= this.expiresAt) { this.disconnect('Google 授權已到期，請重新連線。'); throw new GoogleHttpError(401); }
     const epoch = this.epoch;
     const controller = new AbortController();
+    const cancel = () => controller.abort();
+    if (options.signal?.aborted) throw new DOMException('Google 讀取已取消。', 'AbortError');
+    options.signal?.addEventListener('abort', cancel, {once: true});
     this.controllers.add(controller);
     const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
     try {
       const headers = new Headers(options.headers); headers.delete('Authorization');
       const response = await fetch(url, {...options, method: options.method ?? 'GET', headers: {...Object.fromEntries(headers), Authorization: 'Bearer ' + this.token}, signal: controller.signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer'});
       if (!response.ok) {
+        const error = await readGoogleHttpError(response, this.resourceName);
         if (response.status === 401 && epoch === this.epoch && !controller.signal.aborted) this.disconnect('Google 授權已到期，請重新連線。');
-        throw new GoogleHttpError(response.status, this.resourceName);
+        throw error;
       }
       if (epoch !== this.epoch || controller.signal.aborted) throw new Error('Google 連線已變更，已取消這次操作。');
       const value = await consume(response);
       if (epoch !== this.epoch || controller.signal.aborted) throw new Error('Google 連線已變更，已取消這次操作。');
       return value;
     } catch (error) {
+      if (options.signal?.aborted) throw options.signal.reason instanceof Error ? options.signal.reason : new DOMException('Google 讀取已取消。', 'AbortError');
       if (error instanceof GoogleHttpError) throw error;
       throw new Error(this.networkMessage);
-    } finally { clearTimeout(timer); this.controllers.delete(controller); }
+    } finally { clearTimeout(timer); this.controllers.delete(controller); options.signal?.removeEventListener('abort', cancel); }
   }
 
   disconnect(message = '尚未連線 Google'): void {

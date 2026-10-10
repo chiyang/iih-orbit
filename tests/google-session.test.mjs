@@ -20,7 +20,7 @@ function messaging() {
   };
 }
 const settle = async () => { for (let tick = 0; tick < 4; tick++) await new Promise(resolve => setImmediate(resolve)); };
-function tab(local, bus, sessionStorage = storage()) {
+function tab(local, bus, sessionStorage = storage(), options) {
   let current, pending = '', busy = false, warning = '', message = '';
   const channel = bus?.channel();
   const bridge = new GoogleSessionBridge(sessionStorage, local, channel, {
@@ -28,7 +28,7 @@ function tab(local, bus, sessionStorage = storage()) {
     receive: (session, shared) => { current = session; message = shared ? 'shared' : 'restored'; },
     clear: text => { current = undefined; pending = ''; busy = false; message = text; },
     warning: text => { warning = text; }
-  });
+  }, options);
   return {
     bridge, channel, storage: sessionStorage, current: () => current, message: () => message, warning: () => warning,
     login() {
@@ -151,4 +151,15 @@ test('瀏覽器阻擋保存時提示，不能把憑證改存 localStorage 或從
   second.bridge.activate(context);
   assert.equal(second.current(), undefined);
   second.bridge.close();
+});
+
+test('共用瀏覽器憑證的舊分頁取消或解除，不得刪除新版授權；重新開頁保留原期限', () => {
+  const local = storage(), options = {scope: CALENDAR_SCOPE, storageKey: GOOGLE_SESSION_KEY, controlPrefix: 'shared-control:', sharedStorage: true};
+  const first = tab(local, undefined, local, options), second = tab(local, undefined, local, options);
+  first.bridge.activate(context); first.login(); second.bridge.activate(context); const latest = second.login();
+  first.disconnect(); assert.equal(JSON.parse(local.getItem(GOOGLE_SESSION_KEY)).id, latest.id);
+  const reopened = tab(local, undefined, local, options); reopened.bridge.activate(context);
+  assert.equal(reopened.current().id, latest.id); assert.equal(reopened.current().expiresAt, latest.expiresAt);
+  second.disconnect(); assert.equal(local.getItem(GOOGLE_SESSION_KEY), null);
+  first.bridge.close(); second.bridge.close(); reopened.bridge.close();
 });

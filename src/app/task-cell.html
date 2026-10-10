@@ -11,7 +11,7 @@
     @else if (dateField()) {
       <label>{{ label() }}<input name="value" type="date" [attr.aria-label]="label()" [(ngModel)]="value" [disabled]="busy()" appCellFocus></label>
       <label class="time-choice"><input name="includeTime" type="checkbox" [ngModel]="includeTime" (ngModelChange)="toggleTime($event)" [disabled]="busy() || !value">加入時間</label>
-      @if (includeTime && value) {<input name="time" type="time" [attr.aria-label]="label() + '的時間'" [(ngModel)]="time" [disabled]="busy()">}
+      @if (includeTime && value) {<app-schedule-time [label]="label() + '的時間'" [value]="time" (valueChange)="time = $event" [disabled]="busy()" />}
     } @else {
       <select name="value" [attr.aria-label]="label()" [(ngModel)]="value" [disabled]="busy()" appCellFocus>
         @switch (field()) {

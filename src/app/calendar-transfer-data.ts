@@ -40,7 +40,9 @@ export function taskFingerprint(task: Task): string {
 }
 export function formatCalendarDescription(task: Task, metadata: CalendarMetadata): string {
   if (task.description.includes(HEADER) || task.description.includes(FOOTER)) throw new Error('任務描述已含有 Orbit 子任務格式標記，請先調整描述再移轉。');
-  const lines = [task.description, '', HEADER, '專案：' + encodeLine(metadata.project), '分類：' + encodeLine(metadata.category), '狀態：' + encodeLine(metadata.status), '優先順序：' + priorityLabels[metadata.priority], '子任務：', ...task.subtasks.map(item => `[${item.done ? 'x' : ' '}] ${encodeLine(item.title)}`), FOOTER];
+  // Calendar accepts HTML; Markdown angle destinations can otherwise be mistaken for tags.
+  const description = task.description.replace(/\[([^\]\n]+)\]\(<(https?:\/\/[^<>\s]+)>\)/g, (_, label: string, url: string) => label + '：' + url);
+  const lines = [description, '', HEADER, '專案：' + encodeLine(metadata.project), '分類：' + encodeLine(metadata.category), '狀態：' + encodeLine(metadata.status), '優先順序：' + priorityLabels[metadata.priority], '子任務：', ...task.subtasks.map(item => `[${item.done ? 'x' : ' '}] ${encodeLine(item.title)}`), FOOTER];
   const result = lines.join('\n');
   if (result.length > 19000) throw new Error('描述與子任務過長，請縮短內容後再移轉；本機任務仍保留。');
   return result;

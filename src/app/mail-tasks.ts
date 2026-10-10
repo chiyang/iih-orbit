@@ -1,0 +1,68 @@
+import { effect, inject, Injectable, signal, untracked } from '@angular/core';
+import { BoardStore, TaskEditContext } from './board-store';
+import { GmailService } from './gmail-service';
+import { GMAIL_MIME, MailPreview, MailSchedule, mailTask } from './gmail-data';
+import type { Task } from './models';
+
+interface MailDrag {token: string; mail: MailPreview; email: string; accountId: string; workspaceId: string; generation: string}
+@Injectable({providedIn: 'root'})
+export class MailTasks {
+  readonly store = inject(BoardStore);
+  readonly gmail = inject(GmailService);
+  readonly dragging = signal(false);
+  readonly busy = signal(false);
+  readonly notice = signal('');
+  readonly undoContext = signal<TaskEditContext | null>(null);
+  private drag?: MailDrag;
+  constructor() {
+    effect(() => {
+      const generation = this.store.generation(), workspace = this.store.currentWorkspace().id, account = this.gmail.preferences().accountId;
+      untracked(() => { if (this.drag && (this.drag.generation !== generation || this.drag.workspaceId !== workspace || this.drag.accountId !== account)) this.end(); });
+    });
+  }
+  start(event: DragEvent, mail: MailPreview): void {
+    if (!event.dataTransfer || this.busy() || !this.gmail.preferences().accountId || !this.gmail.isListed(mail)) { event.preventDefault(); return; }
+    const preferences = this.gmail.preferences();
+    this.drag = {token: crypto.randomUUID(), mail: structuredClone(mail), email: preferences.email, accountId: preferences.accountId, workspaceId: this.store.currentWorkspace().id, generation: this.store.generation()};
+    event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData(GMAIL_MIME, this.drag.token); this.dragging.set(true);
+  }
+  end(): void { this.drag = undefined; this.dragging.set(false); }
+  accepts(event: DragEvent): boolean {
+    return !!this.drag && !this.busy() && !!event.dataTransfer?.types.includes(GMAIL_MIME) && this.drag.generation === this.store.generation() && this.drag.workspaceId === this.store.currentWorkspace().id && this.drag.accountId === this.gmail.preferences().accountId;
+  }
+  over(event: DragEvent): boolean {
+    if (!this.accepts(event)) return false;
+    event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; return true;
+  }
+  async drop(event: DragEvent, base: Task, schedule: MailSchedule = {}): Promise<void> {
+    if (!this.accepts(event) || event.dataTransfer?.getData(GMAIL_MIME) !== this.drag?.token) return;
+    event.preventDefault(); event.stopPropagation(); const drag = this.drag!; this.end();
+    await this.create(drag.mail, drag.email, base, schedule, {workspaceId: drag.workspaceId, generation: drag.generation, original: null});
+  }
+  draft(mail: MailPreview, base: Task, source?: {identity: string; email: string}): Task {
+    if (source) {
+      if (source.identity !== this.gmail.previewIdentity() || source.email !== this.gmail.preferences().email) throw new Error('Gmail 帳號已變更，請重新選擇郵件。');
+    } else if (!this.gmail.isListed(mail)) throw new Error('郵件列表已更新，請重新選擇。');
+    return mailTask(mail, source?.email ?? this.gmail.preferences().email, base);
+  }
+  private async create(mail: MailPreview, email: string, base: Task, schedule: MailSchedule, context: TaskEditContext): Promise<void> {
+    if (this.busy()) return; this.busy.set(true); this.undoContext.set(null); this.notice.set('');
+    try {
+      const task = mailTask(mail, email, base, schedule), result = await this.store.saveTask(task, context);
+      if (!result.ok) { this.notice.set(result.message); return; }
+      this.undoContext.set({...context, original: structuredClone(task)});
+      this.notice.set(result.persisted ? `已建立「${task.title}」${schedule.time ? '，時段為一小時' : schedule.date ? '，已安排全天' : ''}。` : '任務只暫存在此分頁，請匯出備份。');
+    } catch (error) { this.notice.set(error instanceof Error ? error.message : '未能建立任務，請重試。'); }
+    finally { this.busy.set(false); }
+  }
+  async undo(): Promise<void> {
+    const context = this.undoContext(); if (!context?.original || this.busy()) return;
+    this.busy.set(true);
+    try {
+      const result = await this.store.deleteTask(context.original.id, context);
+      if (result.ok) { this.undoContext.set(null); this.notice.set(result.persisted ? '已撤銷這次建立，原信仍保留。' : '已撤銷這次建立，變更只暫存在此分頁。'); }
+      else { this.undoContext.set(null); this.notice.set(result.message); }
+    } finally { this.busy.set(false); }
+  }
+  dismiss(): void { this.notice.set(''); this.undoContext.set(null); }
+}
