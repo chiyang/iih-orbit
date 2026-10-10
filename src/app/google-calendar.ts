@@ -7,6 +7,7 @@ import { cacheKey, calendarMonthRange, calendarRange, CalendarRange, CalendarSou
 import { dateKey } from './task-schedule';
 import { CALENDAR_SYNC_PREFIX, CalendarSyncCoordinator, CalendarSyncTimeoutError } from './calendar-sync';
 import { withStorageLock } from './storage-coordinator';
+import { CalendarListCache, calendarListScope, CALENDAR_LIST_TTL } from './calendar-list-cache';
 
 @Injectable({providedIn: 'root'})
 export class GoogleCalendarService implements OnDestroy {
@@ -16,6 +17,9 @@ export class GoogleCalendarService implements OnDestroy {
   private readonly api = new CalendarApi((path, parameters) => this.auth.request(path, parameters));
   readonly available = signal<AvailableCalendar[]>([]);
   readonly listing = signal(false);
+  private readonly listCache = new CalendarListCache();
+  private availableScope = '';
+  private calendarListing?: {scope: string; connection: number; promise: Promise<void>};
   readonly error = signal('');
   readonly cacheWarning = signal('');
   readonly loading = signal(new Set<string>());
@@ -114,6 +118,7 @@ export class GoogleCalendarService implements OnDestroy {
   private async configure(): Promise<void> {
     if (this.destroyed || this.suspended) return;
     const epoch = ++this.epoch;
+    this.useCalendarList();
     this.attempts.clear();
     const identity = JSON.stringify([this.store.generation(), this.store.google().clientId]);
     const replaced = this.identity && this.identity !== identity;
@@ -153,26 +158,43 @@ export class GoogleCalendarService implements OnDestroy {
       const result = await this.store.updateGoogle({accountId: account.id, email: account.email});
       if (!result.ok) { this.auth.disconnect(); throw new Error(result.message); }
       this.auth.useSession({generation: this.store.generation(), clientId: this.store.google().clientId, accountId: account.id});
-      await this.listCalendars();
+      await this.listCalendars(false);
       await this.refresh(true);
     } catch (error) { this.error.set(this.message(error)); }
     finally { this.connecting = false; }
   }
 
-  async listCalendars(): Promise<void> {
-    if (!this.auth.connected()) return;
+  private useCalendarList(): ReturnType<CalendarListCache['read']> {
+    const scope = calendarListScope(this.store.generation(), this.store.google());
+    const cached = this.listCache.read(scope);
+    if (this.availableScope !== scope) { this.availableScope = scope; this.available.set(cached?.calendars ?? []); }
+    else if (!this.available().length && cached) this.available.set(cached.calendars);
+    return cached;
+  }
+  listCalendars(force = true): Promise<void> {
+    const cached = this.useCalendarList(), scope = this.availableScope;
+    if (!this.auth.connected() || this.auth.account()?.id !== this.store.google().accountId) return Promise.resolve();
+    const connection = this.auth.connectionVersion();
+    if (this.calendarListing?.scope === scope && this.calendarListing.connection === connection) return this.calendarListing.promise;
+    if (!force && cached && Date.now() - cached.updatedAt < CALENDAR_LIST_TTL) { this.error.set(''); return Promise.resolve(); }
     this.listing.set(true); this.error.set('');
-    const account = this.auth.account()!.id, generation = this.store.generation(), clientId = this.store.google().clientId;
-    try {
-      const calendars = await this.api.calendars();
-      if (this.auth.account()?.id !== account || generation !== this.store.generation() || clientId !== this.store.google().clientId) return;
-      this.available.set(calendars);
-      for (const source of this.sources()) {
-        const calendar = calendars.find(item => item.id === source.calendarId);
-        if (calendar && source.name !== calendar.name) await this.store.updateCalendarSource(source.id, {name: calendar.name});
-      }
-    } catch (error) { this.error.set(this.message(error)); }
-    finally { this.listing.set(false); }
+    const run = {scope, connection, promise: Promise.resolve()};
+    const current = () => !this.destroyed && !this.suspended && scope === calendarListScope(this.store.generation(), this.store.google()) && this.auth.connected() && connection === this.auth.connectionVersion() && this.auth.account()?.id === this.store.google().accountId;
+    run.promise = (async () => {
+      try {
+        const calendars = await this.api.calendars();
+        if (!current()) return;
+        this.availableScope = scope; this.available.set(calendars); this.listCache.write(scope, calendars);
+        for (const source of this.sources()) {
+          if (!current()) return;
+          const calendar = calendars.find(item => item.id === source.calendarId);
+          if (calendar && source.name !== calendar.name) await this.store.updateCalendarSource(source.id, {name: calendar.name});
+        }
+      } catch (error) { if (current()) this.error.set(this.available().length ? '月曆清單更新失敗，仍可使用已保存的清單。' + this.message(error) : this.message(error)); }
+      finally { if (this.calendarListing === run) { this.calendarListing = undefined; this.listing.set(false); } }
+    })();
+    this.calendarListing = run;
+    return run.promise;
   }
 
   async bind(calendar: AvailableCalendar, workspaceId: string, enabled: boolean): Promise<void> {

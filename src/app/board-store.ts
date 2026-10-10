@@ -1,5 +1,6 @@
 import { computed, Injectable, OnDestroy, signal } from '@angular/core';
-import { BoardState, BoardStatus, Category, Project, Task, TaskStatus, WorkspaceState } from './models';
+import { BoardState, BoardStatus, CalendarTransfer, Category, Project, Task, TaskStatus, WorkspaceState } from './models';
+import { originKey, taskFingerprint } from './calendar-transfer-data';
 import { readBoardState } from './board-data';
 import { createInitialState } from './seed';
 import { createWorkspaceState, emptyWorkspace, readWorkspaceState, removeBoardStatus, statusKind } from './workspace-data';
@@ -97,6 +98,42 @@ export class BoardStore implements OnDestroy {
       if (JSON.stringify(task) !== JSON.stringify(context.original)) throw new Error('這個任務已更新，請重新查看後再刪除。');
       return {...board, tasks: board.tasks.filter(task => task.id !== id)};
     }, context.workspaceId, context.generation);
+  }
+
+  prepareCalendarTransfer(transfer: CalendarTransfer, context: TaskEditContext, clientId: string): Promise<StoreResult> {
+    return this.calendarTransaction(context, clientId, transfer.accountId, board => {
+      const current = board.tasks.find(task => task.id === transfer.taskId);
+      if (!current || JSON.stringify(current) !== JSON.stringify(context.original)) throw new Error('任務已更新，請重新查看後再移轉。');
+      const pending = board.calendarTransfers?.find(item => item.taskId === current.id && !item.published);
+      if (pending && pending.eventId !== transfer.eventId) throw new Error('這個任務有尚未確認的 Google 活動，請先重試原本的移轉。');
+      if (pending) return board;
+      return {...board, calendarTransfers: [...board.calendarTransfers ?? [], transfer]};
+    });
+  }
+  finishCalendarTransfer(transfer: CalendarTransfer, context: TaskEditContext, clientId: string, keepOrbit = false, current?: () => void): Promise<StoreResult> {
+    return this.calendarTransaction(context, clientId, transfer.accountId, board => {
+      current?.();
+      const saved = board.calendarTransfers?.find(item => originKey(item, item.eventId) === originKey(transfer, transfer.eventId));
+      if (!saved || saved.body !== transfer.body) throw new Error('移轉紀錄已變更，Google 活動已保留，請重新查看。');
+      return {...board, calendarTransfers: board.calendarTransfers!.filter(item => item !== saved), tasks: board.tasks.filter(task => keepOrbit || task.id !== saved.taskId || taskFingerprint(task) !== saved.original)};
+    });
+  }
+  saveCalendarCopy(task: Task, context: TaskEditContext, clientId: string, accountId: string, verify?: () => void): Promise<StoreResult> {
+    const saved = structuredClone(task);
+    delete saved.calendarOrigin;
+    return this.calendarTransaction(context, clientId, accountId, board => {
+      verify?.();
+      if (context.original || board.tasks.some(item => item.id === saved.id)) throw new Error('這份 Orbit 副本已建立，請重新開啟活動後再複製。');
+      return {...board, tasks: [...board.tasks, saved]};
+    });
+  }
+  private calendarTransaction(context: TaskEditContext, clientId: string, accountId: string, change: (board: BoardState) => BoardState): Promise<StoreResult> {
+    return this.transact(data => {
+      if (data.google?.clientId !== clientId || data.google.accountId !== accountId) throw new Error('Google 帳號或連線設定已變更，原有 Orbit 任務保留。');
+      const workspace = data.state.workspaces.find(item => item.id === context.workspaceId);
+      if (!workspace) throw new Error('原工作空間已不存在，Google 活動與本機資料未再修改。');
+      return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspace.id ? {...workspace, ...change(workspace)} : item)}};
+    }, {generation: context.generation, requirePersistence: true});
   }
 
   moveTask(id: string, status: TaskStatus, beforeId?: string): Promise<StoreResult> {

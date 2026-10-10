@@ -2,6 +2,7 @@ import type { BoardState, BoardStatus, Project, Task } from './models';
 import { COLUMNS, PRIORITIES } from './models.ts';
 import { validColor } from './appearance-data.ts';
 import { scheduleError, validDate } from './task-schedule.ts';
+import { readCalendarOrigin, readCalendarTransfers } from './calendar-transfer-data.ts';
 
 /** Read saved schemas without mutating the source or discarding legacy tasks. */
 export function readBoardState(value: unknown): BoardState | null {
@@ -29,6 +30,9 @@ export function readBoardState(value: unknown): BoardState | null {
     && Array.isArray(task.subtasks) && task.subtasks.every(subtask => subtask && typeof subtask.id === 'string'
       && typeof subtask.title === 'string' && typeof subtask.done === 'boolean'));
   if (!validTasks || new Set(source.tasks.map(task => task.id)).size !== source.tasks.length) return null;
+  if (source.tasks.some(task => task.calendarOrigin !== undefined && !readCalendarOrigin(task.calendarOrigin))) return null;
+  const calendarTransfers = source.calendarTransfers === undefined ? undefined : readCalendarTransfers(source.calendarTransfers);
+  if (calendarTransfers === null) return null;
   const tasks: Task[] = source.tasks.map(task => ({
     id: task.id,
     title: task.title,
@@ -41,13 +45,15 @@ export function readBoardState(value: unknown): BoardState | null {
     startTime: legacy ? '' : task.startTime,
     dueDate: task.dueDate,
     dueTime: legacy ? '' : task.dueTime,
-    subtasks: task.subtasks.map(subtask => ({id: subtask.id, title: subtask.title, done: subtask.done}))
+    subtasks: task.subtasks.map(subtask => ({id: subtask.id, title: subtask.title, done: subtask.done})),
+    ...(task.calendarOrigin ? {calendarOrigin: readCalendarOrigin(task.calendarOrigin)!} : {})
   }));
   return {
     // Keep an absent archive flag absent so existing cloud backup hashes stay valid.
     version: 4, projects: projects.map(project => ({id: project.id, name: project.name.trim(), ...(project.archived === undefined ? {} : {archived: project.archived})})),
     categories: source.categories.map(category => ({id: category.id, name: category.name, color: category.color})),
-    statuses: statuses.map(status => ({id: status.id, label: status.label, subtitle: status.subtitle, color: status.color, kind: status.kind, hidden: status.hidden ?? status.kind === 'archived'})), tasks
+    statuses: statuses.map(status => ({id: status.id, label: status.label, subtitle: status.subtitle, color: status.color, kind: status.kind, hidden: status.hidden ?? status.kind === 'archived'})), tasks,
+    ...(calendarTransfers ? {calendarTransfers} : {})
   };
 }
 

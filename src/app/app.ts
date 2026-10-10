@@ -4,7 +4,8 @@ import { CdkScrollable } from '@angular/cdk/scrolling';
 import { Component, computed, DestroyRef, HostListener, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BoardStore, StoreResult, TaskEditContext } from './board-store';
-import { Calendar, CalendarCreate } from './calendar';
+import { Calendar } from './calendar';
+import type { CalendarCreate } from './calendar';
 import { Icon } from './icon';
 import { BrandMark } from './brand-mark';
 import { ThemeColor } from './theme-color';
@@ -30,18 +31,26 @@ import { TaskCell } from './task-cell';
 import type { TaskCellField } from './task-cell';
 import { WorkspaceTemplatePicker } from './workspace-template-picker';
 import type { WorkspaceTemplateId } from './workspace-templates';
+import { CalendarPublish } from './calendar-publish';
 
-type Modal = 'task' | 'categories' | 'projects' | 'delete' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | null;
+type Modal = 'task' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker],
+  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish],
   templateUrl: './app.html',
   styleUrls: ['./app.css', './forms.css']
 })
 export class App {
   readonly store = inject(BoardStore);
+  readonly calendarPublishing = signal(false);
+  calendarPublished(warning = ''): void {
+    const retained = this.store.tasks().some(task => task.id === this.draft.id);
+    this.closeModal();
+    this.notify(warning || (retained ? 'Google 活動已建立；Orbit 任務在移轉期間有更新，因此仍保留。' : '已移至 Google Calendar，Orbit 任務卡片已移除。'));
+  }
+  returnCalendarTask(): void { this.formError.set(''); this.modal.set('task'); }
   readonly externalEntry = signal<ExternalEvent | null>(null);
   openExternalEvent(entry: ExternalEvent): void { this.externalEntry.set(entry); this.modal.set('external-event'); }
   readonly preferences = inject(UiPreferences);
@@ -365,7 +374,7 @@ export class App {
     this.modal.set('task');
   }
 
-  async saveTask(): Promise<void> {
+  async saveTask(publish = false): Promise<void> {
     if (this.store.pendingWrites()) return;
     const title = this.draft.title.trim();
     if (!title) {
@@ -384,10 +393,22 @@ export class App {
       return;
     }
     if (this.subtaskDraft.trim()) this.addSubtask();
-    const result = await this.store.saveTask({...this.draft, title, description: this.draft.description.trim()}, this.taskEditContext()!);
+    const saved = {...this.draft, title, description: this.draft.description.trim()};
+    if (publish && JSON.stringify(saved) === JSON.stringify(this.taskEditContext()?.original) && !this.store.hasUnsavedChanges()) {
+      this.store.refreshFromStorage();
+      if (this.taskDraftConflict()) { this.formError.set('任務已更新，請載入最新版本再移轉。'); return; }
+      this.draft = structuredClone(saved); this.modal.set('calendar-publish'); return;
+    }
+    const result = await this.store.saveTask(saved, this.taskEditContext()!);
     if (!this.handleResult(result)) return;
     const hidden = !this.visibleTasks().some(task => task.id === this.draft.id);
     const message = this.editing() ? '任務已更新' : '新任務已建立';
+    if (publish && result.persisted) {
+      this.draft = structuredClone(this.store.tasks().find(task => task.id === this.draft.id)!);
+      this.taskEditContext.set(this.store.taskContext(this.draft.id));
+      this.modal.set('calendar-publish');
+      return;
+    }
     this.closeModal();
     this.notify(result.persisted ? hidden ? `${message}，可清除篩選查看。` : message : '任務只暫存在此分頁，請匯出備份。');
   }
@@ -785,6 +806,7 @@ export class App {
   }
 
   closeModal(): void {
+    if (this.calendarPublishing()) return;
     if (this.modal() === 'settings' && this.store.pendingWrites() > 0) return;
     this.modal.set(null);
     this.externalEntry.set(null);

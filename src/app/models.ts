@@ -35,6 +35,27 @@ export interface Task {
   dueDate: string;
   dueTime: string;
   subtasks: Subtask[];
+  /** Legacy field retained only to read older backups; new copies have no source link. */
+  calendarOrigin?: CalendarOrigin;
+}
+
+export interface CalendarMetadata {project: string; category: string; status: string; priority: Priority}
+export interface CalendarOrigin {
+  accountId: string;
+  calendarId: string;
+  eventId: string;
+  metadata: CalendarMetadata;
+  extra: string;
+}
+export interface CalendarTransfer {
+  accountId: string;
+  calendarId: string;
+  eventId: string;
+  taskId: string;
+  original: string;
+  body: string;
+  metadata: CalendarMetadata;
+  published: boolean;
 }
 
 export interface BoardState {
@@ -43,6 +64,7 @@ export interface BoardState {
   categories: Category[];
   statuses: BoardStatus[];
   tasks: Task[];
+  calendarTransfers?: CalendarTransfer[];
 }
 
 export interface BoardStatus {

@@ -10,6 +10,7 @@ import { resolve } from 'node:path';
 import { CALENDAR_SCOPE } from '../src/app/google-data.ts';
 import { GOOGLE_SESSION_KEY } from '../src/app/google-session.ts';
 import { CALENDAR_SYNC_PREFIX } from '../src/app/calendar-sync.ts';
+import { CalendarListCache, calendarListScope, CALENDAR_LIST_TTL } from '../src/app/calendar-list-cache.ts';
 import {DRIVE_SCOPE, DRIVE_SESSION_KEY} from '../src/app/drive-data.ts';
 
 const require = createRequire(import.meta.url);
@@ -17,8 +18,8 @@ const { build } = createRequire(require.resolve('@angular/build/package.json'))(
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/google-test-'));
 const output = resolve(directory, 'google.mjs');
-await build({stdin: {contents: "export {GoogleAuth} from './src/app/google-auth.ts'; export {DriveAuth} from './src/app/drive-auth.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {CalendarSources} from './src/app/calendar-sources.ts'; export {CalendarCache} from './src/app/calendar-cache.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const { GoogleAuth, DriveAuth, GoogleCalendarService, CalendarSources, CalendarCache, BoardStore } = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {GoogleAuth} from './src/app/google-auth.ts'; export {DriveAuth} from './src/app/drive-auth.ts'; export {CalendarWriteAuth} from './src/app/calendar-write-auth.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {CalendarSources} from './src/app/calendar-sources.ts'; export {CalendarCache} from './src/app/calendar-cache.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const { GoogleAuth, DriveAuth, CalendarWriteAuth, GoogleCalendarService, CalendarSources, CalendarCache, BoardStore } = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 
 function storage() {
@@ -33,6 +34,25 @@ function tabStorage() {
   return {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key)};
 }
 const sessionContext = {clientId: '123-example.apps.googleusercontent.com', generation: 'generation', accountId: 'account'};
+
+test('Calendar 寫入授權分開保存並逐項檢查範圍，缺少寫入權限不算連線成功', async () => {
+  storage(); const sessions = tabStorage(); let options, allowWrite = false; const checked = [];
+  const oauth = {initTokenClient: value => {options = value; return {requestAccessToken() {}};}, hasGrantedAllScopes: (response, scope) => {checked.push(scope); return allowWrite || !scope.endsWith('/calendar.events');}};
+  const injector = createEnvironmentInjector([{provide: DOCUMENT, useValue: {defaultView: {google: {accounts: {oauth2: oauth}}, sessionStorage: sessions, localStorage: globalThis.localStorage}}}]);
+  const auth = runInInjectionContext(injector, () => new CalendarWriteAuth()); auth.useSession(sessionContext);
+  const originalFetch = globalThis.fetch; globalThis.fetch = async () => Response.json({sub: 'account', email: 'a@example.test'});
+  try {
+    await auth.prepare(); const refused = auth.authorize(sessionContext.clientId); const rejection = assert.rejects(refused, /建立 Google Calendar 活動/);
+    assert.ok(options.scope.includes(CALENDAR_SCOPE)); assert.ok(options.scope.includes('https://www.googleapis.com/auth/calendar.events'));
+    await options.callback({access_token: 'synthetic-token', expires_in: 3600}); await rejection;
+    assert.equal(auth.connected(), false); assert.equal(sessions.getItem(GOOGLE_SESSION_KEY), null);
+    assert.ok(checked.includes(CALENDAR_SCOPE)); assert.ok(checked.includes('https://www.googleapis.com/auth/calendar.events'));
+    allowWrite = true; const accepted = auth.authorize(sessionContext.clientId); await options.callback({access_token: 'synthetic-token', expires_in: 3600}); await accepted;
+    assert.equal(auth.connected(), true); assert.equal(sessions.getItem(GOOGLE_SESSION_KEY), null);
+    assert.ok(sessions.getItem('iih-orbit-calendar-write-session-v1'));
+    const restored = runInInjectionContext(injector, () => new CalendarWriteAuth()); restored.useSession(sessionContext); assert.equal(restored.connected(), true); restored.ngOnDestroy();
+  } finally { globalThis.fetch = originalFetch; auth.ngOnDestroy(); injector.destroy(); }
+});
 
 test('Drive token model 獨立請求最小權限、保存與恢復，Drive 401 不解除 Calendar 連線', async () => {
   storage(); const sessions = tabStorage(); let options, requests = [];
@@ -281,23 +301,23 @@ async function calendarController({emptyAccount = false} = {}) {
     await store.bindCalendar({id: 'source', accountId: 'account', calendarId: 'calendar', name: '月曆', color: '#759acb', workspaceIds: [], visible: true}, store.currentWorkspace().id, true);
   }
   const values = new Map(), requests = [];
-  let fail = false, pending, failurePut = false, clears = 0, prepares = 0, authorizations = 0, prepareFailure = false;
+  let fail = false, listFail = false, pending, failurePut = false, clears = 0, prepares = 0, authorizations = 0, prepareFailure = false;
   const cache = {
     get: async key => structuredClone(values.get(key)),
     put: async snapshot => { if (failurePut) throw new Error('quota'); values.set(snapshot.key, structuredClone(snapshot)); },
     remove: async key => values.delete(key), clear: async () => { clears++; values.clear(); }
   };
   const auth = {
-    connected: signal(false), account: signal(null), ready: signal(false), preparing: signal(false), authorizing: signal(false), message: signal('尚未連線 Google'), sessionWarning: signal(''),
+    connectionVersion: signal(0), connected: signal(false), account: signal(null), ready: signal(false), preparing: signal(false), authorizing: signal(false), message: signal('尚未連線 Google'), sessionWarning: signal(''),
     useSession() {},
     cancelRequests() {},
     async prepare() { prepares++; if (prepareFailure) throw new Error('無法載入元件'); this.ready.set(true); },
-    disconnect() { this.connected.set(false); this.account.set(null); },
-    async authorize() { authorizations++; this.account.set({id: 'account', email: 'a@example.com'}); this.connected.set(true); return this.account(); },
+    disconnect() { this.connectionVersion.update(n => n + 1); this.connected.set(false); this.account.set(null); },
+    async authorize() { authorizations++; this.connectionVersion.update(n => n + 1); this.account.set({id: 'account', email: 'a@example.com'}); this.connected.set(true); return this.account(); },
     async request(path, parameters) {
       requests.push({path, parameters});
       if (pending) await pending;
-      if (path === 'users/me/calendarList') return {items: [{id: 'calendar', summary: '月曆'}]};
+      if (path === 'users/me/calendarList') { if (listFail) throw new Error('network'); return {items: [{id: 'calendar', summary: '月曆', accessRole: 'writer'}]}; }
       if (parameters.singleEvents === 'true' && fail) throw new Error('network');
       return parameters.singleEvents === 'true' ? {items: [raw]} : {items: [raw], nextSyncToken: 'cursor-' + requests.length};
     }
@@ -312,8 +332,76 @@ async function calendarController({emptyAccount = false} = {}) {
   };
   service.setRange('2026-10-01', '2026-10-31');
   await settle();
-  return {store, auth, service, values, requests, sidebar, prepares: () => prepares, authorizations: () => authorizations, setPrepareFailure: value => { prepareFailure = value; }, setFail: value => { fail = value; }, setPending: value => { pending = value; }, setFailurePut: value => { failurePut = value; }, clears: () => clears, close: () => { sidebarInjector?.destroy(); service.ngOnDestroy(); injector.destroy(); }};
+  return {store, auth, service, values, requests, sidebar, createService: () => runInInjectionContext(injector, () => new GoogleCalendarService()), prepares: () => prepares, authorizations: () => authorizations, setPrepareFailure: value => { prepareFailure = value; }, setFail: value => { fail = value; }, setListFail: value => { listFail = value; }, setPending: value => { pending = value; }, setFailurePut: value => { failurePut = value; }, clears: () => clears, close: () => { sidebarInjector?.destroy(); service.ngOnDestroy(); injector.destroy(); }};
 }
+
+test('月曆清單無法持久保存時沿用分頁記憶體快取，仍依帳號隔離', () => {
+  const original = globalThis.localStorage;
+  globalThis.localStorage = {getItem: () => null, setItem: () => { throw new Error('quota'); }};
+  try {
+    const cache = new CalendarListCache(), calendars = [{id: 'calendar', name: '月曆', color: '#759acb', timeZone: '', accessRole: 'writer'}];
+    cache.write('scope', calendars);
+    assert.deepEqual(cache.read('scope').calendars, calendars);
+    assert.equal(cache.read('other-account'), undefined);
+    assert.equal(new CalendarListCache().read('scope'), undefined);
+    globalThis.localStorage.getItem = () => { throw new Error('unavailable'); };
+    assert.deepEqual(cache.read('scope').calendars, calendars);
+  } finally { globalThis.localStorage = original; }
+});
+
+test('月曆清單共用持久快取，五分鐘內重新開啟與新服務不重讀，可手動更新', async () => {
+  const f = await calendarController(); let restored;
+  try {
+    await f.auth.authorize(); await settle(); await f.service.listCalendars(false);
+    const count = () => f.requests.filter(item => item.path === 'users/me/calendarList').length;
+    assert.equal(count(), 1); assert.equal(f.service.available()[0].accessRole, 'writer');
+    await f.service.listCalendars(false); assert.equal(count(), 1);
+    restored = f.createService(); await restored.listCalendars(false);
+    assert.equal(restored.available()[0].id, 'calendar'); assert.equal(count(), 1);
+    const scope = calendarListScope(f.store.generation(), f.store.google()), cache = new CalendarListCache();
+    assert.equal(cache.read(scope).calendars[0].accessRole, 'writer');
+    cache.write(scope, f.service.available(), Date.now() - CALENDAR_LIST_TTL - 1);
+    await f.service.listCalendars(false); assert.equal(count(), 2);
+    await f.service.listCalendars(true); assert.equal(count(), 3);
+    f.setListFail(true); await f.service.listCalendars(true);
+    assert.equal(f.service.available()[0].id, 'calendar'); assert.match(f.service.error(), /仍可使用/);
+  } finally { restored?.ngOnDestroy(); f.close(); }
+});
+
+test('月曆清單並行載入共用請求，帳號切換後舊回應與快取不能串入新帳號', async () => {
+  const f = await calendarController();
+  try {
+    await f.auth.authorize(); await settle(); await f.service.listCalendars(false);
+    let release; f.setPending(new Promise(resolve => { release = resolve; }));
+    const count = f.requests.filter(item => item.path === 'users/me/calendarList').length;
+    const first = f.service.listCalendars(true), second = f.service.listCalendars(true);
+    assert.equal(first, second); assert.equal(f.requests.filter(item => item.path === 'users/me/calendarList').length, count + 1);
+    await f.store.updateGoogle({accountId: 'other'}); f.auth.account.set({id: 'other', email: 'other@example.test'}); f.auth.connectionVersion.update(value => value + 1); f.auth.connected.set(true);
+    release(); f.setPending(undefined); await first; await settle();
+    await f.service.listCalendars(false);
+    assert.equal(f.service.availableScope, calendarListScope(f.store.generation(), f.store.google()));
+    assert.equal(new CalendarListCache().read(calendarListScope(f.store.generation(), {...f.store.google(), accountId: 'account'})), undefined);
+    assert.equal(f.requests.filter(item => item.path === 'users/me/calendarList').length, count + 2);
+  } finally { f.close(); }
+});
+
+test('月曆清單重新授權不沿用舊請求，服務結束後晚回覆不能覆寫快取', async () => {
+  const f = await calendarController();
+  try {
+    await f.auth.authorize(); await settle(); await f.service.listCalendars(false);
+    const scope = calendarListScope(f.store.generation(), f.store.google()), cache = new CalendarListCache();
+    let release; f.setPending(new Promise(resolve => { release = resolve; }));
+    const count = f.requests.filter(item => item.path === 'users/me/calendarList').length;
+    const old = f.service.listCalendars(true);
+    f.auth.connectionVersion.update(value => value + 1);
+    const next = f.service.listCalendars(true);
+    assert.notEqual(next, old); assert.equal(f.requests.filter(item => item.path === 'users/me/calendarList').length, count + 2);
+    const marker = {...f.service.available()[0], name: '已保存清單'};
+    cache.write(scope, [marker]); f.service.ngOnDestroy();
+    release(); f.setPending(undefined); await Promise.all([old, next]);
+    assert.equal(cache.read(scope).calendars[0].name, '已保存清單');
+  } finally { f.close(); }
+});
 
 test('側欄先準備連線元件，點擊才啟動授權；失敗可直接重試', async () => {
   const fixture = await calendarController();

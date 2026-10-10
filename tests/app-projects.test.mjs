@@ -36,6 +36,38 @@ function application() {
   return {app, settings, store, close: () => { clearTimeout(app.toastTimer); injector.destroy(); }};
 }
 
+test('進入 Calendar 移轉先保存草稿，未改動任務不建立額外保存紀錄', async () => {
+  const {app, store, close} = application();
+  try {
+    const revision = store.revision();
+    app.openTask('todo', store.tasks()[0]); await app.saveTask(true);
+    assert.equal(app.modal(), 'calendar-publish'); assert.equal(store.revision(), revision);
+    app.returnCalendarTask(); app.draft.description = '移轉前新增描述'; await app.saveTask(true);
+    assert.equal(app.modal(), 'calendar-publish'); assert.notEqual(store.revision(), revision);
+    assert.equal(store.tasks()[0].description, '移轉前新增描述');
+    assert.equal(app.taskEditContext().original.description, '移轉前新增描述');
+  } finally { close(); }
+});
+
+test('移轉返回任務保留原編輯基準，另一分頁修改或刪除後不能覆寫或自動復活', async () => {
+  for (const change of ['edit', 'delete']) {
+    const {app, store, close} = application();
+    const peer = new BoardStore();
+    try {
+      app.openTask('todo', store.tasks()[0]); await app.saveTask(true);
+      const context = app.taskEditContext();
+      if (change === 'edit') await peer.saveTask({...peer.tasks()[0], description: '另一分頁的新內容'});
+      else await peer.deleteTask(peer.tasks()[0].id);
+      store.refreshFromStorage(); app.returnCalendarTask();
+      assert.equal(app.taskEditContext(), context); assert.equal(app.taskDraftConflict(), true);
+      await app.saveTask();
+      const current = store.tasks().find(item => item.id === task.id);
+      assert.equal(change === 'edit' ? current.description : current, change === 'edit' ? '另一分頁的新內容' : undefined);
+      assert.equal(app.modal(), 'task'); assert.match(app.formError(), /更新|刪除/);
+    } finally { peer.ngOnDestroy(); close(); }
+  }
+});
+
 test('專案封存分開列出，不計整體進度，任務仍可篩選並開啟；改名保留封存狀態', async () => {
   const {app, store, close} = application();
   try {

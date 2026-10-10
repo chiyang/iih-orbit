@@ -9,7 +9,8 @@ export class GoogleHttpError extends Error {
     this.status = status;
   }
 }
-export interface AvailableCalendar {id: string; name: string; color: string; timeZone: string}
+export interface AvailableCalendar {id: string; name: string; color: string; timeZone: string; accessRole?: string}
+export function writableCalendar(calendar: Pick<AvailableCalendar, 'accessRole'>): boolean { return ['writerWithoutPrivateAccess', 'writer', 'owner'].includes(calendar.accessRole ?? ''); }
 export interface CalendarViewCache {rangeKey: string; events: GoogleEvent[]; updatedAt: string; invalidated?: boolean}
 export interface CalendarSnapshot {key: string; events: GoogleEvent[]; syncToken: string; updatedAt: string; views: CalendarViewCache[]}
 export type GoogleRequest = (path: string, parameters: Record<string, string>) => Promise<unknown>;
@@ -49,9 +50,9 @@ export class CalendarApi {
   async calendars(): Promise<AvailableCalendar[]> {
     const result = await this.pages('users/me/calendarList', {maxResults: '250', minAccessRole: 'reader', showHidden: 'true'});
     return result.items.map(value => {
-      const source = value as {id: string; summary?: string; summaryOverride?: string; backgroundColor?: string; timeZone?: string};
+      const source = value as {id: string; summary?: string; summaryOverride?: string; backgroundColor?: string; timeZone?: string; accessRole?: string};
       if (!source || typeof source.id !== 'string' || !source.id) throw new Error('Google 月曆清單不完整。');
-      return {id: source.id, name: source.summaryOverride || source.summary || source.id, color: validHex(source.backgroundColor) ? source.backgroundColor : '#759acb', timeZone: source.timeZone || ''};
+      return {id: source.id, name: source.summaryOverride || source.summary || source.id, color: validHex(source.backgroundColor) ? source.backgroundColor : '#759acb', timeZone: source.timeZone || '', ...(source.accessRole ? {accessRole: source.accessRole} : {})};
     });
   }
 

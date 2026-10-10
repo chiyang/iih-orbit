@@ -3,7 +3,8 @@ import { Component, computed, effect, inject, signal, untracked } from '@angular
 import { FormsModule } from '@angular/forms';
 import { BoardStore } from './board-store';
 import { GoogleCalendarService } from './google-calendar';
-import { AvailableCalendar } from './google-api';
+import { AvailableCalendar, writableCalendar } from './google-api';
+import { CalendarWriteAuth } from './calendar-write-auth';
 import { validClientId } from './google-data';
 import { ThemeColor } from './theme-color';
 
@@ -11,6 +12,9 @@ import { ThemeColor } from './theme-color';
 export class GoogleSettingsPanel {
   readonly store = inject(BoardStore);
   readonly calendar = inject(GoogleCalendarService);
+  readonly writeAuth = inject(CalendarWriteAuth);
+  readonly writable = writableCalendar;
+  disconnect(): void { this.writeAuth.useSession({generation: this.store.generation(), clientId: this.store.google().clientId, accountId: this.store.google().accountId}); this.writeAuth.disconnect('已解除 Google Calendar 寫入連線。'); this.calendar.auth.disconnect('已解除此瀏覽器各分頁的 Google 連線，保留月曆快取。'); }
   readonly origin = inject(DOCUMENT).defaultView?.location.origin ?? '';
   readonly localAddress = this.origin.startsWith('http://127.0.0.1');
   readonly message = signal('');
@@ -29,6 +33,11 @@ export class GoogleSettingsPanel {
         this.savedId = clientId;
         if (clientId) void this.prepare();
       });
+    });
+    effect(() => {
+      this.store.generation(); this.clientId(); this.store.google().accountId;
+      const connected = this.calendar.auth.connected();
+      untracked(() => { if (connected) void this.calendar.listCalendars(false); });
     });
   }
   async prepare(): Promise<void> {

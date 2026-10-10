@@ -116,7 +116,7 @@ export class GoogleAuth implements OnDestroy {
         callback: async response => {
           if (epoch !== this.epoch) return;
           if (nonce && !this.bridge.isCurrent(nonce)) { this.clearLocal('Google 授權已在其他分頁取消或更新。'); return; }
-          if (response.error || !response.access_token || !Number.isFinite(Number(response.expires_in)) || !this.oauth!.hasGrantedAllScopes(response, this.sessionOptions.scope)) { finishError(this.permissionMessage); return; }
+          if (response.error || !response.access_token || !Number.isFinite(Number(response.expires_in)) || !this.sessionOptions.scope.split(' ').every(scope => this.oauth!.hasGrantedAllScopes(response, scope))) { finishError(this.permissionMessage); return; }
           this.token = response.access_token;
           this.expiresAt = Date.now() + Math.max(0, Number(response.expires_in) - 30) * 1000;
           try {

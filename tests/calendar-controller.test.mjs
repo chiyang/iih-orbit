@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { COLUMNS } from '../src/app/models.ts';
 import { externalEvent } from '../src/app/google-data.ts';
+import { copyEventTask, createEventBody } from '../src/app/calendar-transfer-data.ts';
 
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -46,6 +47,49 @@ function googleEntry(id, start, end, title = id) {
   const source = {id: 'source', accountId: 'account', calendarId: 'calendar', name: '行事曆', color: '#4385d8', visible: true, workspaceIds: ['workspace']};
   return externalEvent(source, {id, summary: title, start, end});
 }
+
+test('月／週視圖相同內容也保留 Google 與 Orbit 各自的卡片，切換顯示來源不隱藏另一邊', () => {
+  const source = {id: 'source', accountId: 'account', calendarId: 'calendar', name: '月曆', color: '#759acb', visible: true, workspaceIds: ['workspace']};
+  const board = {id: 'workspace', projects: [], categories: [], statuses: COLUMNS};
+  const body = createEventBody(base, board, {mode: 'custom', minutes: 15, startDate: base.startDate, startTime: base.startTime, endDate: base.dueDate, endTime: base.dueTime}, '0123456789abcdef');
+  const entry = externalEvent(source, body), copy = copyEventTask(entry, board);
+  const {calendar, close} = calendarController([copy], [entry]);
+  try {
+    assert.equal(calendar.combinedTasks().length, 2); assert.equal(calendar.isExternal(copy), false);
+    assert.equal('calendarOrigin' in copy, false);
+    calendar.mode.set('week'); assert.equal(calendar.combinedTasks().length, 2);
+    calendar.showOrbit.set(false); assert.deepEqual(calendar.combinedTasks().map(task => task.id), [entry.task.id]);
+    calendar.showOrbit.set(true); calendar.showGoogle.set(false); assert.deepEqual(calendar.combinedTasks().map(task => task.id), [copy.id]);
+    calendar.showGoogle.set(true); calendar.deadlineFiltered.set(true); assert.deepEqual(calendar.combinedTasks().map(task => task.id), [copy.id]);
+  } finally { close(); }
+});
+test('Google 或 Orbit 改期後兩張卡片各自出現在正確時段，快取內容不合併', async () => {
+  const source = {id: 'source', accountId: 'account', calendarId: 'calendar', name: '月曆', color: '#759acb', visible: true, workspaceIds: ['workspace']};
+  const board = {id: 'workspace', projects: [], categories: [], statuses: COLUMNS};
+  const body = createEventBody(base, board, {mode: 'custom', minutes: 15, startDate: base.startDate, startTime: base.startTime, endDate: base.dueDate, endTime: base.dueTime}, '0123456789abcdef');
+  const entry = externalEvent(source, body), copy = copyEventTask(entry, board);
+  const {calendar, store, google, close} = calendarController([copy], [entry]);
+  try {
+    await store.saveTask({...copy, startTime: '13:00', dueTime: '14:00'});
+    assert.equal(calendar.combinedTasks().length, 2);
+    const day = calendar.days().find(item => item.key === base.startDate);
+    assert.equal(day.timedEvents.find(item => item.task.id === copy.id).startMinute, 780);
+    assert.equal(day.timedEvents.find(item => item.task.id === entry.task.id).startMinute, 540);
+    await store.saveTask(copy); google.events.set([structuredClone(entry)]);
+    assert.equal(calendar.combinedTasks().length, 2);
+    google.events.set([entry]); assert.equal(calendar.combinedTasks().length, 2);
+  } finally { close(); }
+});
+test('舊備份的來源欄位僅維持相容，重新載入後仍顯示兩張獨立卡片', () => {
+  const entry = googleEntry('legacy-event', {dateTime: '2026-10-09T09:00:00'}, {dateTime: '2026-10-09T10:00:00'}, base.title);
+  const legacy = {...base, calendarOrigin: {accountId: 'account', calendarId: 'calendar', eventId: 'legacy-event', extra: '', metadata: {project: '', category: '', status: '待辦', priority: 'medium'}}};
+  const {calendar, store, close} = calendarController([legacy], [entry]);
+  try {
+    assert.equal(store.tasks().length, 1); assert.equal(store.tasks()[0].calendarOrigin.eventId, 'legacy-event');
+    assert.equal(calendar.combinedTasks().length, 2); assert.equal(calendar.isExternal(store.tasks()[0]), false);
+    calendar.mode.set('week'); assert.equal(calendar.combinedTasks().length, 2);
+  } finally { close(); }
+});
 
 test('月曆先分全天與時間，各組 Google 在前，時間依各來源排序且預覽保持四項', () => {
   const local = [

@@ -6,6 +6,7 @@ import type { CalendarSource, GoogleSettings } from './google-data.ts';
 import { DEFAULT_GOOGLE, readGoogleSettings, readSources } from './google-data.ts';
 import { DEFAULT_REMINDERS, type ReminderPreferences, readReminders } from './reminder-data.ts';
 import { DEFAULT_DRIVE, type DriveSettings, readDriveSettings } from './drive-settings.ts';
+import { taskFingerprint } from './calendar-transfer-data.ts';
 
 export type BackupKind = 'full' | 'workspaces';
 export type {TextSize} from './appearance-data.ts';
@@ -82,15 +83,16 @@ export function copyWorkspaces(workspaces: Workspace[], newId: () => string = ()
     const categories = new Map(workspace.categories.map(category => [category.id, newId()]));
     const projects = new Map(workspace.projects.map(project => [project.id, newId()]));
     const statuses = new Map(workspace.statuses.map(status => [status.id, newId()]));
+    const tasks = new Map(workspace.tasks.map(task => [task.id, newId()]));
+    const subtasks = new Map(workspace.tasks.flatMap(task => task.subtasks.map(subtask => [JSON.stringify([task.id, subtask.id]), newId()])));
+    const copyTask = (task: Task): Task => ({...structuredClone(task), id: tasks.get(task.id) ?? task.id, categoryId: categories.get(task.categoryId) ?? '', projectId: projects.get(task.projectId) ?? '', status: statuses.get(task.status) ?? task.status, subtasks: task.subtasks.map(subtask => ({...subtask, id: subtasks.get(JSON.stringify([task.id, subtask.id])) ?? subtask.id}))});
     return {
       ...structuredClone(workspace), id: newId(),
       categories: workspace.categories.map(category => ({...category, id: categories.get(category.id)!})),
       projects: workspace.projects.map(project => ({...project, id: projects.get(project.id)!})),
       statuses: workspace.statuses.map(status => ({...status, id: statuses.get(status.id)!})),
-      tasks: workspace.tasks.map(task => ({
-        ...structuredClone(task), id: newId(), categoryId: categories.get(task.categoryId) ?? '', projectId: projects.get(task.projectId) ?? '', status: statuses.get(task.status)!,
-        subtasks: task.subtasks.map(subtask => ({...subtask, id: newId()}))
-      }))
+      tasks: workspace.tasks.map(copyTask),
+      ...(workspace.calendarTransfers ? {calendarTransfers: workspace.calendarTransfers.map(item => ({...structuredClone(item), taskId: tasks.get(item.taskId) ?? item.taskId, original: taskFingerprint(copyTask(JSON.parse(item.original)))}))} : {})
     };
   });
 }

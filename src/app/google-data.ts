@@ -62,9 +62,13 @@ export interface GoogleEvent {
   originalStartTime?: GoogleMoment;
   recurrence: string[];
   updated: string;
+  etag?: string;
+  transparency?: string;
+  orbitTransfer?: string;
+  contentComplete?: boolean;
 }
 export interface ExternalTask extends Task {sourceInterval?: {start: number; end: number}}
-export interface ExternalEvent {source: CalendarSource; event: GoogleEvent; task: ExternalTask}
+export interface ExternalEvent {source: CalendarSource; event: GoogleEvent; task: ExternalTask; }
 export interface CalendarRange {start: string; end: string; timeZone: string; key: string}
 
 function readMoment(value: unknown): GoogleMoment | undefined {
@@ -93,6 +97,10 @@ export function readGoogleEvent(value: unknown): GoogleEvent | null {
     || (start.date ? start.date >= end.date! : Date.parse(start.dateTime!) > Date.parse(end.dateTime!)))) return null;
   return {
     id: source.id, status: source.status === 'cancelled' ? 'cancelled' : 'confirmed',
+    ...(typeof source.etag === 'string' ? {etag: source.etag} : {}),
+    transparency: source.transparency === 'transparent' ? 'transparent' : 'opaque',
+    orbitTransfer: text(source.orbitTransfer) ? source.orbitTransfer : typeof (value as {extendedProperties?: {private?: {orbitTransfer?: unknown}}}).extendedProperties?.private?.orbitTransfer === 'string' ? (value as {extendedProperties: {private: {orbitTransfer: string}}}).extendedProperties.private.orbitTransfer : '',
+    contentComplete: source.contentComplete !== false && (!source.summary || source.summary.length <= 2000) && (!source.description || source.description.length <= 20000) && (!source.location || source.location.length <= 2000),
     summary: typeof source.summary === 'string' ? source.summary.slice(0, 2000) : '未命名活動',
     description: typeof source.description === 'string' ? source.description.slice(0, 20000) : '',
     location: typeof source.location === 'string' ? source.location.slice(0, 2000) : '', htmlLink: safeGoogleLink(source.htmlLink),
