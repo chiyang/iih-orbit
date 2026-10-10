@@ -315,14 +315,14 @@ test('只更改主題色時，全部資料自動備份在等待時間後保存�
   const f = await fixture();
   try {
     await f.service.start('full', [], 'backup'); await f.service.sync(); await settle();
-    const count = f.documents.size;
+    const count = f.documents.size, sync = t.mock.method(f.service, 'sync', f.service.sync.bind(f.service));
     await f.store.updateAppearance({accent: '#3264ad'}); await settle();
-    t.mock.timers.tick(14999); await settle(); assert.equal(f.documents.size, count);
-    t.mock.timers.tick(1); await settle(); assert.equal(f.documents.size, count + 1);
+    t.mock.timers.tick(14999); await settle(); assert.equal(sync.mock.callCount(), 0); assert.equal(f.documents.size, count);
+    t.mock.timers.tick(1); assert.equal(sync.mock.callCount(), 1); await sync.mock.calls[0].result; assert.equal(f.documents.size, count + 1);
     assert.deepEqual([...f.documents.values()].at(-1).preferences, f.store.appearance());
     await f.store.updateAppearance({theme: 'dark', textSize: 'compact'});
     await f.store.updateReminders({leadMinutes: 60}); await settle();
-    t.mock.timers.tick(15000); await settle(); assert.equal(f.documents.size, count + 2);
+    t.mock.timers.tick(15000); assert.equal(sync.mock.callCount(), 2); await sync.mock.calls[1].result; assert.equal(f.documents.size, count + 2);
     const saved = [...f.documents.values()].at(-1);
     assert.deepEqual(saved.preferences, f.store.appearance()); assert.equal(saved.reminders.leadMinutes, 60);
     t.mock.timers.tick(15000); await settle(); assert.equal(f.documents.size, count + 2);
