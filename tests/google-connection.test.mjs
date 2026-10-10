@@ -10,14 +10,15 @@ import { resolve } from 'node:path';
 import { CALENDAR_SCOPE } from '../src/app/google-data.ts';
 import { GOOGLE_SESSION_KEY } from '../src/app/google-session.ts';
 import { CALENDAR_SYNC_PREFIX } from '../src/app/calendar-sync.ts';
+import {DRIVE_SCOPE, DRIVE_SESSION_KEY} from '../src/app/drive-data.ts';
 
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/google-test-'));
 const output = resolve(directory, 'google.mjs');
-await build({stdin: {contents: "export {GoogleAuth} from './src/app/google-auth.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {CalendarSources} from './src/app/calendar-sources.ts'; export {CalendarCache} from './src/app/calendar-cache.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const { GoogleAuth, GoogleCalendarService, CalendarSources, CalendarCache, BoardStore } = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {GoogleAuth} from './src/app/google-auth.ts'; export {DriveAuth} from './src/app/drive-auth.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {CalendarSources} from './src/app/calendar-sources.ts'; export {CalendarCache} from './src/app/calendar-cache.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const { GoogleAuth, DriveAuth, GoogleCalendarService, CalendarSources, CalendarCache, BoardStore } = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 
 function storage() {
@@ -32,6 +33,27 @@ function tabStorage() {
   return {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key)};
 }
 const sessionContext = {clientId: '123-example.apps.googleusercontent.com', generation: 'generation', accountId: 'account'};
+
+test('Drive token model 獨立請求最小權限、保存與恢復，Drive 401 不解除 Calendar 連線', async () => {
+  storage(); const sessions = tabStorage(); let options, requests = [];
+  const oauth = {initTokenClient: config => {options = config; return {requestAccessToken: () => {}};}, hasGrantedAllScopes: () => true};
+  const injector = createEnvironmentInjector([{provide: DOCUMENT, useValue: {defaultView: {google: {accounts: {oauth2: oauth}}, sessionStorage: sessions, localStorage: globalThis.localStorage}}}]);
+  const calendar = runInInjectionContext(injector, () => new GoogleAuth()), drive = runInInjectionContext(injector, () => new DriveAuth());
+  calendar.useSession(sessionContext); drive.useSession(sessionContext); const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, config) => {requests.push({url, config}); return Response.json(url.includes('userinfo') ? {sub: 'account', email: 'a@example.com'} : {files: []});};
+  try {
+    await calendar.prepare(); let promise = calendar.authorize(sessionContext.clientId); await options.callback({access_token: 'calendar-token', expires_in: 3600}); await promise;
+    await drive.prepare(); promise = drive.authorize(sessionContext.clientId); assert.ok(options.scope.includes(DRIVE_SCOPE)); assert.equal(options.scope.includes(CALENDAR_SCOPE), false); assert.equal(options.include_granted_scopes, false);
+    await options.callback({access_token: 'drive-token', expires_in: 3600}); await promise;
+    await drive.api('files', {}, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+    assert.equal(requests.at(-1).config.headers.Authorization, 'Bearer drive-token'); assert.equal(requests.at(-1).config.method, 'POST'); assert.equal(requests.at(-1).config.headers['content-type'], 'application/json');
+    assert.equal(JSON.parse(sessions.getItem(DRIVE_SESSION_KEY)).token, 'drive-token'); assert.equal(JSON.parse(sessions.getItem(GOOGLE_SESSION_KEY)).token, 'calendar-token');
+    const restored = runInInjectionContext(injector, () => new DriveAuth()); restored.useSession(sessionContext); assert.equal(restored.connected(), true); restored.ngOnDestroy();
+    const count = requests.length; assert.throws(() => drive.upload('https://example.com/upload', {method: 'POST'}), /位址不合法/); assert.equal(requests.length, count);
+    globalThis.fetch = async () => new Response(null, {status: 401}); await assert.rejects(drive.api('files'), /到期/);
+    assert.equal(drive.connected(), false); assert.equal(calendar.connected(), true); assert.equal(sessions.getItem(DRIVE_SESSION_KEY), null); assert.ok(sessions.getItem(GOOGLE_SESSION_KEY));
+  } finally {globalThis.fetch = originalFetch; drive.ngOnDestroy(); calendar.ngOnDestroy(); injector.destroy();}
+});
 
 test('Token Model 只申請讀取及帳號識別，憑證只存 sessionStorage，過期後清除', async () => {
   const values = storage();

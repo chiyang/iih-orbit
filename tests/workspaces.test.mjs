@@ -19,9 +19,11 @@ test('單看板升級為工作空間，完整保留任務、時間、順序與�
   assert.deepEqual(legacy, original);
 });
 
-test('新增工作空間從空白開始，修改選定看板不改動其他工作空間或來源', () => {
+test('新增工作空間建立同名專案，修改選定看板不改動其他工作空間或來源', () => {
   const original = createWorkspaceState(board);
   const second = emptyWorkspace('second', '研究計畫');
+  assert.equal(second.projects.length, 1);
+  assert.equal(second.projects[0].name, '研究計畫');
   const source = {...original, activeWorkspaceId: second.id, workspaces: [...original.workspaces, second]};
   const updated = updateWorkspaceBoard(source, {...second, projects: [{id: 'research-project', name: '研究進度'}], tasks: [{...task, id: 'research', projectId: 'research-project'}]});
   assert.deepEqual(updated.workspaces[0], original.workspaces[0]);

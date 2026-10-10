@@ -4,8 +4,8 @@ import { validHex } from './appearance-data.ts';
 
 export class GoogleHttpError extends Error {
   readonly status: number;
-  constructor(status: number) {
-    super(status === 401 ? 'Google 授權已到期，請重新連線。' : status === 403 ? '無法讀取月曆，請檢查 API 是否啟用、授權權限及月曆存取權。' : status === 429 ? 'Google 暫時限制讀取次數，請稍後再試。' : status === 404 ? '月曆已不存在或無法存取，請重新選擇來源。' : 'Google 暫時無法回應，請稍後再試。');
+  constructor(status: number, resource = '月曆') {
+    super(status === 401 ? 'Google 授權已到期，請重新連線。' : status === 403 ? `無法存取${resource}，請檢查 API 是否啟用、授權權限與存取權。` : status === 429 ? 'Google 暫時限制讀取次數，請稍後再試。' : status === 404 ? `${resource}已不存在或無法存取，請重新選擇。` : 'Google 暫時無法回應，請稍後再試。');
     this.status = status;
   }
 }

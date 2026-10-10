@@ -25,8 +25,10 @@ export class CalendarSyncCoordinator {
   private readonly channel?: SessionChannel;
   private readonly locks?: Pick<LockManager, 'request'>;
   private readonly changed: (keys: string[]) => void;
+  private readonly namespace: {storagePrefix: string; lockPrefix: string; label: string};
 
-  constructor(storage: SyncStorage, atomic: Atomic, changed: (keys: string[]) => void, channel?: SessionChannel, locks?: Pick<LockManager, 'request'>, timeoutMs = SYNC_RUN_TIMEOUT_MS) {
+  constructor(storage: SyncStorage, atomic: Atomic, changed: (keys: string[]) => void, channel?: SessionChannel, locks?: Pick<LockManager, 'request'>, timeoutMs = SYNC_RUN_TIMEOUT_MS, namespace = {storagePrefix: CALENDAR_SYNC_PREFIX, lockPrefix: 'iih-orbit-calendar-run:', label: '月曆'}) {
+    this.namespace = namespace;
     this.storage = storage; this.atomic = atomic; this.changed = changed; this.channel = channel; this.locks = locks;
     this.timeoutMs = timeoutMs;
     if (channel) channel.onmessage = () => this.refresh();
@@ -34,7 +36,7 @@ export class CalendarSyncCoordinator {
   }
 
   activate(scope: string): void { this.scope = scope; this.refresh(); }
-  private key(scope: string): string { return CALENDAR_SYNC_PREFIX + scope; }
+  private key(scope: string): string { return this.namespace.storagePrefix + scope; }
   private read(scope: string): SyncRun | undefined {
     const value = this.storage.getItem(this.key(scope));
     if (!value) return undefined;
@@ -58,7 +60,7 @@ export class CalendarSyncCoordinator {
 
   private recoverAbandoned(scope: string, id: string): void {
     if (!this.locks || this.recovery) return;
-    this.recovery = this.locks.request('iih-orbit-calendar-run:' + scope, {ifAvailable: true}, async lock => {
+    this.recovery = this.locks.request(this.namespace.lockPrefix + scope, {ifAvailable: true}, async lock => {
       if (!lock || this.closed || this.suspended || this.scope !== scope) return false;
       return this.atomic(() => {
         if (this.closed || this.suspended || this.scope !== scope || this.read(scope)?.id !== id) return false;
@@ -88,7 +90,7 @@ export class CalendarSyncCoordinator {
       const current = () => !cancelled && !this.closed && !this.suspended && this.scope === scope && this.read(scope)?.id === run.id;
       const interrupted = new Promise<never>((_, reject) => {
         this.cancelCurrent = error => { cancelled = true; reject(error); };
-        timer = setTimeout(() => this.cancelCurrent?.(new CalendarSyncTimeoutError()), this.timeoutMs);
+        timer = setTimeout(() => this.cancelCurrent?.(this.namespace.label === '月曆' ? new CalendarSyncTimeoutError() : new Error(this.namespace.label + '同步逾時，待上傳版本仍保留。')), this.timeoutMs);
       });
       try { if (current()) await Promise.race([Promise.resolve().then(() => current() ? operation(current) : undefined), interrupted]); return true; }
       finally {
@@ -97,7 +99,7 @@ export class CalendarSyncCoordinator {
         finally { if (this.owned?.run.id === run.id) this.owned = undefined; this.notify(); }
       }
     };
-    if (this.locks) return this.locks.request('iih-orbit-calendar-run:' + scope, {ifAvailable: true}, lock => {
+    if (this.locks) return this.locks.request(this.namespace.lockPrefix + scope, {ifAvailable: true}, lock => {
       if (!lock) { this.refresh(); return false; }
       return execute();
     });
@@ -118,7 +120,7 @@ export class CalendarSyncCoordinator {
   suspend(): void {
     if (this.closed || this.suspended) return;
     this.suspended = true;
-    this.cancelCurrent?.(new Error('頁面已離開，本次月曆同步已停止。'));
+    this.cancelCurrent?.(new Error('頁面已離開，本次' + this.namespace.label + '同步已停止。'));
     const owned = this.owned;
     try { if (owned && this.read(owned.scope)?.id === owned.run.id) this.storage.removeItem(this.key(owned.scope)); } catch { /* An interrupted owner expires automatically. */ }
     this.changed([]);

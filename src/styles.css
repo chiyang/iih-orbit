@@ -51,8 +51,7 @@ button { border: 0; }
 ::selection { background: var(--accent-soft); color: var(--text); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .brand { display: flex; gap: calc(10px * var(--font-scale)); align-items: center; margin: 0 8px 29px; color: var(--text); text-decoration: none; line-height: 1; }
-.brand-symbol { width: calc(38px * var(--font-scale)); height: calc(38px * var(--font-scale)); flex-shrink: 0; background: var(--accent-strong); border-radius: 12px; display: grid; place-items: center; color: var(--text-soft); }
-.brand-symbol app-icon { width: calc(26px * var(--font-scale)); height: calc(26px * var(--font-scale)); transform: rotate(-10deg); }
+.brand-symbol { width: calc(50px * var(--font-scale)); height: calc(40px * var(--font-scale)); flex-shrink: 0; display: grid; place-items: center; color: var(--accent-text); }
 .brand-wordmark { display: flex; flex-direction: column; gap: calc(6px * var(--font-scale)); min-width: 0; }
 .brand-institution { color: var(--text-muted); font-size: var(--font-8); font-weight: 650; letter-spacing: .18em; }
 .brand-name { font-size: var(--font-22); font-weight: 700; letter-spacing: -.5px; white-space: nowrap; }
@@ -63,9 +62,11 @@ button { border: 0; }
 @media (max-width: 700px) {
   .text-size-label { display: none; }
   .text-size-control { gap: 6px; padding: 4px 7px; }
-  .mobile-wordmark { display: flex; flex-direction: column; gap: 2px; line-height: 1.1; color: var(--text); }
-  .mobile-wordmark > span { font-size: var(--font-8); letter-spacing: .12em; font-weight: 650; }
-  .mobile-wordmark > strong { font-size: var(--font-14); font-weight: 700; letter-spacing: -.4px; white-space: nowrap; }
+  .mobile-wordmark { display: flex; align-items: center; gap: 7px; line-height: 1.1; color: var(--accent-text); }
+  .mobile-wordmark app-brand-mark { width: 34px; height: 28px; flex-shrink: 0; }
+  .mobile-brand-text { display: flex; flex-direction: column; gap: 2px; }
+  .mobile-brand-text > span { font-size: var(--font-8); letter-spacing: .12em; font-weight: 650; }
+  .mobile-brand-text > strong { font-size: var(--font-14); font-weight: 700; letter-spacing: -.4px; white-space: nowrap; }
 }
 
 /* The drag preview is placed in the document body by Angular CDK. */
@@ -112,5 +113,4 @@ button { border: 0; }
   .settings-button { padding: 7px 9px; }
 }
 
-.brand-symbol { background: var(--accent-strong); color: var(--on-accent); }
 .brand-name, .brand-institution, .workspace-initial, .mobile-wordmark, .mobile-wordmark strong { color: var(--accent-text); }

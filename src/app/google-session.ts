@@ -27,15 +27,15 @@ interface SessionCallbacks {
 const sameScope = (left: GoogleSessionContext, right: GoogleSessionContext) => left.clientId === right.clientId && left.generation === right.generation;
 const sameContext = (left: GoogleSessionContext, right: GoogleSessionContext) => sameScope(left, right) && left.accountId === right.accountId;
 const contextOf = (session: GoogleSession): GoogleSessionContext => ({clientId: session.clientId, generation: session.generation, accountId: session.account.id});
-const controlKey = (context: GoogleSessionContext) => CONTROL_PREFIX + JSON.stringify([context.generation, context.clientId]);
+export interface SessionOptions {scope: string; storageKey: string; controlPrefix: string}
 
-export function readGoogleSession(value: unknown, context: GoogleSessionContext, nonce: string, now = Date.now()): GoogleSession | undefined {
+export function readGoogleSession(value: unknown, context: GoogleSessionContext, nonce: string, now = Date.now(), scope = CALENDAR_SCOPE): GoogleSession | undefined {
   if (!value || typeof value !== 'object' || !nonce || !context.accountId) return undefined;
   const session = value as GoogleSession;
   if (session.version !== 1 || typeof session.id !== 'string' || !session.id || session.id.length > 100
     || session.clientId !== context.clientId || session.generation !== context.generation || session.nonce !== nonce
     || !session.account || session.account.id !== context.accountId || typeof session.account.email !== 'string' || !session.account.email || session.account.email.length > 320
-    || session.scope !== CALENDAR_SCOPE || typeof session.token !== 'string' || !session.token || session.token.length > 8192 || /\s/.test(session.token)
+    || session.scope !== scope || typeof session.token !== 'string' || !session.token || session.token.length > 8192 || /\s/.test(session.token)
     || !Number.isSafeInteger(session.expiresAt) || session.expiresAt <= now || session.expiresAt > now + 86400000) return undefined;
   return {version: 1, id: session.id, clientId: session.clientId, generation: session.generation, account: {id: session.account.id, email: session.account.email}, scope: session.scope, token: session.token, expiresAt: session.expiresAt, nonce: session.nonce};
 }
@@ -50,7 +50,9 @@ export class GoogleSessionBridge {
   private readonly control: SessionStorage | undefined;
   private readonly channel: SessionChannel | undefined;
   private readonly callbacks: SessionCallbacks;
-  constructor(storage: SessionStorage | undefined, control: SessionStorage | undefined, channel: SessionChannel | undefined, callbacks: SessionCallbacks) {
+  private readonly options: SessionOptions;
+  constructor(storage: SessionStorage | undefined, control: SessionStorage | undefined, channel: SessionChannel | undefined, callbacks: SessionCallbacks, options: SessionOptions = {scope: CALENDAR_SCOPE, storageKey: GOOGLE_SESSION_KEY, controlPrefix: CONTROL_PREFIX}) {
+    this.options = options;
     this.storage = storage; this.control = control; this.channel = channel; this.callbacks = callbacks;
     if (channel) channel.onmessage = event => this.receive(event.data);
   }
@@ -63,14 +65,14 @@ export class GoogleSessionBridge {
     if (!changed) { this.verify(false); return; }
     this.requestId = '';
     if (previous && !sameScope(previous, context)) {
-      try { this.control?.removeItem(controlKey(previous)); } catch { /* Old scopes cannot match the new context. */ }
+      try { this.control?.removeItem(this.controlKey(previous)); } catch { /* Old scopes cannot match the new context. */ }
     }
     const current = this.callbacks.current();
     if (current && sameContext(contextOf(current), context) && !current.nonce) { this.warn(); return; }
     if (current && this.valid(current)) { this.remember(current); return; }
     if (current) this.callbacks.clear('Google 連線設定已變更，請重新連線。');
     let stored;
-    try { const raw = this.storage?.getItem(GOOGLE_SESSION_KEY); stored = raw ? JSON.parse(raw) : undefined; }
+    try { const raw = this.storage?.getItem(this.options.storageKey); stored = raw ? JSON.parse(raw) : undefined; }
     catch { this.warn(); }
     const restored = this.valid(stored);
     if (restored) { this.callbacks.receive(restored, false); this.remember(restored, false); return; }
@@ -81,7 +83,7 @@ export class GoogleSessionBridge {
   private marker(create = false): string {
     if (!this.context?.clientId || !validClientId(this.context.clientId) || !this.control) return '';
     try {
-      const key = controlKey(this.context);
+      const key = this.controlKey(this.context);
       const saved = this.control.getItem(key);
       if (saved && /^[a-f0-9-]{36}$/.test(saved)) return saved;
       if (create) { const nonce = crypto.randomUUID(); this.control.setItem(key, nonce); return nonce; }
@@ -89,7 +91,7 @@ export class GoogleSessionBridge {
     return '';
   }
   private valid(value: unknown): GoogleSession | undefined {
-    return this.context ? readGoogleSession(value, this.context, this.marker()) : undefined;
+    return this.context ? readGoogleSession(value, this.context, this.marker(), Date.now(), this.options.scope) : undefined;
   }
   currentNonce(): string { return this.marker(true); }
   isCurrent(nonce: string): boolean { return !!nonce && this.marker() === nonce; }
@@ -100,7 +102,7 @@ export class GoogleSessionBridge {
     if (!this.context?.clientId || !this.control) return '';
     if (expectedNonce && this.marker() !== expectedNonce) return this.marker();
     const nonce = crypto.randomUUID();
-    try { this.control.setItem(controlKey(this.context), nonce); }
+    try { this.control.setItem(this.controlKey(this.context), nonce); }
     catch { this.warn(); return ''; }
     this.send({type: 'clear', context: this.context, nonce, message});
     return nonce;
@@ -108,11 +110,12 @@ export class GoogleSessionBridge {
   remember(session: GoogleSession, announce = true): void {
     const saved = this.valid(session);
     if (!saved) return;
-    try { if (!this.storage) throw new Error('unavailable'); this.storage.setItem(GOOGLE_SESSION_KEY, JSON.stringify(saved)); }
+    try { if (!this.storage) throw new Error('unavailable'); this.storage.setItem(this.options.storageKey, JSON.stringify(saved)); }
     catch { this.warn(); }
     if (announce) this.send({type: 'available', context: contextOf(saved)});
   }
-  forget(): void { try { this.storage?.removeItem(GOOGLE_SESSION_KEY); } catch { this.warn(); } }
+  forget(): void { try { this.storage?.removeItem(this.options.storageKey); } catch { this.warn(); } }
+  private controlKey(context: GoogleSessionContext): string { return this.options.controlPrefix + JSON.stringify([context.generation, context.clientId]); }
 
   verify(request = true): void {
     if (this.closed) return;

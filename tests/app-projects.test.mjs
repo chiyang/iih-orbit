@@ -36,6 +36,83 @@ function application() {
   return {app, settings, store, close: () => { clearTimeout(app.toastTimer); injector.destroy(); }};
 }
 
+test('專案封存分開列出，不計整體進度，任務仍可篩選並開啟；改名保留封存狀態', async () => {
+  const {app, store, close} = application();
+  try {
+    app.openProjects();
+    const project = store.projects().find(project => project.id === 'website');
+    await app.toggleProjectArchived(project);
+    assert.equal(app.overallProgress().percent, 0);
+    assert.equal(app.activeProjectCount(), 1);
+    assert.deepEqual(app.progressRows().map(row => row.id), ['welcome', '']);
+    assert.deepEqual(app.archivedProgressRows().map(row => row.id), ['website']);
+    assert.equal(app.visibleTasks().length, 3);
+    app.selectProject('website');
+    assert.equal(app.selectedProjectArchived(), true);
+    assert.equal(app.selectedProgress().percent, 100);
+    assert.equal(app.visibleTasks()[0].id, 'website-task');
+    app.editProject(store.projects().find(project => project.id === 'website'));
+    app.projectDraft = '已結案網站'; await app.saveProject();
+    assert.equal(store.projects().find(project => project.id === 'website').archived, true);
+    await app.toggleProjectArchived(store.projects().find(project => project.id === 'website'));
+    assert.equal(app.selectedProjectArchived(), false);
+    assert.equal(app.overallProgress().percent, 33);
+  } finally { close(); }
+});
+
+test('所有專案下新增任務自動選擇同名或第一個未封存專案，舊未指定任務保留', async () => {
+  const {app, store, close} = application();
+  try {
+    app.openTask(); assert.equal(app.draft.projectId, 'welcome');
+    app.closeModal();
+    await store.setProjectArchived(store.projects()[0], true);
+    app.openTask(); assert.equal(app.draft.projectId, 'website');
+    assert.equal(store.tasks().find(task => task.id === 'daily').projectId, '');
+    app.closeModal(); app.openWorkspaces(); app.workspaceDraft = '新的工作空間'; await app.saveWorkspace();
+    app.openTask(); assert.equal(app.draft.projectId, store.projects()[0].id);
+    assert.equal(store.projects()[0].name, '新的工作空間');
+    app.draft.title = '開始新任務'; await app.saveTask();
+    assert.equal(store.tasks()[0].projectId, store.projects()[0].id);
+  } finally { close(); }
+});
+
+test('樣板切換自動建議名稱但保留自訂名稱，範例選項與編輯工作空間互不混用', async () => {
+  const {app, store, close} = application();
+  try {
+    app.openWorkspaces();
+    app.chooseWorkspaceTemplate({id: 'administration', name: '學程行政'});
+    assert.equal(app.workspaceDraft, '學程行政');
+    app.chooseWorkspaceTemplate({id: 'research', name: '研究計劃'});
+    assert.equal(app.workspaceDraft, '研究計劃');
+    app.workspaceDraft = '我的教學工作';
+    app.chooseWorkspaceTemplate({id: 'courses', name: '課程安排'});
+    assert.equal(app.workspaceDraft, '我的教學工作');
+    app.workspaceExamples = false;
+    await Promise.all([app.saveWorkspace(), app.saveWorkspace()]);
+    assert.equal(store.workspaces().filter(workspace => workspace.name === '我的教學工作').length, 1);
+    assert.equal(store.tasks().length, 0); assert.equal(store.categories()[0].name, '授課安排');
+    assert.equal(store.projects()[0].name, '我的教學工作');
+    app.openWorkspaces(); app.editWorkspace(store.currentWorkspace());
+    app.chooseWorkspaceTemplate({id: 'research', name: '研究計劃'});
+    assert.equal(app.workspaceDraft, '我的教學工作');
+    app.cancelWorkspaceEdit(); assert.equal(app.workspaceTemplateId(), 'blank'); assert.equal(app.workspaceDraft, '');
+  } finally { close(); }
+});
+
+test('分類排序即時更新顯示順序，工作空間被取代時不操作新的分類', async () => {
+  const {app, store, close} = application();
+  try {
+    await store.saveCategory({id: 'admin', name: '行政', color: 'blue'});
+    app.openCategories(); await app.reorderCategory('admin', -1);
+    assert.deepEqual(store.categories().map(category => category.id), ['admin', 'design']);
+    const peer = new BoardStore();
+    await peer.resetData(false, peer.revision()); store.refreshFromStorage();
+    await app.reorderCategory('admin', 1);
+    assert.match(app.categoryError(), /取代/);
+    assert.equal(store.categories().length, 0);
+  } finally { close(); }
+});
+
 test('初始顯示所有專案，選擇單一專案會同步篩選看板、清單與日曆，搜尋不改動進度', () => {
   const {app, close} = application();
   try {
@@ -259,7 +336,7 @@ test('側欄入口直接開啟月曆設定，設定分頁支援左右鍵與首�
     settings.initialTab = signal('calendar'); assert.equal(settings.activeTab(), 'calendar');
     let focused = '', prevented = 0;
     const key = name => settings.tabKeydown({key: name, preventDefault() { prevented++; }, currentTarget: {closest: () => ({querySelector: selector => ({focus() { focused = selector; }})})}});
-    key('ArrowRight'); assert.equal(settings.activeTab(), 'data'); assert.match(focused, /data/);
+    key('ArrowRight'); assert.equal(settings.activeTab(), 'drive'); assert.match(focused, /drive/);
     settings.beginReset('all'); settings.confirmation = '重置整個 Orbit';
     key('End'); assert.equal(settings.activeTab(), 'reset');
     key('ArrowRight'); assert.equal(settings.activeTab(), 'appearance');

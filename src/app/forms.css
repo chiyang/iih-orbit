@@ -2,6 +2,7 @@
 .modal { width: 760px; max-width: 100%; max-height: calc(100dvh - 48px); overflow-y: auto; border-radius: 15px; background: var(--surface); box-shadow: 0 24px 80px rgb(var(--shadow-rgb) / 0.169); animation: enter .18s ease-out; }
 .modal[data-modal='task'] { width: 820px; }
 .modal[data-modal='projects'] { width: 760px; }
+.modal[data-modal='workspaces'] { width: 900px; }
 .modal[data-modal='settings'] { width: 1040px; height: min(820px, calc(100dvh - 48px)); display: flex; flex-direction: column; overflow: hidden; }
 .modal[data-modal='settings'] > .modal-header, .modal[data-modal='settings'] > .modal-footer { flex-shrink: 0; }
 .modal[data-modal='settings'] > app-settings { flex: 1; min-height: 0; }
@@ -47,6 +48,14 @@
 .category-manager-row { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 7px; padding: 9px 12px; }
 .category-manager-row strong { color: var(--text-muted); font-size: var(--font-12); font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
 .category-manager-row small { margin-left: auto; font-size: var(--font-9); color: var(--text-soft); }
+.category-manager-row .management-title small { margin-left: 0; }
+.workspace-examples { display: flex; align-items: start; gap: 9px; color: var(--text-muted); font-size: var(--font-10); margin: 16px 0 20px; cursor: pointer; }
+.workspace-examples input { accent-color: var(--accent-strong); flex-shrink: 0; margin-top: 4px; }
+.project-archive-button { display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-muted); font-size: var(--font-10); }
+.project-archive-button app-icon { width: 14px; height: 14px; }
+.project-archive-button:hover { background: var(--surface-hover); }
+.archived-project { border-style: dashed; }
+@media (max-width: 540px) { .category-manager-row { flex-wrap: wrap; } .category-manager-row .management-actions { margin-left: auto; } }
 .danger-icon:hover { background: var(--danger-bg); color: var(--danger-text); }
 .category-form { margin-top: 25px; border-top: 1px solid var(--border); padding-top: 18px; }
 .category-form h3 { font-size: var(--font-12); font-weight: 500; color: var(--text-muted); margin: 0 0 18px; }

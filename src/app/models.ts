@@ -19,6 +19,7 @@ export interface Subtask {
 export interface Project {
   id: string;
   name: string;
+  archived?: boolean;
 }
 
 export interface Task {

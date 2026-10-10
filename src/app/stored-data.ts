@@ -5,6 +5,7 @@ import { readAppearance } from './appearance-data.ts';
 import type { GoogleSettings } from './google-data.ts';
 import { readGoogleSettings } from './google-data.ts';
 import { type ReminderPreferences, readReminders } from './reminder-data.ts';
+import { type DriveSettings, readDriveSettings } from './drive-settings.ts';
 
 export const WORKSPACE_STORAGE_KEY = 'orbit-workspaces-v2';
 export const WORKSPACE_SELECTION_KEY = 'orbit-active-workspace-v1';
@@ -18,6 +19,7 @@ export interface StoredWorkspaceData {
   preferences?: AppearancePreferences;
   google?: GoogleSettings;
   reminders?: ReminderPreferences;
+  drive?: DriveSettings;
 }
 
 export function readStoredData(value: unknown): StoredWorkspaceData | null {
@@ -33,5 +35,7 @@ export function readStoredData(value: unknown): StoredWorkspaceData | null {
   if (google === null) return null;
   const reminders = source.reminders === undefined ? undefined : readReminders(source.reminders);
   if (reminders === null) return null;
-  return {formatVersion: 2, generation: source.generation, revision: source.revision, updatedAt: source.updatedAt, state, ...(preferences ? {preferences} : {}), ...(google ? {google} : {}), ...(reminders ? {reminders} : {})};
+  const drive = source.drive === undefined ? undefined : readDriveSettings(source.drive, state.workspaces.map(workspace => workspace.id));
+  if (drive === null) return null;
+  return {formatVersion: 2, generation: source.generation, revision: source.revision, updatedAt: source.updatedAt, state, ...(preferences ? {preferences} : {}), ...(google ? {google} : {}), ...(reminders ? {reminders} : {}), ...(drive ? {drive} : {})};
 }

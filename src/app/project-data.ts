@@ -13,11 +13,12 @@ export function tasksForProject(tasks: readonly Task[], projectId: string): Task
   return tasks.filter(task => projectId === 'all' || task.projectId === projectId);
 }
 
-/** Overall progress is weighted by task counts, and archived tasks are excluded. */
-export function projectProgress(tasks: readonly Task[], statuses: readonly BoardStatus[], projectId: string, name: string): ProjectProgress {
+/** Overall progress excludes archived projects; their individual progress remains available. */
+export function projectProgress(tasks: readonly Task[], statuses: readonly BoardStatus[], projectId: string, name: string, projects: readonly Project[] = []): ProjectProgress {
   const selected = tasksForProject(tasks, projectId);
   const kinds = new Map(statuses.map(status => [status.id, status.kind]));
-  const active = selected.filter(task => kinds.get(task.status) !== 'archived');
+  const archived = new Set(projects.filter(project => project.archived).map(project => project.id));
+  const active = selected.filter(task => kinds.get(task.status) !== 'archived' && (projectId !== 'all' || !archived.has(task.projectId)));
   const completed = active.filter(task => kinds.get(task.status) === 'done').length;
   return {id: projectId, name, completed, total: active.length, taskCount: selected.length, percent: active.length ? Math.round(completed / active.length * 100) : 0};
 }

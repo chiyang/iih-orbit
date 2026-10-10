@@ -1,0 +1,18 @@
+<fieldset class="template-picker" [disabled]="disabled()">
+  <legend>從樣板開始</legend>
+  <div class="template-grid" role="group" aria-label="工作空間樣板">
+    <button type="button" class="template-option blank" [class.selected]="selected() === 'blank'" [attr.aria-pressed]="selected() === 'blank'" (click)="choose.emit({id: 'blank', name: ''})"><app-icon name="plus" /><span><strong>空白工作空間</strong><small>同名專案，任務與分類自行建立。</small></span></button>
+    @for (item of templates; track item.id) {
+      <button type="button" class="template-option" [class.selected]="selected() === item.id" [attr.aria-pressed]="selected() === item.id" (click)="choose.emit({id: item.id, name: item.name})"><app-icon [name]="item.icon" /><span><strong>{{ item.name }}</strong><small>{{ item.description }}</small></span></button>
+    }
+  </div>
+</fieldset>
+@if (template(); as item) {
+  <section class="template-preview" aria-label="樣板內容預覽">
+    <strong>{{ item.name }}樣板內容</strong>
+    <p>專案：{{ workspaceName().trim() || item.name }}@for (project of item.projects; track project) {、{{ project === workspaceName().trim() ? project + '（專案）' : project }}}</p>
+    <div class="template-categories">@for (category of item.categories; track category.name) {<span [orbitColor]="category.color"><i></i>{{ category.name }}</span>}</div>
+    <p>{{ item.examples.length }} 個可選的示範任務，日期使用本週 {{ week[0] }} ～ {{ week[6] }}。</p>
+    <ul>@for (task of item.examples; track task.title) {<li>{{ task.title }}</li>}</ul>
+  </section>
+}

@@ -6,8 +6,9 @@ export function createWorkspaceState(board: BoardState): WorkspaceState {
   return {version: 1, activeWorkspaceId: 'workspace-default', workspaces: [{...structuredClone(board), id: 'workspace-default', name: '我的工作空間'}]};
 }
 
-export function emptyWorkspace(id: string, name: string): Workspace {
-  return {version: 4, id, name: name.trim(), projects: [], categories: [], statuses: COLUMNS.map(status => ({...status})), tasks: []};
+export function emptyWorkspace(id: string, name: string, newId: () => string = () => crypto.randomUUID()): Workspace {
+  const label = name.trim();
+  return {version: 4, id, name: label, projects: [{id: newId(), name: label}], categories: [], statuses: COLUMNS.map(status => ({...status})), tasks: []};
 }
 
 export function readWorkspaceState(value: unknown): WorkspaceState | null {

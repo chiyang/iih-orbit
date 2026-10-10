@@ -6,6 +6,7 @@ import { FormsModule } from '@angular/forms';
 import { BoardStore, StoreResult, TaskEditContext } from './board-store';
 import { Calendar, CalendarCreate } from './calendar';
 import { Icon } from './icon';
+import { BrandMark } from './brand-mark';
 import { ThemeColor } from './theme-color';
 import { Settings } from './settings';
 import type { SettingsTab } from './settings';
@@ -17,6 +18,7 @@ import { UiPreferences } from './ui-preferences';
 import { boardStatusesForScope } from './workspace-data';
 import { projectProgress, projectSummaries, tasksForProject } from './project-data';
 import { CalendarSources } from './calendar-sources';
+import { DriveStatus } from './drive-status';
 import { ExternalEventDetails } from './external-event-details';
 import { ExternalEvent } from './google-data';
 import { DeadlineFilter, deadlineState, DUE_DAY_PRESETS } from './reminder-data';
@@ -26,13 +28,15 @@ import { ReminderPopups } from './reminder-popups';
 import type { ReminderItem, ReminderTab } from './reminder-items';
 import { TaskCell } from './task-cell';
 import type { TaskCellField } from './task-cell';
+import { WorkspaceTemplatePicker } from './workspace-template-picker';
+import type { WorkspaceTemplateId } from './workspace-templates';
 
 type Modal = 'task' | 'categories' | 'projects' | 'delete' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, Calendar, ThemeColor, Settings, CalendarSources, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell],
+  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker],
   templateUrl: './app.html',
   styleUrls: ['./app.css', './forms.css']
 })
@@ -55,9 +59,13 @@ export class App {
     const id = this.projectFilter();
     return id === '' || this.store.projects().some(project => project.id === id) ? id : 'all';
   });
-  readonly progressRows = computed(() => projectSummaries(this.store.tasks(), this.statuses(), this.store.projects()));
-  readonly selectedProgress = computed(() => projectProgress(this.store.tasks(), this.statuses(), this.selectedProjectId(), this.selectedProjectId() === 'all' ? '所有專案' : this.projectName(this.selectedProjectId())));
-  readonly overallProgress = computed(() => projectProgress(this.store.tasks(), this.statuses(), 'all', '所有專案'));
+  readonly activeProjectCount = computed(() => this.store.projects().filter(project => !project.archived).length);
+  readonly progressRows = computed(() => projectSummaries(this.store.tasks(), this.statuses(), this.store.projects().filter(project => !project.archived)));
+  readonly archivedProgressRows = computed(() => this.store.projects().filter(project => project.archived).map(project => projectProgress(this.store.tasks(), this.statuses(), project.id, project.name)));
+  readonly selectedProjectArchived = computed(() => !!this.store.projects().find(project => project.id === this.selectedProjectId())?.archived);
+  readonly selectedProgress = computed(() => projectProgress(this.store.tasks(), this.statuses(), this.selectedProjectId(), this.selectedProjectId() === 'all' ? '所有專案' : this.projectName(this.selectedProjectId()), this.store.projects()));
+  readonly overallProgress = computed(() => projectProgress(this.store.tasks(), this.statuses(), 'all', '所有專案', this.store.projects()));
+  readonly selectedPendingCount = computed(() => tasksForProject(this.store.tasks(), this.selectedProjectId()).filter(task => !this.store.isDone(task) && !this.store.isArchived(task)).length);
   readonly projectEditing = signal<Project | null>(null);
   readonly projectToDelete = signal<Project | null>(null);
   readonly priorityFilter = signal('all');
@@ -122,6 +130,10 @@ export class App {
   statusDraft: Omit<BoardStatus, 'id'> = {label: '', subtitle: '', color: 'gray', kind: 'active', hidden: false};
   statusDestination = '';
   workspaceDraft = '';
+  readonly workspaceTemplateId = signal<WorkspaceTemplateId>('blank');
+  readonly workspaceSaving = signal(false);
+  workspaceExamples = true;
+  private workspaceTemplateName = '';
   workspaceDeleteName = '';
   subtaskDraft = '';
   hasStartTime = false;
@@ -541,6 +553,11 @@ export class App {
     this.categoryError.set('');
   }
 
+  async reorderCategory(id: string, direction: -1 | 1): Promise<void> {
+    if (this.store.pendingWrites() || !this.formContextValid()) return;
+    if (this.handleResult(await this.store.reorderCategory(id, direction), true)) this.notifySaved('分類順序已更新');
+  }
+
   readonly colorHex = colorHex;
 
   setDraftColor(kind: 'category' | 'status', value: string): void {
@@ -632,6 +649,9 @@ export class App {
   openWorkspaces(): void {
     this.rememberFormContext();
     this.workspaceDraft = '';
+    this.workspaceTemplateId.set('blank');
+    this.workspaceTemplateName = '';
+    this.workspaceExamples = true;
     this.workspaceEditingId.set('');
     this.workspaceToDelete.set(null);
     this.formError.set('');
@@ -654,8 +674,24 @@ export class App {
     this.formError.set('');
   }
 
+  chooseWorkspaceTemplate(selection: {id: WorkspaceTemplateId; name: string}): void {
+    if (this.store.pendingWrites() || this.workspaceSaving() || this.workspaceEditingId()) return;
+    if (!this.workspaceDraft.trim() || this.workspaceDraft === this.workspaceTemplateName) this.workspaceDraft = selection.name;
+    this.workspaceTemplateId.set(selection.id);
+    this.workspaceTemplateName = selection.name;
+    this.formError.set('');
+  }
+
+  cancelWorkspaceEdit(): void {
+    this.workspaceEditingId.set('');
+    this.workspaceDraft = '';
+    this.workspaceTemplateId.set('blank');
+    this.workspaceTemplateName = '';
+    this.formError.set('');
+  }
+
   async saveWorkspace(): Promise<void> {
-    if (this.store.pendingWrites() || !this.formContextValid(false)) return;
+    if (this.store.pendingWrites() || this.workspaceSaving() || !this.formContextValid(false)) return;
     const name = this.workspaceDraft.trim();
     if (!name) { this.formError.set('請輸入工作空間名稱。'); return; }
     if (this.store.workspaces().some(workspace => workspace.id !== this.workspaceEditingId() && workspace.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
@@ -663,11 +699,15 @@ export class App {
       return;
     }
     const editing = !!this.workspaceEditingId();
-    if (!this.handleResult(await this.store.saveWorkspace(this.workspaceEditingId(), name))) return;
+    this.workspaceSaving.set(true);
+    let saved: StoreResult;
+    try { saved = await this.store.saveWorkspace(this.workspaceEditingId(), name, {templateId: this.workspaceTemplateId(), includeExamples: this.workspaceExamples}); }
+    finally { this.workspaceSaving.set(false); }
+    if (!this.handleResult(saved)) return;
     if (!editing) { this.clearFilters(); this.sortKey.set(null); }
     this.sidebarOpen.set(false);
     this.closeModal();
-    this.notifySaved(editing ? '工作空間已改名' : '工作空間已建立，可以開始新增任務');
+    this.notifySaved(editing ? '工作空間已改名' : '工作空間已建立，並已加入同名專案');
   }
 
   requestDeleteWorkspace(workspace: Workspace): void {
@@ -721,7 +761,7 @@ export class App {
       return;
     }
     const original = this.projectEditing();
-    if (!this.handleResult(await this.store.saveProject({id: original?.id ?? crypto.randomUUID(), name: this.projectDraft}, original))) return;
+    if (!this.handleResult(await this.store.saveProject({...original, id: original?.id ?? crypto.randomUUID(), name: this.projectDraft}, original))) return;
     this.resetProjectDraft();
     this.progressExpanded.set(true);
     this.notifySaved(original ? '專案名稱已更新' : '專案已新增，可在任務中設定所屬專案');
@@ -734,6 +774,14 @@ export class App {
     if (this.projectFilter() === project.id) this.projectFilter.set('all');
     this.resetProjectDraft();
     this.notifySaved('專案已移除，任務保留並改為未指定專案');
+  }
+
+  async toggleProjectArchived(project: Project): Promise<void> {
+    if (this.store.pendingWrites() || !this.formContextValid()) return;
+    if (!this.handleResult(await this.store.setProjectArchived(project, !project.archived))) return;
+    if (this.projectEditing()?.id === project.id) this.projectEditing.set({...this.store.projects().find(item => item.id === project.id)!});
+    this.projectToDelete.set(null);
+    this.notifySaved(project.archived ? '專案已還原，重新計入所有專案進度' : '專案已封存，任務保留並排除於所有專案進度');
   }
 
   closeModal(): void {
@@ -782,6 +830,7 @@ export class App {
   }
 
   private emptyTask(status: TaskStatus): Task {
-    return {id: crypto.randomUUID(), title: '', description: '', categoryId: '', projectId: this.selectedProjectId() === 'all' ? '' : this.selectedProjectId(), status, priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: []};
+    const defaultProject = this.store.projects().find(project => !project.archived && project.name === this.store.currentWorkspace().name) ?? this.store.projects().find(project => !project.archived);
+    return {id: crypto.randomUUID(), title: '', description: '', categoryId: '', projectId: this.selectedProjectId() === 'all' ? defaultProject?.id ?? '' : this.selectedProjectId(), status, priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: []};
   }
 }

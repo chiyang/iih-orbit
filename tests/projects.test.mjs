@@ -4,7 +4,7 @@ import { COLUMNS } from '../src/app/models.ts';
 import { readBoardState } from '../src/app/board-data.ts';
 import { projectProgress, projectSummaries, tasksForProject } from '../src/app/project-data.ts';
 import { sortTasks } from '../src/app/task-schedule.ts';
-import { readBackup } from '../src/app/backup-data.ts';
+import { createBackup, copyWorkspaces, readBackup } from '../src/app/backup-data.ts';
 
 const projects = [{id: 'welcome', name: '迎新活動'}, {id: 'website', name: '網站改版'}, {id: 'empty', name: '未啟動專案'}];
 const task = {id: 'first', title: '任務', description: '保留內容', projectId: 'welcome', categoryId: '', status: 'todo', priority: 'medium', startDate: '2026-10-07', startTime: '09:00', dueDate: '2026-10-08', dueTime: '10:00', subtasks: []};
@@ -66,8 +66,40 @@ test('格式 1 舊備份匯入時升級專案與任務，舊匯出檔仍保持�
   const backup = {application: 'iih-orbit', formatVersion: 1, appVersion: '1.1.0', kind: 'workspaces', exportedAt: '2026-10-08T00:00:00Z', data: {version: 1, activeWorkspaceId: 'old', workspaces: [workspace]}};
   const original = structuredClone(backup);
   const restored = readBackup(backup);
-  assert.equal(restored.formatVersion, 4);
+  assert.equal(restored.formatVersion, 5);
   assert.equal(restored.data.workspaces[0].projects[0].name, '迎新活動');
   assert.equal(restored.data.workspaces[0].tasks[0].projectId, restored.data.workspaces[0].projects[0].id);
   assert.deepEqual(backup, original);
+});
+
+test('專案封存排除整體進度，保留任務與個別專案進度，還原後重新計入', () => {
+  const list = [{...projects[0], archived: true}, projects[1]];
+  const tasks = [task, {...task, id: 'web', projectId: 'website', status: 'done'}, {...task, id: 'loose', projectId: ''}, {...task, id: 'history', projectId: 'website', status: 'archived'}];
+  const snapshot = structuredClone(tasks);
+  const total = projectProgress(tasks, COLUMNS, 'all', '所有專案', list);
+  assert.deepEqual([total.completed, total.total, total.percent, total.taskCount], [1, 2, 50, 4]);
+  const archived = projectProgress(tasks, COLUMNS, 'welcome', '迎新活動', list);
+  assert.equal(archived.total, 1); assert.equal(archived.percent, 0);
+  assert.equal(projectProgress(tasks, COLUMNS, 'all', '所有專案', projects).percent, 33);
+  assert.equal(projectProgress([task], COLUMNS, 'all', '所有專案', list).total, 0);
+  assert.equal(projectProgress([task], COLUMNS, 'all', '所有專案', list).percent, 0);
+  assert.deepEqual(tasksForProject(tasks, 'all'), snapshot);
+  assert.deepEqual(tasks, snapshot);
+});
+
+test('封存旗標驗證及備份往返，舊專案沒有旗標時不新增欄位', () => {
+  const legacy = readBoardState(board);
+  assert.deepEqual(legacy.projects, projects);
+  for (const archived of ['false', null, 1]) assert.equal(readBoardState({...board, projects: [{...projects[0], archived}]}), null);
+  const archivedBoard = {...board, projects: [{...projects[0], archived: true}, {...projects[1], archived: false}]};
+  const workspace = {...archivedBoard, id: 'workspace', name: '學程工作'};
+  const state = {version: 1, activeWorkspaceId: workspace.id, workspaces: [workspace]};
+  for (const kind of ['full', 'workspaces']) {
+    const saved = readBackup(createBackup(state, kind, [workspace.id], 'standard'));
+    assert.deepEqual(saved.data.workspaces[0].projects, workspace.projects);
+    const copy = copyWorkspaces(saved.data.workspaces)[0];
+    assert.equal(copy.projects[0].archived, true);
+    assert.notEqual(copy.projects[0].id, workspace.projects[0].id);
+    assert.equal(copy.tasks[0].projectId, copy.projects[0].id);
+  }
 });

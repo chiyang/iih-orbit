@@ -27,6 +27,11 @@
 .project-group-track > span { height: 100%; display: block; background: var(--accent-strong); border-radius: inherit; }
 .project-group-percent { text-align: right; font-size: var(--font-12); color: var(--accent-text); }
 .project-group-empty { margin: 5px 0; padding: 12px; color: var(--text-muted); font-size: var(--font-11); line-height: 1.8; }
+.archived-projects { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 4px; }
+.archived-projects summary { cursor: pointer; color: var(--text-muted); font-size: var(--font-11); padding: 7px 4px; }
+.archived-projects summary app-icon { width: 15px; height: 15px; margin: 0 6px; }
+.archived-projects summary span { display: inline-block; font-size: var(--font-9); margin-left: 10px; }
+.archived-projects .project-group-row { margin-top: 7px; }
 .task-project-tag { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; margin: 9px 0 0; border: 1px solid var(--border); border-radius: 5px; color: var(--accent-text); background: var(--control-bg); font-size: var(--font-9); line-height: 1.6; text-align: left; overflow-wrap: anywhere; }
 .task-project-tag app-icon { width: 12px; height: 12px; }
 .task-project-tag:hover { background: var(--surface-hover); }

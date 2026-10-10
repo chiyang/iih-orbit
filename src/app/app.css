@@ -1,6 +1,6 @@
 :host { display: block; min-height: 100vh; --sidebar-width: max(220px, calc(234px * var(--font-scale))); }
 .personal-symbol { display: grid; place-items: center; width: 31px; height: 31px; border-radius: 9px; color: var(--text-muted); background: var(--accent-soft); }
-.personal-symbol app-icon { width: 18px; height: 18px; }
+.personal-symbol app-brand-mark { width: 27px; height: 23px; color: var(--accent-text); }
 .personal-mode { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
 .personal-mode app-icon { width: 15px; height: 15px; }
 .local-mode { display: flex; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface-soft); color: var(--text-soft); font-size: var(--font-9); }

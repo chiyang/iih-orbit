@@ -9,6 +9,9 @@ import { readStoredData, StoredWorkspaceData, WORKSPACE_SELECTION_KEY, WORKSPACE
 import { withStorageLock } from './storage-coordinator';
 import { CalendarSource, DEFAULT_GOOGLE, GoogleSettings, readGoogleSettings } from './google-data';
 import { DEFAULT_REMINDERS, ReminderPreferences, readReminders } from './reminder-data';
+import { DEFAULT_DRIVE, DriveSettings, readDriveSettings } from './drive-settings';
+import { projectProgress } from './project-data';
+import type { WorkspaceCreationOptions } from './workspace-templates';
 
 export type StoreResult = {ok: true; persisted: boolean} | {ok: false; message: string};
 export interface TaskEditContext {
@@ -31,6 +34,7 @@ export class BoardStore implements OnDestroy {
   readonly appearance = signal<AppearancePreferences>(this.snapshot.preferences ?? this.legacyAppearance());
   readonly google = signal<GoogleSettings>(this.snapshot.google ?? structuredClone(DEFAULT_GOOGLE));
   readonly reminders = signal<ReminderPreferences>(this.snapshot.reminders ?? {...DEFAULT_REMINDERS});
+  readonly drive = signal<DriveSettings>(this.snapshot.drive ?? structuredClone(DEFAULT_DRIVE));
   readonly workspaceState = signal<WorkspaceState>(this.selectedState(this.snapshot.state));
   readonly workspaces = computed(() => this.workspaceState().workspaces);
   readonly currentWorkspace = computed(() => this.workspaces().find(workspace => workspace.id === this.workspaceState().activeWorkspaceId)!);
@@ -41,7 +45,7 @@ export class BoardStore implements OnDestroy {
   readonly statuses = computed(() => this.state().statuses);
   readonly activeTasks = computed(() => this.tasks().filter(task => !this.isArchived(task)));
   readonly completed = computed(() => this.activeTasks().filter(task => this.isDone(task)).length);
-  readonly progress = computed(() => this.activeTasks().length ? Math.round(this.completed() / this.activeTasks().length * 100) : 0);
+  readonly progress = computed(() => projectProgress(this.tasks(), this.statuses(), 'all', '所有專案', this.projects()).percent);
   private channel?: BroadcastChannel;
   private readonly storageListener = (event: StorageEvent) => {
     if (event.key === WORKSPACE_STORAGE_KEY || event.key === null) this.refreshFromStorage();
@@ -124,6 +128,17 @@ export class BoardStore implements OnDestroy {
     return this.mutateBoard(board => ({...board, categories: board.categories.filter(category => category.id !== id), tasks: board.tasks.map(task => task.categoryId === id ? {...task, categoryId: ''} : task)}));
   }
 
+  reorderCategory(id: string, direction: -1 | 1): Promise<StoreResult> {
+    return this.mutateBoard(board => {
+      const categories = [...board.categories];
+      const index = categories.findIndex(category => category.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= categories.length) return board;
+      [categories[index], categories[target]] = [categories[target], categories[index]];
+      return {...board, categories};
+    });
+  }
+
   saveStatus(status: BoardStatus): Promise<StoreResult> {
     const saved = {...status, hidden: status.hidden ?? status.kind === 'archived'};
     const original = this.statuses().find(item => item.id === saved.id);
@@ -153,7 +168,8 @@ export class BoardStore implements OnDestroy {
     });
   }
   saveProject(project: Project, original: Project | null = this.projects().find(item => item.id === project.id) ?? null): Promise<StoreResult> {
-    const saved = {id: project.id, name: project.name.trim()};
+    const archived = project.archived ?? original?.archived;
+    const saved = {id: project.id, name: project.name.trim(), ...(archived === undefined ? {} : {archived})};
     return this.mutateBoard(board => {
       const current = board.projects.find(item => item.id === saved.id) ?? null;
       if (JSON.stringify(current) !== JSON.stringify(original)) throw new Error('這個專案已在其他分頁更新或刪除，請重新查看；輸入內容仍保留。');
@@ -170,16 +186,28 @@ export class BoardStore implements OnDestroy {
     });
   }
 
+  setProjectArchived(project: Project, archived: boolean): Promise<StoreResult> {
+    return this.saveProject({...project, archived}, project);
+  }
+
   switchWorkspace(id: string): void {
     if (!this.workspaces().some(workspace => workspace.id === id)) return;
     this.workspaceState.update(state => ({...state, activeWorkspaceId: id}));
     this.rememberSelection(id);
   }
 
-  saveWorkspace(id: string, name: string): Promise<StoreResult> {
+  async saveWorkspace(id: string, name: string, options: WorkspaceCreationOptions = {}): Promise<StoreResult> {
     const label = name.trim();
-    const newWorkspace = id ? null : emptyWorkspace(crypto.randomUUID(), label);
+    const generation = this.generation();
+    let newWorkspace = id ? null : emptyWorkspace(crypto.randomUUID(), label);
+    if (newWorkspace && options.templateId && options.templateId !== 'blank') {
+      try {
+        const { workspaceFromTemplate } = await import('./workspace-templates');
+        newWorkspace = workspaceFromTemplate(newWorkspace.id, label, options);
+      } catch { return {ok: false, message: '無法建立樣板，請重新選擇或重新整理後再試。'}; }
+    }
     return this.transact(data => {
+      if (data.generation !== generation) throw new Error('原資料已被其他分頁取代，請重新開啟工作空間設定。');
       if (!label) throw new Error('請輸入工作空間名稱。');
       if (id && !data.state.workspaces.some(workspace => workspace.id === id)) throw new Error('這個工作空間已被刪除。');
       return {...data, state: {...data.state, workspaces: newWorkspace ? [...data.state.workspaces, newWorkspace] : data.state.workspaces.map(workspace => workspace.id === id ? {...workspace, name: label} : workspace)}};
@@ -206,7 +234,15 @@ export class BoardStore implements OnDestroy {
   async backupForExport(kind: BackupKind, selectedIds: string[] = [], includeGoogle = false): Promise<OrbitBackup> {
     return withStorageLock(() => {
       if (!this.hasUnsavedChanges()) this.apply(this.readLatest());
-      return createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), includeGoogle, this.reminders());
+      return createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), includeGoogle, this.reminders(), this.drive());
+    });
+  }
+
+  driveSnapshot(kind: BackupKind, selectedIds: string[]): Promise<{backup: OrbitBackup; revision: string}> {
+    return withStorageLock(() => {
+      if (this.hasUnsavedChanges()) throw new Error('本機有未保存的資料，請先下載備份，Drive 自動同步已暫停。');
+      this.apply(this.readLatest());
+      return {backup: createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), false, this.reminders(), this.drive()), revision: this.revision()};
     });
   }
 
@@ -232,8 +268,45 @@ export class BoardStore implements OnDestroy {
       if (patch.clientId !== undefined && patch.clientId !== data.google!.clientId) {
         settings.accountId = ''; settings.email = ''; settings.sources = [];
       }
-      return {...data, google: settings};
+      return {...data, google: settings, ...(patch.clientId !== undefined && patch.clientId !== data.google!.clientId ? {drive: structuredClone(DEFAULT_DRIVE)} : {})};
     });
+  }
+
+  updateDrive(patch: Partial<DriveSettings>): Promise<StoreResult> {
+    return this.transact(data => {
+      const drive = readDriveSettings({...DEFAULT_DRIVE, ...data.drive, ...structuredClone(patch)}, data.state.workspaces.map(w => w.id));
+      if (!drive) throw new Error('Drive 設定不合法，請確認帳號與工作空間範圍。');
+      return {...data, drive};
+    }, {requirePersistence: true});
+  }
+  stopDrive(expectedGeneration: string, expectedSettings: string): Promise<StoreResult> {
+    return this.transact(data => {
+      const drive = data.drive ?? structuredClone(DEFAULT_DRIVE);
+      if (data.generation !== expectedGeneration || JSON.stringify(drive) !== expectedSettings) throw new Error('Drive 設定已變更，請重新確認刪除範圍。');
+      return {...data, drive: {...drive, mode: 'off'}};
+    }, {requirePersistence: true});
+  }
+
+  /** Full synchronization includes app preferences; authentication and Drive controls stay local. */
+  applyDriveBackup(input: OrbitBackup, expectedRevision: string, targetIds: string[]): Promise<StoreResult> {
+    const backup = readBackup(input);
+    return this.transact(data => {
+      if (this.hasUnsavedChanges() || data.revision !== expectedRevision) throw new Error('本機資料已變更，雲端資料未套用。請重新檢查同步版本。');
+      const incoming = structuredClone(backup.data.workspaces);
+      const incomingIds = new Set(incoming.map(w => w.id));
+      const workspaces = backup.kind === 'full' ? incoming : [...data.state.workspaces.filter(w => !targetIds.includes(w.id) && !incomingIds.has(w.id)), ...incoming];
+      const affected = backup.kind === 'full' ? data.state.workspaces.map(w => w.id) : targetIds;
+      const oldSources = data.google!.sources.map(s => ({...s, workspaceIds: s.workspaceIds.filter(id => !affected.includes(id) && !incomingIds.has(id))}));
+      for (const source of backup.kind === 'full' ? backup.google?.sources ?? [] : backup.calendarSources ?? []) {
+        const old = oldSources.find(s => s.accountId === source.accountId && s.calendarId === source.calendarId);
+        if (old) {old.workspaceIds = [...new Set([...old.workspaceIds, ...source.workspaceIds])]; old.name = source.name; old.color = source.color; old.visible = source.visible;}
+        else oldSources.push({...structuredClone(source), id: crypto.randomUUID()});
+      }
+      return {...data, state: {...data.state, workspaces, activeWorkspaceId: incomingIds.has(data.state.activeWorkspaceId) ? data.state.activeWorkspaceId : workspaces[0].id},
+        ...(backup.kind === 'full' && backup.preferences ? {preferences: structuredClone(backup.preferences)} : {}),
+        ...(backup.kind === 'full' && backup.reminders ? {reminders: {...backup.reminders}} : {}),
+        google: {...data.google!, ...(backup.kind === 'full' && backup.google ? {refreshMinutes: backup.google.refreshMinutes} : {}), sources: oldSources.filter(s => s.workspaceIds.length)}};
+    }, {requirePersistence: true});
   }
 
   saveCalendarSource(source: CalendarSource): Promise<StoreResult> {
@@ -274,6 +347,7 @@ export class BoardStore implements OnDestroy {
       if (data.revision !== expectedRevision) throw new Error('確認期間資料或設定已更新，請重新查看後再重置。');
       return {...data, generation: crypto.randomUUID(), preferences: all ? {...DEFAULT_APPEARANCE} : data.preferences,
         reminders: all ? {...DEFAULT_REMINDERS} : data.reminders,
+        drive: {...(all ? DEFAULT_DRIVE : data.drive ?? DEFAULT_DRIVE), mode: 'off', workspaceIds: []},
         google: all ? structuredClone(DEFAULT_GOOGLE) : {...data.google!, sources: []},
         state: {version: 1, activeWorkspaceId: workspace.id, workspaces: [workspace]}};
     }, {requirePersistence: true, select: workspace.id, afterPersist: () => {
@@ -290,7 +364,7 @@ export class BoardStore implements OnDestroy {
     return this.transact(data => {
       if (backup.kind === 'full') {
         if (!expectedRevision || data.revision !== expectedRevision) throw new Error('確認期間資料已更新，請重新檢查覆蓋範圍後再匯入。');
-        return {...data, generation: crypto.randomUUID(), state: structuredClone(backup.data), preferences: backup.preferences ?? {...DEFAULT_APPEARANCE}, reminders: backup.reminders ?? {...DEFAULT_REMINDERS}, google: {...structuredClone(backup.google ?? DEFAULT_GOOGLE), refreshMinutes: 0}};
+        return {...data, generation: crypto.randomUUID(), state: structuredClone(backup.data), preferences: backup.preferences ?? {...DEFAULT_APPEARANCE}, reminders: backup.reminders ?? {...DEFAULT_REMINDERS}, drive: {...structuredClone(backup.drive ?? DEFAULT_DRIVE), mode: 'off'}, google: {...structuredClone(backup.google ?? DEFAULT_GOOGLE), refreshMinutes: 0}};
       }
       const workspaceIds = new Map(backup.data.workspaces.map((workspace, index) => [workspace.id, added[index].id]));
       const sources = (backup.calendarSources ?? []).map(source => ({...structuredClone(source), id: crypto.randomUUID(), workspaceIds: source.workspaceIds.map(id => workspaceIds.get(id)!)}));
@@ -339,7 +413,11 @@ export class BoardStore implements OnDestroy {
         if (!state) throw new Error('分類、狀態或日期資料不合法，未儲存這次變更。');
         const google = readGoogleSettings(changed.google, state.workspaces.map(workspace => workspace.id));
         if (!google) throw new Error('Google 連線或月曆來源設定不合法，未儲存這次變更。');
-        const next: StoredWorkspaceData = {...changed, state, google, revision: crypto.randomUUID(), updatedAt: new Date().toISOString()};
+        const settings = changed.drive ?? structuredClone(DEFAULT_DRIVE);
+        const workspaceIds = settings.workspaceIds.filter(id => state.workspaces.some(w => w.id === id));
+        const drive = readDriveSettings({...settings, workspaceIds, ...(settings.kind === 'workspaces' && workspaceIds.length !== settings.workspaceIds.length ? {mode: 'off'} : {})}, state.workspaces.map(w => w.id));
+        if (!drive) throw new Error('Drive 設定不合法，未儲存這次變更。');
+        const next: StoredWorkspaceData = {...changed, state, google, drive, revision: crypto.randomUUID(), updatedAt: new Date().toISOString()};
         try { localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(next)); }
         catch {
           if (options.requirePersistence) throw new Error('瀏覽器儲存空間不足或無法保存，還原或重置未套用；原有資料保留。');
@@ -372,6 +450,7 @@ export class BoardStore implements OnDestroy {
     this.appearance.set(data.preferences ?? this.legacyAppearance());
     this.google.set(data.google ?? structuredClone(DEFAULT_GOOGLE));
     this.reminders.set(data.reminders ?? {...DEFAULT_REMINDERS});
+    this.drive.set(data.drive ?? structuredClone(DEFAULT_DRIVE));
     if (saved) this.lastSavedRevision = data.revision;
     const active = select ?? this.workspaceState().activeWorkspaceId;
     const state = {...data.state, activeWorkspaceId: data.state.workspaces.some(workspace => workspace.id === active) ? active : data.state.activeWorkspaceId};

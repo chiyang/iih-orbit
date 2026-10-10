@@ -1,0 +1,111 @@
+<section aria-labelledby="drive-title">
+  <div class="heading drive-heading">
+    <div><h3 id="drive-title">Google Drive 備份</h3><p>先找回雲端已有的資料，再決定要使用哪一份。</p></div>
+    <span class="state" role="status">{{ drive.status() }}</span>
+  </div>
+  @if (drive.auth.connected()) {
+    <div class="connection-bar"><span class="account"><app-icon name="check" />{{ store.drive().email }}</span><button class="quiet" [disabled]="drive.busy() || importing() || saving() || removing()" (click)="drive.disconnect()">中斷連線</button></div>
+  } @else {
+    <div class="connect-prompt"><p>{{ store.google().clientId ? '連線後會自動讀取備份，也會顯示這台電腦之前使用的雲端資料。' : '第一次使用，請先完成下方的 Google 連線設定。' }}</p><button class="primary" [disabled]="!store.google().clientId || !drive.auth.ready() || drive.busy() || !drive.online()" (click)="drive.connect()">{{ drive.auth.preparing() ? '準備連線…' : drive.auth.authorizing() ? '等待 Google 授權…' : '連線 Google Drive' }}</button>@if (!drive.auth.ready() && !drive.auth.preparing()) {<button (click)="drive.prepare()">重新準備連線</button>}</div>
+  }
+  <details class="setup" [open]="!store.google().clientId">
+    <summary>{{ store.google().clientId ? 'Google 連線設定' : '首次連線設定' }}</summary>
+    <ol><li>在 Google Cloud Console 啟用 <strong>Google Drive API</strong>。</li><li>建立「網頁應用程式」的 OAuth Client ID，把本站網址加入「已授權的 JavaScript 來源」。月曆已設定時，可沿用同一個 Client ID。</li><li>仍在測試中時，將使用的 Google 帳號加入測試使用者。</li><li>貼上 Client ID 並儲存，再按「連線 Google Drive」。</li></ol>
+    <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener noreferrer">前往 Google 設定</a>
+    <label>Google Client ID<input type="text" autocomplete="off" [(ngModel)]="clientId" [disabled]="drive.busy() || importing() || saving()" placeholder="…apps.googleusercontent.com"></label>
+    <button [disabled]="drive.busy() || importing() || saving() || clientId.trim() === store.google().clientId" (click)="saveClientId()">儲存連線設定</button>
+    <p class="note">月曆與 Drive 共用這項設定。更換後需重新連線，月曆綁定會清除，自動儲存會暫停。不需要 Client Secret。</p>
+  </details>
+  @if (!drive.online()) {<p class="warning" role="status">目前離線。本機修改仍保留，恢復網路後再讀取或保存。</p>}
+  @if (drive.auth.sessionWarning()) {<p class="warning">{{ drive.auth.sessionWarning() }}</p>}
+  @if (drive.runtime().pending && !drive.unavailable()) {<div class="notice"><strong>還有一份資料等待上傳</strong><p>本機修改已保留。先完成這次上傳，再改用其他資料。</p><button [disabled]="drive.busy() || !drive.auth.connected() || !drive.online()" (click)="drive.retry()">重試上傳</button></div>}
+</section>
+
+<section #cloudList tabindex="-1" aria-labelledby="drive-versions-title">
+  <div class="heading"><div><h3 id="drive-versions-title">雲端資料</h3><p>目前使用的資料、其他電腦的資料與另外保存的備份，都在這裡。</p></div><button [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="drive.list()"><app-icon name="sync" />{{ drive.catalogState() === 'loading' ? '讀取中…' : '重新載入' }}</button></div>
+  <p class="note">每份自動儲存保留最近 8 份內容（最新 1 份＋過去 7 份），更舊的自動移至 Drive 垃圾桶。另存的備份會保留。</p>
+  @if (drive.cleanupError() && drive.auth.connected()) {<p class="warning" role="alert">{{ drive.cleanupError() }}</p>}
+  @if (drive.catalogState() === 'loading') {<p class="catalog-feedback" role="status">正在讀取 Google Drive，請稍候…</p>}
+  @else if (drive.catalogState() === 'error' && drive.auth.connected()) {<div class="notice" role="alert"><strong>雲端資料讀取失敗</strong><p>{{ drive.catalogError() }}</p><p class="note">{{ hasFiles() ? '下方保留上次的清單，重新載入成功後才能改用其他資料或另建一份。' : '尚未確認雲端是否有資料。重新載入成功後，才會提供建立自動儲存。' }}</p></div>}
+  @else if (drive.catalogFresh()) {<p class="catalog-feedback" role="status">已讀取 {{ cloudCount() }} 份雲端資料 · {{ drive.catalogCheckedAt() | date:'HH:mm:ss' }} 更新</p>}
+  @else if (drive.auth.connected()) {<p class="catalog-feedback" role="status">正在準備雲端清單…</p>}
+
+  @if (drive.runtime().link && !currentCollection()) {
+    <div class="cloud-card missing-card"><span class="badge">本機保留的儲存連結</span><h4>{{ currentScope() }}</h4>
+      @if (drive.catalogFresh() && drive.unavailable()) {<p class="warning">在這個 Google 帳號找不到原本的雲端資料。本機內容仍在，先清除舊連結，再選用已有資料或建立新的自動儲存。</p><button class="danger" [disabled]="drive.busy() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="requestRemoval(drive.runtime().link!.datasetId)">清除舊連結</button>}
+      @else {<p>這是上次保存的連結，尚未確認雲端內容。{{ drive.auth.connected() ? '請等候清單讀取完成。' : '重新連線後會檢查是否仍可使用。' }}</p>}
+    </div>
+  }
+
+  <div class="cloud-items">
+    @for (collection of catalog().collections; track collection.id) {
+      <article class="cloud-card" [class.current]="collection.current" [attr.aria-label]="collection.current ? '目前使用的雲端資料' : '可使用的雲端資料'">
+        <div class="heading"><div><div class="item-title">@if (collection.current) {<span class="badge current-badge"><app-icon name="check" />{{ drive.catalogFresh() ? '目前使用' : '上次使用・尚未確認' }}</span>}<span class="badge">{{ collection.current ? store.drive().mode === 'off' ? '已暫停' : store.drive().mode === 'backup' ? '自動備份' : '自動儲存' : collection.purposeLabel === '自動同步' ? '自動儲存' : '自動備份' }}</span>@if (collection.deleting) {<span class="badge warning-badge">刪除尚未完成</span>}@else if (collection.heads.length > 1) {<span class="badge warning-badge">有 {{ collection.heads.length }} 份內容待選擇</span>}</div><h4>{{ collection.heads[0] ? scopeLabel(collection.heads[0]) : collection.label }}</h4><p class="save-time">最近保存 {{ collection.updatedAt | date:'yyyy/MM/dd HH:mm:ss' }}@if (collection.heads[0]?.summary; as counts) { · {{ counts.tasks }} 個任務}</p></div></div>
+        @if (collection.warning) {<p class="warning" role="alert">{{ collection.warning }}</p>}
+        @if (collection.current && drive.runtime().conflict) {<div class="notice"><strong>先選擇要保留使用的內容</strong><p>本機內容仍保留，自動儲存先暫停。可查看下方雲端內容後使用，或繼續使用這台電腦的內容。</p><button [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="drive.resolve(drive.runtime().conflict!)">使用這台電腦的內容</button></div>}
+        <div class="actions">
+          @if (collection.current && !collection.deleting) {
+            @if (store.drive().mode === 'off') {<button class="primary" [disabled]="!canSave() || editing() || drive.unavailable()" (click)="resume()">恢復自動儲存</button>}
+            @else {<button class="primary" [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online() || !!drive.runtime().conflict || drive.unavailable()" (click)="drive.sync()"><app-icon name="sync" />立即儲存</button><button [disabled]="drive.busy() || saving() || importing() || removing()" (click)="options({mode: 'off'})">暫停</button>}
+          }
+          @if (collection.heads.length === 1) {<button [class.primary]="!collection.current" [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !collection.heads[0].size || collection.deleting || !collection.current && !drive.catalogFresh()" (click)="inspect(collection.heads[0], !collection.current || !!drive.runtime().conflict)">{{ collection.current && !drive.runtime().conflict ? '查看內容' : '查看並使用' }}<app-icon name="arrow" /></button>}
+        </div>
+        @if (collection.heads.length > 1) {<p class="note">選一份查看並使用，或用右側垃圾桶刪除不需要的內容。其他版本仍保留。</p><ng-container *ngTemplateOutlet="versionRows; context: {$implicit: collection.heads, branches: true, use: true}" />}
+        @if (collection.history.length) {<details class="history"><summary>過去備份（{{ collection.history.length }} 份）</summary><p class="note">保留最近內容，方便回復誤改。不需要的備份也可逐份刪除。尚有不同內容待選擇、未完成上傳或仍在使用的舊內容，會等處理完成再自動清理。</p><ng-container *ngTemplateOutlet="versionRows; context: {$implicit: collection.history}" /></details>}
+        <details class="secondary-option card-options"><summary>{{ collection.current ? '儲存設定與更多操作' : '更多操作' }}</summary>
+          @if (collection.current) {
+            <div class="actions"><button [disabled]="drive.busy() || saving() || importing() || !!drive.runtime().pending" (click)="editing.set(!editing())">{{ editing() ? '取消設定變更' : '調整保存範圍與方式' }}</button><button [disabled]="!canBackup()" (click)="saveCopy()">另存當下的備份</button></div>
+            <div class="field-pair"><label>修改後多久儲存？<select [disabled]="drive.busy() || saving()" [ngModel]="store.drive().debounceSeconds" (ngModelChange)="options({debounceSeconds: +$event})"><option [ngValue]="15">15 秒</option><option [ngValue]="30">30 秒</option><option [ngValue]="60">60 秒</option></select></label><label>多久檢查雲端更新？<select [disabled]="drive.busy() || saving()" [ngModel]="store.drive().pollMinutes" (ngModelChange)="options({pollMinutes: +$event})"><option [ngValue]="0">只在手動或修改時檢查</option><option [ngValue]="1">每 1 分鐘</option><option [ngValue]="5">每 5 分鐘</option><option [ngValue]="15">每 15 分鐘</option></select></label></div>
+          }
+          <p class="note">刪除整份資料會將目前內容與過去備份移至 Drive 垃圾桶，本機資料保留。{{ collection.current ? '並停止這份資料的自動儲存。' : '' }}</p><button class="danger" [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="requestRemoval(collection.id)"><app-icon name="trash" />{{ collection.deleting ? '繼續刪除' : '刪除這份雲端資料' }}</button>
+        </details>
+      </article>
+    }
+    @if (catalog().manual.length) {<details class="cloud-card manual-card" [open]="!catalog().collections.length"><summary><strong>另外保存的備份</strong><span class="badge">{{ catalog().manual.length }} 份</span></summary><p class="note">這些備份保存當時的內容，可還原、加入工作空間或下載。</p><ng-container *ngTemplateOutlet="versionRows; context: {$implicit: catalog().manual, scope: true, use: true}" /></details>}
+    @if (!hasFiles() && !drive.runtime().link) {
+      @if (!drive.auth.connected()) {<div class="empty"><app-icon name="export" /><p>連線 Google Drive 後，這裡會列出已有的資料。</p></div>}
+      @else if (drive.catalogFresh()) {<p class="empty">這個 Google 帳號目前沒有 Orbit 雲端資料。可以在下方建立第一份自動儲存。</p>}
+    }
+  </div>
+
+  @if (preview(); as document) {
+    <div #previewPanel tabindex="-1" class="preview" aria-labelledby="drive-preview-title">
+      <div class="heading"><div><span class="eyebrow">{{ action() ? '確認後才會更換本機內容' : '雲端內容預覽' }}</span><h3 id="drive-preview-title">{{ previewFile() ? scopeLabel(previewFile()!) : '雲端備份' }}</h3></div><button [disabled]="importing()" (click)="clearPreview()">關閉</button></div>
+      <p>{{ document.exportedAt | date:'yyyy/MM/dd HH:mm:ss' }} · {{ document.data.workspaces.length }} 個工作空間 · {{ pendingTasks() }} 個任務</p><ul>@for (workspace of document.data.workspaces; track workspace.id) {<li>{{ workspace.name }} · {{ workspace.tasks.length }} 個任務</li>}</ul>
+      @if (savedAppearance(); as saved) {<p class="saved-appearance"><i [style.background-color]="saved.accent" aria-hidden="true"></i><span>{{ saved.themeLabel }} · {{ saved.fontLabel }} · 主題色 {{ saved.accent }}</span></p>}
+      @if (action()) {
+        <div class="use-confirmation"><strong>{{ useLabel }}</strong><p>{{ document.kind === 'full' ? '將取代目前全部 ' + store.workspaces().length + ' 個工作空間，並套用這份資料的外觀與提醒設定。' : '將使用這些工作空間的雲端內容，其他工作空間、外觀與提醒設定保留。' }}{{ action() === 'restore' ? '自動儲存會暫停，Google 需要重新連線。' : '確認後會繼續自動儲存。' }}{{ reviewedBranchCount() > 1 ? '其他雲端版本會保留為過去備份。' : '' }}</p>@if (useStale()) {<p class="warning">資料或連線已更新，請重新確認後再使用。</p>}<div class="actions"><button [disabled]="importing() || drive.busy()" (click)="clearPreview()">取消</button>@if (useStale() && useAction(); as use) {<button [disabled]="importing() || drive.busy()" (click)="prepare(useAction()!)">重新確認</button>}<button class="primary" [disabled]="useStale() || importing() || saving() || drive.busy() || !!drive.runtime().pending || store.pendingWrites() > 0 || !drive.auth.connected() || !drive.online()" (click)="confirmUse()">{{ importing() ? '使用中…' : useLabel }}</button></div>
+        </div>
+      } @else if (useAction(); as use) {<div class="actions"><button class="primary" [disabled]="drive.busy() || saving() || importing() || !!drive.runtime().pending || store.pendingWrites() > 0" (click)="prepare(use)">{{ useLabel }}</button></div><p class="note">{{ useDescription() }}</p>}
+      @else if (previewCurrent()) {<p class="note">這份資料目前已在使用。可回到上方按「立即儲存」保存新的修改。</p>}
+      <details class="secondary-option"><summary>保留本機內容或下載備份</summary><div class="actions"><button [disabled]="importing() || saving() || drive.busy() || store.pendingWrites() > 0" (click)="copy()">加入工作空間</button><button (click)="download()">下載這份雲端備份</button><button [disabled]="importing() || store.pendingWrites() > 0" (click)="downloadLocal()">先下載目前本機資料</button></div><p class="note">「加入工作空間」會另外加入副本，保留目前的工作資料與設定。</p></details>
+    </div>
+  }
+
+  @if (removal(); as review) {
+    <div #removalPanel tabindex="-1" class="warning-box removal-confirmation" role="alert" aria-labelledby="drive-removal-title"><h3 id="drive-removal-title">{{ removalPhrase() }}</h3><strong>{{ review.label === '全部資料' ? '所有工作空間與設定' : review.label }}</strong>@if (review.kind === 'file') {<p>保存時間：{{ review.files[0].createdTime | date:'yyyy/MM/dd HH:mm:ss' }}</p>}<p>將 {{ removalCount() }} 份檔案移至 Google Drive 垃圾桶。{{ review.kind === 'collection' ? '包含目前內容與全部過去備份。' : '只刪除選定的這一份，其他雲端內容與過去備份保留。' }} 本機工作空間、任務與 Google 月曆事件保留。</p>@if (!removalCount()) {<p>雲端檔案已不存在，將清除本機的舊連結。</p>}@if (review.currentCollection) {<p class="warning">這份資料的自動儲存會停止。</p>}@if (review.pendingVersion) {<p class="warning">這份資料尚未完成的上傳會取消，本機修改保留。</p>}@if (review.kind === 'collection' && review.files.length) {<details><summary>查看刪除範圍</summary><ul class="removal-files">@for (file of review.files; track file.id) {<li>{{ file.createdTime | date:'yyyy/MM/dd HH:mm:ss' }} · {{ scopeLabel(file) }}@if (file.trashed) { · 已在垃圾桶}</li>}</ul></details>}@if (removalStale()) {<p class="warning">連線或設定已變更，請重新確認。</p>}<div class="actions"><button [disabled]="removing() || drive.busy()" (click)="cancelRemoval()">取消</button>@if (removalStale() || drive.error()) {<button [disabled]="removing() || drive.busy() || !drive.auth.connected() || !drive.online()" (click)="requestRemoval(review.kind === 'collection' ? review.datasetId : review.files[0])">重新確認</button>}<button class="danger" [disabled]="removalStale() || removing() || drive.busy() || importing() || saving() || !drive.online() || !drive.auth.connected()" (click)="acceptRemoval()">{{ removing() ? '刪除中…' : removalPhrase() }}</button></div></div>
+  }
+
+  @if (hasFiles() && drive.catalogFresh() && !drive.runtime().link && !creating()) {<details class="secondary-option"><summary>已有資料，但想另外建立一份？</summary><p>只有需要另一份獨立資料時才另建。上方的雲端資料與備份仍會保留。</p><button [disabled]="drive.busy() || saving() || importing()" (click)="beginCreate()">另建一份</button></details>}
+</section>
+
+@if (showCreateForm()) {
+  <section class="create-section" aria-labelledby="drive-auto-title"><h3 id="drive-auto-title">{{ editing() ? '自動儲存設定' : creating() ? '另建一份自動儲存' : '建立第一份自動儲存' }}</h3><p>{{ editing() ? '調整目前的保存範圍與方式。' : '把這台電腦的資料存到 Google Drive，之後的修改會自動保存。' }}</p><div class="saving-summary"><app-icon name="check" /><span>{{ kind() === 'full' ? '所有工作空間與設定' : '已選 ' + ids().length + ' 個工作空間' }} · {{ mode() === 'sync' ? '其他電腦也能接著使用' : '只保存這台電腦的修改' }}</span></div>
+    <details class="secondary-option" [open]="editing()"><summary>調整保存範圍與方式</summary>
+      <fieldset><legend>要保存哪些資料？</legend><label class="choice"><input type="radio" name="drive-range" value="full" [ngModel]="kind()" (ngModelChange)="kind.set($event)" [disabled]="saving() || drive.busy()">所有工作空間與設定</label><label class="choice"><input type="radio" name="drive-range" value="workspaces" [ngModel]="kind()" (ngModelChange)="kind.set($event)" [disabled]="saving() || drive.busy()">只選幾個工作空間</label></fieldset>
+      @if (kind() === 'workspaces') {<div class="workspace-choices">@for (workspace of store.workspaces(); track workspace.id) {<label class="choice"><input type="checkbox" [checked]="ids().includes(workspace.id)" [disabled]="saving() || drive.busy()" (change)="toggle(workspace.id, $any($event.target).checked)">{{ workspace.name }}</label>}</div>}
+      <p class="note">所有工作空間包含任務、專案、分類、狀態、外觀與提醒。只選部分空間時，外觀與提醒保留在這台電腦。</p>
+      <fieldset><legend>如何保存？</legend><label class="choice"><input type="radio" name="drive-mode" value="sync" [ngModel]="mode()" (ngModelChange)="mode.set($event)" [disabled]="saving() || drive.busy()">自動儲存並接收其他電腦的更新</label><label class="choice"><input type="radio" name="drive-mode" value="backup" [ngModel]="mode()" (ngModelChange)="mode.set($event)" [disabled]="saving() || drive.busy()">自動備份，只保存這台電腦的修改</label></fieldset>
+    </details>
+    @if (drive.runtime().link && !sameScope()) {<p class="notice">更換工作空間範圍會另建一份，原本的雲端資料與過去備份仍保留。</p>}
+    <div class="actions">@if (editing() || creating()) {<button [disabled]="saving()" (click)="editing.set(false); creating.set(false)">取消</button>}<button class="primary" [disabled]="!canSave()" (click)="saveAutomatic()"><app-icon name="save" />{{ saving() ? '儲存中…' : startLabel() }}</button></div><p class="note">需要開著 Orbit 並保持連線，才能自動保存。</p>
+  </section>
+}
+
+@if (hasFiles()) {<details class="secondary-option file-management"><summary>檔案位置與整理</summary><p>Google Drive › IIH Orbit · 約 {{ bytes() / 1024 / 1024 | number:'1.1-1' }} MB</p><p class="note">整理只調整資料夾位置與檔名，所有內容與過去備份仍保留。</p><button [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !!drive.runtime().pending" (click)="drive.organize()">整理資料夾</button></details>}
+@if (error() || drive.error()) {<p class="warning" role="alert">{{ error() || drive.error() }}</p>}
+@if (drive.message()) {<p class="success" role="status">{{ drive.message() }}</p>}
+
+<ng-template #versionRows let-files let-branches="branches" let-use="use" let-scope="scope"><div class="versions">
+  @for (file of files; track file.id) {<div class="version"><button class="version-open" [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !file.size || (use && !drive.catalogFresh())" (click)="inspect(file, !!use)"><strong>{{ file.createdTime | date:'yyyy/MM/dd HH:mm:ss' }}@if (scope) { · {{ scopeLabel(file) }}}</strong><small>@if (file.summary; as counts) { {{ counts.workspaces }} 個工作空間 · {{ counts.tasks }} 個任務 · }{{ file.size ? use ? '查看並使用這份內容' : '查看內容' : '上傳未完成' }}</small></button><button class="icon-button danger" [attr.aria-label]="(branches ? '刪除內容：' : '刪除備份：') + (file.createdTime | date:'yyyy/MM/dd HH:mm:ss')" [title]="branches ? '刪除這份內容' : '刪除這份備份'" [disabled]="!canRemoveFile(file) || drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="requestRemoval(file)"><app-icon name="trash" /></button></div>}
+</div></ng-template>

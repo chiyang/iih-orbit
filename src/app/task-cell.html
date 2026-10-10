@@ -15,7 +15,7 @@
     } @else {
       <select name="value" [attr.aria-label]="label()" [(ngModel)]="value" [disabled]="busy()" appCellFocus>
         @switch (field()) {
-          @case ('projectId') {<option value="">未指定專案</option>@for (project of store.projects(); track project.id) {<option [value]="project.id">{{ project.name }}</option>}}
+          @case ('projectId') {<option value="">未指定專案</option>@for (project of store.projects(); track project.id) {<option [value]="project.id">{{ project.name }}{{ project.archived ? '（已封存）' : '' }}</option>}}
           @case ('categoryId') {<option value="">未分類</option>@for (category of store.categories(); track category.id) {<option [value]="category.id">{{ category.name }}</option>}}
           @case ('priority') {@for (priority of priorities; track priority.id) {<option [value]="priority.id">{{ priority.label }}</option>}}
         }

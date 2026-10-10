@@ -44,7 +44,8 @@ export function readBoardState(value: unknown): BoardState | null {
     subtasks: task.subtasks.map(subtask => ({id: subtask.id, title: subtask.title, done: subtask.done}))
   }));
   return {
-    version: 4, projects: projects.map(project => ({id: project.id, name: project.name.trim()})),
+    // Keep an absent archive flag absent so existing cloud backup hashes stay valid.
+    version: 4, projects: projects.map(project => ({id: project.id, name: project.name.trim(), ...(project.archived === undefined ? {} : {archived: project.archived})})),
     categories: source.categories.map(category => ({id: category.id, name: category.name, color: category.color})),
     statuses: statuses.map(status => ({id: status.id, label: status.label, subtitle: status.subtitle, color: status.color, kind: status.kind, hidden: status.hidden ?? status.kind === 'archived'})), tasks
   };
@@ -52,7 +53,8 @@ export function readBoardState(value: unknown): BoardState | null {
 
 export function validProjects(projects: unknown): projects is Project[] {
   return Array.isArray(projects) && projects.every(project => project && typeof project.id === 'string'
-    && project.id && project.id !== 'all' && typeof project.name === 'string' && project.name.trim())
+    && project.id && project.id !== 'all' && typeof project.name === 'string' && project.name.trim()
+    && (project.archived === undefined || typeof project.archived === 'boolean'))
     && new Set(projects.map(project => project.id)).size === projects.length
     && new Set(projects.map(project => project.name.trim().toLocaleLowerCase())).size === projects.length;
 }
