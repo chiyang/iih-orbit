@@ -21,8 +21,8 @@ const {build} = createRequire(require.resolve('@angular/build/package.json'))('e
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/calendar-transfer-test-'));
 const output = resolve(directory, 'transfer.mjs');
-await build({stdin: {contents: "export {CalendarPublish} from './src/app/calendar-publish.ts'; export {CalendarTransferService} from './src/app/calendar-transfer.ts'; export {CalendarWriteAuth} from './src/app/calendar-write-auth.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {BoardStore} from './src/app/board-store.ts'; export {GoogleHttpError as ServiceHttpError} from './src/app/google-api.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const {CalendarPublish, CalendarTransferService, CalendarWriteAuth, GoogleCalendarService, BoardStore, ServiceHttpError} = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {ExternalEventDetails} from './src/app/external-event-details.ts'; export {CalendarPublish} from './src/app/calendar-publish.ts'; export {CalendarTransferService} from './src/app/calendar-transfer.ts'; export {CalendarWriteAuth} from './src/app/calendar-write-auth.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {BoardStore} from './src/app/board-store.ts'; export {GoogleHttpError as ServiceHttpError} from './src/app/google-api.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const {ExternalEventDetails, CalendarPublish, CalendarTransferService, CalendarWriteAuth, GoogleCalendarService, BoardStore, ServiceHttpError} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 const task = {id: 'task', title: '期末報告', description: '第一段\n第二段 & <文字>', projectId: 'project', categoryId: '', status: 'todo', priority: 'high', startDate: '', startTime: '', dueDate: '2026-10-10', dueTime: '00:10', subtasks: [{id: 's1', title: '讀文獻 "重點"\n下一行', done: true}, {id: 's2', title: '交作業', done: false}]};
 const workspace = {version: 4, id: 'workspace', name: '工作', projects: [{id: 'project', name: '課程'}], categories: [], statuses: COLUMNS, tasks: [task]};
@@ -151,8 +151,26 @@ async function fixture() {
     const controller = runInInjectionContext(child, () => new CalendarPublish());
     controller.task = () => value; controller.context = () => store.taskContext(value.id); controller.ngOnInit(); return controller;
   };
-  return {store, service, auth, google, events, calls, controls, createPublish, flush: () => { for (const effect of effects) if (effect.dirty) effect.run(); }, deny: value => denied = value, createService: () => runInInjectionContext(injector, () => new CalendarTransferService()), close: () => { for (const child of children) child.destroy(); injector.destroy(); store.ngOnDestroy(); }};
+  const createDetails = value => {
+    const child = createEnvironmentInjector([{provide: CalendarTransferService, useValue: service}], injector); children.push(child);
+    const controller = runInInjectionContext(child, () => new ExternalEventDetails()); controller.entry = () => value; return controller;
+  };
+  return {store, service, auth, google, events, calls, controls, createPublish, createDetails, flush: () => { for (const effect of effects) if (effect.dirty) effect.run(); }, deny: value => denied = value, createService: () => runInInjectionContext(injector, () => new CalendarTransferService()), close: () => { for (const child of children) child.destroy(); injector.destroy(); store.ngOnDestroy(); }};
 }
+
+test('活動明細開啟按鈕指定來源帳號，帳號切換時不把舊活動導向新帳號', async () => {
+  const f = await fixture();
+  try {
+    const entry = googleEntry(undefined, {htmlLink: 'https://www.google.com/calendar/event?eid=google-event'}), details = f.createDetails(entry);
+    const target = () => new URL(new URL(details.eventLink()).searchParams.get('continue'));
+    assert.equal(target().searchParams.get('eid'), 'google-event'); assert.equal(target().searchParams.get('authuser'), 'test@example.test');
+    await f.store.updateGoogle({accountId: 'other', email: 'other@example.test'});
+    assert.equal(details.eventLink(), '');
+    await f.store.updateGoogle({accountId: 'account', email: 'test@example.test'});
+    assert.equal(target().searchParams.get('authuser'), 'test@example.test');
+    assert.equal(f.calls.filter(call => call.method === 'POST').length, 0);
+  } finally { f.close(); }
+});
 
 test('完整起訖時間直接沿用，只有截止才給選項，沒有時段則補齊欄位', async () => {
   const f = await fixture();

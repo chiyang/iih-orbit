@@ -32,7 +32,7 @@ export function createBackup(state: WorkspaceState, kind: BackupKind, selectedId
     throw new Error('請選擇至少一個仍存在的工作空間。');
   }
   return {
-    application: 'iih-orbit', formatVersion: 5, appVersion: '1.6.0', kind, exportedAt: new Date().toISOString(),
+    application: 'iih-orbit', formatVersion: 5, appVersion: '1.6.1', kind, exportedAt: new Date().toISOString(),
     data: structuredClone({version: 1, activeWorkspaceId: workspaces.some(workspace => workspace.id === state.activeWorkspaceId) ? state.activeWorkspaceId : workspaces[0].id, workspaces}),
     ...(kind === 'full' ? {preferences: typeof appearance === 'string' ? {...DEFAULT_APPEARANCE, textSize: appearance} : structuredClone(appearance), google: structuredClone(google), reminders: {...reminders}, drive: structuredClone(drive)}
       : {calendarSources: google.sources.filter(source => source.workspaceIds.some(id => selectedIds.includes(id))).map(source => ({...structuredClone(source), workspaceIds: source.workspaceIds.filter(id => selectedIds.includes(id))})),

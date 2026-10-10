@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { CalendarApi, GoogleHttpError, calendarViewForRange } from '../src/app/google-api.ts';
-import { cacheKey, calendarMonthRange, calendarRange, DEFAULT_GOOGLE, externalEvent, externalOccursOn, mergeGoogleEvents, readGoogleEvent, readGoogleSettings, safeGoogleLink } from '../src/app/google-data.ts';
+import { cacheKey, calendarMonthRange, calendarRange, DEFAULT_GOOGLE, externalEvent, externalOccursOn, googleCalendarEventLink, mergeGoogleEvents, readGoogleEvent, readGoogleSettings, safeGoogleLink } from '../src/app/google-data.ts';
 import { dateKey, monthDates, weekDates } from '../src/app/task-schedule.ts';
 import { layoutAllDayTasks, timedEventsOnDay } from '../src/app/week-layout.ts';
 import { createBackup, readBackup } from '../src/app/backup-data.ts';
@@ -61,6 +61,39 @@ test('Google 活動白名單、惡意連結及無效日期不會成為可執行�
   assert.equal(safeGoogleLink('https://www.google.com/calendar/event?eid=123'), 'https://www.google.com/calendar/event?eid=123');
   for (const start of [{dateTime: '2026-02-30T09:00:00+08:00'}, {dateTime: '2026-10-09T09:00:00'}, {dateTime: '2026-10-09T25:00:00Z'}, {date: '2026-02-30'}]) assert.equal(readGoogleEvent({...raw, start}), null);
   assert.equal(readGoogleEvent({...raw, end: {dateTime: '2026-10-09T08:00:00+08:00'}}), null);
+});
+
+test('開啟 Google 活動帶入連線帳號，保留 API 活動識別與時區且取代舊帳號提示', () => {
+  const htmlLink = 'https://www.google.com/calendar/event?eid=encoded%2Bshared%2Fevent%3D&ctz=Asia%2FTaipei&authuser=0&authuser=wrong%40example.com';
+  const entry = externalEvent({...source, calendarId: 'shared@group.calendar.google.com'}, readGoogleEvent({...raw, htmlLink}));
+  const email = 'orbit+work@example.com';
+  const account = new URL(googleCalendarEventLink(entry, {accountId: source.accountId, email}));
+  assert.equal(account.origin, 'https://accounts.google.com'); assert.equal(account.pathname, '/AccountChooser');
+  assert.equal(account.searchParams.get('Email'), email);
+  const target = new URL(account.searchParams.get('continue'));
+  assert.equal(target.origin, 'https://www.google.com'); assert.equal(target.pathname, '/calendar/event');
+  assert.equal(target.searchParams.get('eid'), 'encoded+shared/event='); assert.equal(target.searchParams.get('ctz'), 'Asia/Taipei');
+  assert.deepEqual(target.searchParams.getAll('authuser'), [email]);
+  assert.equal(entry.event.htmlLink, htmlLink);
+});
+
+test('Google 活動網址移除固定登入序號，同一活動在登入順序改變後仍指定帳號', () => {
+  for (const path of ['/calendar/u/0/r/event', '/calendar/u/3/r/eventedit/encoded-instance', '/calendar/u/old%40example.com/event']) {
+    const entry = externalEvent(source, readGoogleEvent({...raw, htmlLink: 'https://calendar.google.com' + path + '?eid=instance&ctz=UTC'}));
+    const target = new URL(new URL(googleCalendarEventLink(entry, {accountId: 'account', email: 'work@example.com'})).searchParams.get('continue'));
+    assert.equal(target.pathname, path.replace(/\/u\/[^/]+/, '')); assert.equal(target.searchParams.get('eid'), 'instance');
+    assert.equal(target.searchParams.get('authuser'), 'work@example.com');
+  }
+});
+
+test('Google 開啟連結缺少帳號、來源屬於其他帳號或網址不安全時不退回預設帳號', () => {
+  const entry = externalEvent(source, readGoogleEvent({...raw, htmlLink: 'https://www.google.com/calendar/event?eid=instance'}));
+  for (const settings of [{accountId: '', email: 'work@example.com'}, {accountId: 'other', email: 'work@example.com'}, {accountId: 'account', email: ''}, {accountId: 'account', email: 'work@example.com\nother@example.com'}]) {
+    assert.equal(googleCalendarEventLink(entry, settings), '');
+  }
+  for (const htmlLink of ['', 'javascript:alert(1)', 'https://calendar.google.com.evil.test/calendar/event?eid=instance', 'https://www.google.com/search']) {
+    assert.equal(googleCalendarEventLink({...entry, event: {...entry.event, htmlLink}}, {accountId: 'account', email: 'work@example.com'}), '');
+  }
 });
 
 test('全天活動的 exclusive end 不多顯示一天，跨月日期及週橫條一致', () => {

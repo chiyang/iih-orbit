@@ -5,7 +5,7 @@ import { parseCalendarDescription, plainGoogleDescription } from './calendar-tra
 import type { TaskEditContext } from './board-store';
 import type { Task } from './models';
 import { PRIORITIES } from './models';
-import { ExternalEvent } from './google-data';
+import { ExternalEvent, googleCalendarEventLink } from './google-data';
 import { ThemeColor } from './theme-color';
 
 @Component({
@@ -18,7 +18,8 @@ import { ThemeColor } from './theme-color';
     @if (shown().event.contentComplete === false) {<p class="notice">活動內容過長，目前顯示節錄；請在 Google 查看完整內容。此活動暫時不能複製。</p>}
     @if (parsed().subtasks.length) {<ul>@for (item of parsed().subtasks; track $index) {<li>{{ item.done ? '☑' : '☐' }} {{ item.title }}</li>}</ul>}
     <p class="note">複製會建立獨立的 Orbit 任務，Google 活動仍保留。兩邊各自顯示與編輯。</p>
-    @if (shown().event.htmlLink) {<a [href]="shown().event.htmlLink" target="_blank" rel="noopener noreferrer">在 Google Calendar 開啟 ↗</a>}
+    @if (eventLink(); as link) {<a [href]="link" target="_blank" rel="noopener noreferrer">在 Google Calendar 開啟 ↗</a><p class="note">開啟帳號：{{ service.store.google().email }}</p>}
+    @else if (shown().event.htmlLink) {<p class="notice">請重新連線這份月曆的 Google 帳號後，再開啟活動。</p>}
     <div class="transfer-actions"><button type="button" class="button secondary" [disabled]="loading() || service.busy()" (click)="reload()">{{ loading() ? '讀取最新活動…' : '重新載入最新內容' }}</button><button type="button" class="button primary" [disabled]="loading() || service.busy() || shown().event.contentComplete === false" (click)="prepareCopy()">複製為 Orbit 任務…</button></div>
     @if (draft(); as task) {<section class="copy-preview"><h3>確認 Orbit 副本</h3><p>{{ task.title }} · {{ schedule() }}<br>{{ task.subtasks.length }} 個子任務</p>
       @if (!parsed().valid) {<p class="notice">Orbit 子任務格式已變更，這次會完整保留活動描述，不自動解析子任務。</p>}
@@ -35,6 +36,7 @@ export class ExternalEventDetails {
   readonly openOrbit = output<Task>();
   readonly reviewed = signal<ExternalEvent | null>(null);
   readonly shown = computed(() => this.reviewed() ?? this.entry());
+  readonly eventLink = computed(() => googleCalendarEventLink(this.shown(), this.service.store.google()));
   readonly parsed = computed(() => parseCalendarDescription(this.shown().event.description));
   readonly draft = signal<Task | null>(null);
   readonly loading = signal(false);

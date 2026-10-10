@@ -87,6 +87,19 @@ export function safeGoogleLink(value: unknown): string {
   catch { return ''; }
 }
 
+/** Account hints route the API's event link without relying on browser sign-in order. */
+export function googleCalendarEventLink(entry: ExternalEvent, settings: Pick<GoogleSettings, 'accountId' | 'email'>): string {
+  const email = settings.email.trim(), link = safeGoogleLink(entry.event.htmlLink);
+  if (!link || entry.source.accountId !== settings.accountId || !settings.accountId || email.length > 320 || !/^[^@\s]+@[^@\s]+$/.test(email)) return '';
+  const eventUrl = new URL(link);
+  eventUrl.pathname = eventUrl.pathname.replace(/^\/calendar\/u\/[^/]+(?=\/|$)/, '/calendar');
+  eventUrl.searchParams.set('authuser', email);
+  const accountUrl = new URL('https://accounts.google.com/AccountChooser');
+  accountUrl.searchParams.set('Email', email);
+  accountUrl.searchParams.set('continue', eventUrl.href);
+  return accountUrl.href;
+}
+
 /** Whitelist external content; descriptions are rendered as plain text, never HTML. */
 export function readGoogleEvent(value: unknown): GoogleEvent | null {
   if (!value || typeof value !== 'object') return null;

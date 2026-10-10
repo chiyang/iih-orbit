@@ -18,6 +18,14 @@
 
 「更新月曆清單」可手動強制更新；更新失敗仍保留清單並顯示原因。送出活動前一律重新檢查目標月曆權限，因此快取中的寫入角色不能繞過已撤銷的權限。帳號或資料世代改變後，舊回覆不會寫入新清單。快取只包含月曆資訊，不保存憑證或活動內容。
 
+## 在 Google Calendar 開啟活動
+
+使用 Google API 回傳的 `htmlLink`，保留活動識別資訊及時區。開啟時移除網址中可能固定的 `/u/0` 等登入序號，改以 Orbit 已連線帳號的電子郵件設定 `authuser`；再經 `accounts.google.com/AccountChooser` 帶入 `Email` 與 `continue`。使用帳號電子郵件，不把月曆 ID、擁有者或瀏覽器登入順序當成目標帳號。
+
+活動明細顯示預期開啟的帳號；缺少帳號資訊或來源屬於其他帳號時不提供原始連結，要求重新連線。這些網址參數用於提示 Google 選擇帳號，不能替代 Google 網站的登入驗證；未登入時可能先進入登入或帳號選擇。也不傳遞 OAuth token、不修改來源活動連結或保存資料。
+
+Google 的公開 Calendar API 文件只將 `htmlLink` 定義為網頁活動連結，沒有保證浮動彈窗的網址介面。實作保留該活動連結，不自行猜測 Google 內部的彈窗路由；最後顯示為彈窗或活動明細頁由 Google 決定，真實多帳號操作由使用者驗收。
+
 ## 時段
 
 | 選項 | 行為 |
@@ -68,6 +76,8 @@ Google 活動與複製出的 Orbit 任務在月／週視圖及提醒中各自呈
 
 ## 依據
 
+- [Google 活動網頁連結](https://developers.google.com/workspace/calendar/api/v3/reference/events#resource)：`htmlLink` 指向該活動的 Google Calendar 網頁介面。
+- [Google Site Kit 多帳號連結處理](https://github.com/google/site-kit-wp/issues/1456)：以使用者電子郵件指定 `authuser`，避免依賴無法從 API 得知的瀏覽器登入序號；這不是 Calendar 彈窗的公開介面保證。
 - [Google Calendar 月曆權限](https://developers.google.com/workspace/calendar/api/v3/reference/calendarList)：writerWithoutPrivateAccess、writer、owner 可寫入；未知角色不開放移轉。
 - [建立活動與自訂活動 ID](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert)。
 - [Google OAuth 授權範圍](https://developers.google.com/workspace/calendar/api/auth)與[逐項檢查授權](https://developers.google.com/identity/oauth2/web/reference/js-reference#google.accounts.oauth2.hasGrantedAllScopes)。
