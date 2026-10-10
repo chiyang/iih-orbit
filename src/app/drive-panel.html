@@ -10,7 +10,7 @@
   }
   <details class="setup" [open]="!store.google().clientId">
     <summary>{{ store.google().clientId ? 'Google 連線設定' : '首次連線設定' }}</summary>
-    <ol><li>在 Google Cloud Console 啟用 <strong>Google Drive API</strong>。</li><li>建立「網頁應用程式」的 OAuth Client ID，把本站網址加入「已授權的 JavaScript 來源」。月曆已設定時，可沿用同一個 Client ID。</li><li>仍在測試中時，將使用的 Google 帳號加入測試使用者。</li><li>貼上 Client ID 並儲存，再按「連線 Google Drive」。</li></ol>
+    <ol><li>使用自己的 Google 帳號，在 Google Cloud Console 啟用 <strong>Google Drive API</strong>。</li><li>申請「網頁應用程式」的 OAuth Client ID，在「已授權的 JavaScript 來源」加入 <code>https://chiyang.github.io</code>，不包含 /iih-orbit/ 路徑。月曆已設定時，可沿用自己申請的同一個 Client ID。</li><li>仍在測試中時，將使用的 Google 帳號加入測試使用者。</li><li>貼上 Client ID 並儲存，再按「連線 Google Drive」。本機測試時也需加入測試網址的來源。</li></ol>
     <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener noreferrer">前往 Google 設定</a>
     <label>Google Client ID<input type="text" autocomplete="off" [(ngModel)]="clientId" [disabled]="drive.busy() || importing() || saving()" placeholder="…apps.googleusercontent.com"></label>
     <button [disabled]="drive.busy() || importing() || saving() || clientId.trim() === store.google().clientId" (click)="saveClientId()">儲存連線設定</button>

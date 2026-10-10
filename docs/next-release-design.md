@@ -161,13 +161,13 @@ Drive 操作順序為「連線 → 讀取所有雲端資料 → 查看並使用�
 
 本機 Google 授權測試建議固定使用 `http://localhost:4200`，依官方指引加入 `http://localhost` 與含連接埠的來源。目前程式使用 `http://127.0.0.1:4200`，兩者的本機儲存互不共用；若改位址，必須先完成檔案備份，再在新位址匯入，不能讓使用者以為原資料消失。[授權來源設定](https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid)
 
-設定頁顯示目前網站位址與設定步驟；匯入 Client ID 後仍須確定此位址已在該 Cloud 專案登記。不同電腦建議沿用同一 Cloud 專案及授權設定；更換專案後，既有 Drive 檔案的可存取範圍需重新確認。
+正式站台為 `https://chiyang.github.io/iih-orbit/`。每位使用者自行申請 Google OAuth Client ID，將 `https://chiyang.github.io` 加入已授權 JavaScript 來源；設定頁以此正式來源提供教學，另顯示目前開啟的來源供本機測試。Client ID 不預先寫入程式或 GitHub workflow，匯入後仍須確定使用位址已在該 Cloud 專案登記。不同電腦建議沿用同一 Cloud 專案及授權設定；更換專案後，既有 Drive 檔案的可存取範圍需重新確認。
 
 ### GitHub Pages 與 origin 限制
 
 Client ID 是瀏覽器授權流程使用的公開識別，不必當成密碼隱藏。Authorized JavaScript origins 限制授權請求可從哪些網站發起，不會讓已放進前端的 Client Secret 變得保密。
 
-若部署網址是 `https://example-user.github.io/project-manager/`，授權來源應填 `https://example-user.github.io`，不含 `/project-manager/`。同一帳號網域底下的其他專案也屬於同一 origin；若要隔離這個工具，可考慮專用的自訂網域。這是依 origin 不包含路徑的規則做出的部署建議。[Google origin 規則](https://developers.google.com/identity/protocols/oauth2/javascript-implicit-flow#javascript-origin-validation-rules)
+本專案儲存庫為 `https://github.com/chiyang/iih-orbit.git`，GitHub Pages 部署網址為 `https://chiyang.github.io/iih-orbit/`，授權來源填 `https://chiyang.github.io`，不含 `/iih-orbit/`。同一帳號網域底下的其他專案也屬於同一 origin；若要隔離這個工具，可考慮專用的自訂網域。這是依 origin 不包含路徑的規則做出的部署建議。[Google origin 規則](https://developers.google.com/identity/protocols/oauth2/javascript-implicit-flow#javascript-origin-validation-rules)
 
 Origin 限制不會把 Access Token 綁定到該網站；Google API 的 Access Token 仍是 Bearer Token，取得它的人可能在有效期內使用。使用者選擇在 sessionStorage 暫存未過期憑證以延續重新整理後的操作；這個儲存仍可被同源 JavaScript 讀取。程式按需取得最小權限、不將憑證寫入長期資料或備份，並避免把活動描述當成可執行 HTML。[Google 憑證保護說明](https://developers.google.com/identity/protocols/oauth2/resources/best-practices)
 

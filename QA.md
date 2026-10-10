@@ -456,3 +456,12 @@ Angular Core 22.2.1、Angular CLI / CDK 22.2.2、TypeScript 6.0.3；本機使用
 ### 工具副標調整（2026-10-10）
 
 - 側欄副標依使用者指定改為「讓每一步都慢慢上軌道」，移除原逗號與句號；使用說明同步更新。
+
+### 1.6.1 小版本與 GitHub Pages 部署準備（2026-10-10）
+
+- 小版本更新為 1.6.1，package、鎖定檔及匯出備份的 appVersion 一致，備份格式仍為 5。先提交帳號開啟修正、副標與輕巧備份決定，再準備部署設定。
+- 新增 GitHub Pages workflow：main 推送或 main 手動執行時，安裝依賴、檢查、測試、production build、上傳 browser 靜態產物並部署；PR 只驗證，不部署。建置與部署分成兩個工作，部署須等待建置成功，Pages 寫入與 OIDC 權限限部署工作使用。
+- 新增 npm run build:pages，沿用 production 設定及既有建置門檻，base href 設為 /iih-orbit/，目標網址為 https://chiyang.github.io/iih-orbit/。Angular 設定明確關閉 SSR 與預先渲染；首頁連結改為相對基底路徑。
+- Google Calendar 與 Drive 設定引導使用者自行申請 Client ID，正式已授權 JavaScript 來源為 https://chiyang.github.io，不含專案路徑。本機來源另行加入，不將任何 Client ID 或 Google 憑證放進 workflow。
+- 全部 362 項測試、Angular 型別／樣板檢查及 GitHub Pages production build 通過。初始資源 610.49 kB，估計傳輸 148.85 kB；核對七個首頁資源、17 個 JavaScript 檔案及 50 個 chunk 引用均存在，首頁連結解析後仍位於 /iih-orbit/。產物保留空 app-root，由瀏覽器渲染，沒有 server 輸出目錄。
+- Workflow YAML 可解析，main、PR 與手動觸發，以及部署依賴建置均已核對。本機驗證不代表 GitHub runner 或 Pages 已部署；GitHub 實際部署將於後續 push 並設定 Pages Source 為 GitHub Actions 後執行。真實 Google 資料驗收依使用者決定由其手動進行。

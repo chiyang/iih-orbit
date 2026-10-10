@@ -3,14 +3,15 @@
   <p>將 Google 活動顯示在月曆與週視圖。Orbit 任務可移至可寫入月曆；Google 活動可複製為 Orbit 任務。</p>
   <details class="google-guide"><summary>首次設定：建立自己的 Google Client ID</summary>
     <ol>
-      <li>到 <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> 建立或選擇專案。</li>
-      <li>在 API 程式庫啟用 <strong>Google Calendar API</strong>。後續 Drive 備份階段才會使用 <strong>Google Drive API</strong>，也可以先啟用。</li>
+      <li>使用自己的 Google 帳號，到 <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> 建立或選擇專案，申請自己的 Client ID。</li>
+      <li>在 API 程式庫啟用 <strong>Google Calendar API</strong>；需要雲端備份時，也啟用 <strong>Google Drive API</strong>。</li>
       <li>設定 Google Auth Platform 的品牌資訊、對象及資料存取權。外部測試模式請將自己的 Google 帳號加入測試使用者。</li>
-      <li>在「用戶端」建立 OAuth 用戶端，類型選擇「網頁應用程式」。在「已授權的 JavaScript 來源」加入目前來源：<code>{{ origin }}</code>。</li>
+      <li>在「用戶端」建立 OAuth 用戶端，類型選擇「網頁應用程式」。在「已授權的 JavaScript 來源」加入 <code>https://chiyang.github.io</code>，不包含 /iih-orbit/ 路徑。</li>
       <li>複製 OAuth Client ID，貼到下方並保存，再按「連線 Google」。授權讀取月曆及識別帳號後，選擇要顯示的月曆與工作空間。</li>
     </ol>
+    <p>正式站台：<a href="https://chiyang.github.io/iih-orbit/" target="_blank" rel="noopener noreferrer">https://chiyang.github.io/iih-orbit/</a>。每位使用者使用自己申請的 Client ID；這個工具只需要 Client ID，不需要 API Key 或 Client Secret。</p>
+    @if (origin && origin !== 'https://chiyang.github.io') {<p class="google-note">目前開啟的來源是 <code>{{ origin }}</code>。若也要在這個網址連線 Google，需將此來源另行加入同一個 Client ID。</p>}
     @if (localAddress) {<p class="google-origin-note">Google 官方本機設定使用 http://localhost:4200（另加入 http://localhost）。若目前的 127.0.0.1 來源無法授權，請先匯出全部備份，再以 localhost 開啟並匯入；兩個網址的本機資料各自獨立。</p>}
-    <p>GitHub Pages 的授權來源只填 https://帳號.github.io，不包含專案路徑。這個工具只需要 Client ID，不需要 API Key 或 Client Secret。</p>
     <a href="https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid" target="_blank" rel="noopener noreferrer">Google 官方設定說明</a>
   </details>
   <label class="google-field">OAuth Client ID<input type="text" autocomplete="off" spellcheck="false" aria-label="Google OAuth Client ID" [ngModel]="draft()" (ngModelChange)="draft.set($event)" placeholder="…apps.googleusercontent.com"></label>

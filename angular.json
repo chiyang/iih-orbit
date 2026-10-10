@@ -13,6 +13,8 @@
           "builder": "@angular/build:application",
           "options": {
             "browser": "src/main.ts",
+            "ssr": false,
+            "prerender": false,
             "tsConfig": "tsconfig.app.json",
             "index": "src/index.html",
             "assets": [{"glob": "**/*", "input": "public"}],

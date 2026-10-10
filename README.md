@@ -1,13 +1,13 @@
 # TMU IIH Orbit 專案進度工作台
 
-使用 Angular v22、Signals 與 Angular CDK 開發的繁體中文單機專案進度工作台。
+使用 Angular v22、Signals 與 Angular CDK 開發的繁體中文單機專案進度工作台。純前端運作，由瀏覽器渲染；SSR 與預先渲染均關閉。
 
 ## 開始使用
 
 需要 Node.js 22.22.3 以上的相容版本；開發環境使用 Node.js 24.19.0。
 
 ```sh
-npm install
+npm ci
 npm start
 ```
 
@@ -22,6 +22,22 @@ npm run build
 `check` 檢查 TypeScript 與 Angular 樣板；`test` 驗證日期、排序、日曆區間、備份、資料升級及同步衝突；`build` 輸出正式版本至 `dist/orbit-project-manager/browser`。
 
 正式建置使用 `.build.env` 指定 Angular 支援的 SQLite 快取，以便在限制較多的本機環境中執行。
+
+## GitHub Pages 部署
+
+GitHub 儲存庫：[chiyang/iih-orbit](https://github.com/chiyang/iih-orbit)。部署目標：[https://chiyang.github.io/iih-orbit/](https://chiyang.github.io/iih-orbit/)。
+
+在儲存庫的 **Settings → Pages → Build and deployment → Source** 選擇 **GitHub Actions**。`.github/workflows/pages.yml` 在推送 `main` 或於 `main` 手動執行時，使用 Node.js 24.19.0 安裝鎖定的依賴、執行程式檢查與測試，再建置及部署。PR 只驗證，不部署。[GitHub 官方 workflow 說明](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
+
+本機產生與 workflow 相同的正式靜態檔案：
+
+```sh
+npm run build:pages
+```
+
+輸出目錄為 `dist/orbit-project-manager/browser`，網站基底路徑為 `/iih-orbit/`。只上傳此目錄中的靜態檔案，正式站台無須 Node.js 伺服器、SSR 或專案機密。
+
+每位使用者自行申請 Google OAuth Client ID，將 **已授權的 JavaScript 來源** 設為 `https://chiyang.github.io`，不包含 `/iih-orbit/`。Client ID 由使用者在 Orbit 設定頁填入，不放進 workflow 或網站的預設設定。本機資料要帶到正式站台時，先下載 Orbit 備份，再於正式站台匯入並重新連線 Google。
 
 ## 功能
 
@@ -74,7 +90,7 @@ Google 提醒保留目前月份及前後週的獨立查詢需求，與月曆檢�
 
 1. 開啟「設定 → Google Calendar → 首次設定」，到 Google Cloud Console 建立專案，啟用 **Google Calendar API**。需要雲端備份時，再啟用 **Google Drive API**。
 2. 設定 Google Auth Platform 的品牌、對象及資料存取權。外部測試模式加入自己的測試使用者；建立類型為「網頁應用程式」的 OAuth 用戶端。
-3. 設定已授權 JavaScript 來源。設定頁會顯示目前來源；GitHub Pages 只填 `https://帳號.github.io`，不含專案路徑。本機依 Google 官方設定加入 `http://localhost` 與 `http://localhost:4200`。[官方 Client ID 設定](https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid)
+3. 每位使用者自行申請 Client ID，將已授權 JavaScript 來源設為 `https://chiyang.github.io`，不含正式站台的 `/iih-orbit/` 路徑。只有本機測試時，才另依 Google 官方設定加入 `http://localhost` 與 `http://localhost:4200`。設定頁也會顯示目前開啟的來源。[官方 Client ID 設定](https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid)
 4. 若目前使用 `127.0.0.1` 且無法授權，請先下載全部備份，再以 `localhost:4200` 開啟並匯入；兩個來源的本機資料各自獨立，不能直接切換後當成原資料消失。
 5. 複製 OAuth Client ID 貼進設定頁並保存，等待授權元件載入後按「連線 Google」。使用 Google Identity Services Token Model，僅請求月曆讀取及帳號識別；直接呼叫 REST API，無須 API Key 或 Client Secret。[Token Model 說明](https://developers.google.com/identity/oauth2/web/guides/use-token-model)
 6. 勾選各月曆要顯示的工作空間。左側「外部月曆」提供「連線 Google」「立即同步」、來源顯示開關及更新狀態；活動以 Google 標示，可查看唯讀明細及在 Google Calendar 開啟。重新開啟程式會先準備授權元件，點擊連線按鈕才啟動授權。
