@@ -353,14 +353,16 @@ test('帳號切換後延遲上傳不清除舊佇列，延遲列表也不帶入�
   } finally {f.close();}
 });
 
-test('關閉雲端輪詢時，離線修改在恢復網路後仍會安排保存；重置清理本機 Drive 狀態', async () => {
+test('關閉雲端輪詢時，離線修改在恢復網路後仍會安排保存；重置清理本機 Drive 狀態', async t => {
   const f = await fixture(), originalTimeout = globalThis.setTimeout; const scheduled = [];
   globalThis.setTimeout = (fn, ms, ...args) => {if (ms === 15000) scheduled.push(fn); return originalTimeout(fn, ms, ...args);};
   try {
     await f.service.start('full', [], 'sync'); await f.store.updateDrive({pollMinutes: 0}); await settle();
     f.navigator.onLine = false; await f.event('offline'); const task = f.store.tasks()[0]; await f.store.saveTask({...task, title: '離線修改'}); await settle();
     const count = scheduled.length; f.navigator.onLine = true; await f.event('online'); assert.ok(scheduled.length > count);
-    scheduled.at(-1)(); await settle(); assert.equal(f.documents.size, 2);
+    const sync = t.mock.method(f.service, 'sync', f.service.sync.bind(f.service));
+    scheduled.at(-1)(); assert.equal(sync.mock.callCount(), 1); assert.deepEqual(sync.mock.calls[0].arguments, [false]);
+    await sync.mock.calls[0].result; assert.equal(f.documents.size, 2);
     await f.store.resetData(true, f.store.revision()); await settle(); assert.equal(f.stored.size, 0); assert.equal(f.store.drive().mode, 'off'); assert.equal(f.service.runtime().link, undefined);
   } finally {globalThis.setTimeout = originalTimeout; f.close();}
 });

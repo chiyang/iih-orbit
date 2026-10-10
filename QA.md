@@ -465,3 +465,9 @@ Angular Core 22.2.1、Angular CLI / CDK 22.2.2、TypeScript 6.0.3；本機使用
 - Google Calendar 與 Drive 設定引導使用者自行申請 Client ID，正式已授權 JavaScript 來源為 https://chiyang.github.io，不含專案路徑。本機來源另行加入，不將任何 Client ID 或 Google 憑證放進 workflow。
 - 全部 362 項測試、Angular 型別／樣板檢查及 GitHub Pages production build 通過。初始資源 610.49 kB，估計傳輸 148.85 kB；核對七個首頁資源、17 個 JavaScript 檔案及 50 個 chunk 引用均存在，首頁連結解析後仍位於 /iih-orbit/。產物保留空 app-root，由瀏覽器渲染，沒有 server 輸出目錄。
 - Workflow YAML 可解析，main、PR 與手動觸發，以及部署依賴建置均已核對。本機驗證不代表 GitHub runner 或 Pages 已部署；GitHub 實際部署將於後續 push 並設定 Pages Source 為 GitHub Actions 後執行。真實 Google 資料驗收依使用者決定由其手動進行。
+
+### 首次 GitHub Actions 測試修正（2026-10-10）
+
+- 首次 main 推送的程式檢查通過，362 項測試中有一項失敗：恢復網路後的自動保存測試只等待固定十輪事件循環，尚未完成非同步 SHA-256 計算便檢查副本數量，較慢的 runner 因此誤判。
+- 該測試改為確認排程實際呼叫自動同步，並等待該次同步的 Promise 完成，再檢查保存與重置結果；沒有修改產品的保存邏輯。
+- 暫時讓每次摘要計算延遲 20 ms，可重現舊測試的 1 !== 2 失敗；修正後相同條件通過。CI=true、TZ=UTC 的完整測試全部 362 項通過，臨時診斷副本已移除。GitHub runner 與 Pages 結果另行核對。
