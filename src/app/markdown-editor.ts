@@ -1,4 +1,4 @@
-import { Component, ElementRef, input, linkedSignal, output, viewChild } from '@angular/core';
+import { afterNextRender, Component, ElementRef, inject, Injector, input, linkedSignal, output, viewChild } from '@angular/core';
 import { RichContent } from './rich-content';
 
 @Component({
@@ -6,6 +6,7 @@ import { RichContent } from './rich-content';
   templateUrl: './markdown-editor.html', styleUrl: './markdown-editor.css'
 })
 export class MarkdownEditor {
+  private readonly injector = inject(Injector);
   readonly value = input('');
   readonly initialMode = input<'edit' | 'preview'>('edit');
   readonly expanded = input(false);
@@ -16,7 +17,20 @@ export class MarkdownEditor {
   readonly focusControl = viewChild<ElementRef<HTMLButtonElement>>('focusControl');
   readonly limit = 20000;
   change(event: Event): void { this.valueChange.emit((event.target as HTMLTextAreaElement).value); }
-  setExpanded(value: boolean): void { this.expandedChange.emit(value); if (!value) this.focusControl()?.nativeElement.focus(); }
+  startEditing(): void {
+    this.mode.set('edit');
+    if (this.textarea()) this.textarea()!.nativeElement.focus();
+    else afterNextRender(() => {if (this.mode() === 'edit') this.textarea()?.nativeElement.focus();}, {injector: this.injector});
+  }
+  editPreview(event: Event): void {
+    if ((event.target as Element | null)?.closest?.('a, button, input, select, textarea')) return;
+    event.preventDefault(); this.startEditing();
+  }
+  setExpanded(value: boolean): void {
+    if (value) this.startEditing();
+    this.expandedChange.emit(value);
+    if (!value) this.focusControl()?.nativeElement.focus();
+  }
   insert(kind: 'bold' | 'heading' | 'list' | 'link'): void {
     const field = this.textarea()?.nativeElement; if (!field) return;
     const start = field.selectionStart, end = field.selectionEnd, chosen = field.value.slice(start, end);

@@ -11,6 +11,8 @@ export interface BrowseState {
   project: string;
   category: string;
   priority: string;
+  pinnedOnly: boolean;
+  recentOnly: boolean;
   deadline: DeadlineFilter;
   deadlineDays: number | null;
   sort: SortKey | null;
@@ -20,7 +22,11 @@ export interface BrowseState {
   showOrbit: boolean;
   showGoogle: boolean;
   progressExpanded: boolean;
-  panel: 'closed' | 'gmail' | 'reminders';
+  /** Legacy local value; the synchronized workspace value takes precedence. */
+  headerCompact: boolean;
+  trashOpen: boolean;
+  panel: 'closed' | 'gmail' | 'reminders' | 'tasks';
+  panelTab: 'gmail' | 'reminders' | 'tasks';
   reminderTab: ReminderTab;
 }
 const KEY = 'iih-orbit-browse-state-v1';
@@ -34,6 +40,7 @@ export function readBrowseState(value: unknown): BrowseState {
     scope: choice(s.scope, ['all', 'active', 'done', 'archived'], 'all'),
     query: text(s.query, '', 1000), project: text(s.project, 'all'), category: text(s.category, 'all'),
     priority: choice(s.priority, ['all', 'high', 'medium', 'low'], 'all'),
+    pinnedOnly: s.pinnedOnly === true, recentOnly: s.recentOnly === true,
     deadline: choice(s.deadline, ['all', 'unset', 'overdue', 'due-soon', 'this-week'], 'all'),
     deadlineDays: Number.isInteger(s.deadlineDays) && s.deadlineDays! >= 1 && s.deadlineDays! <= 30 ? s.deadlineDays! : null,
     sort: choice(s.sort, ['title', 'project', 'category', 'status', 'priority', 'startDate', 'dueDate', null], null),
@@ -41,7 +48,9 @@ export function readBrowseState(value: unknown): BrowseState {
     calendarDate: typeof s.calendarDate === 'string' && s.calendarDate && validDate(s.calendarDate) ? s.calendarDate : dateKey(new Date()),
     calendarScrollHour: typeof s.calendarScrollHour === 'number' && Number.isFinite(s.calendarScrollHour) && s.calendarScrollHour >= 0 && s.calendarScrollHour <= 24 ? s.calendarScrollHour : 7.75,
     showOrbit: s.showOrbit !== false, showGoogle: s.showGoogle !== false, progressExpanded: s.progressExpanded === true,
-    panel: choice(s.panel, ['closed', 'gmail', 'reminders'], 'closed'),
+    headerCompact: s.headerCompact === true, trashOpen: s.trashOpen === true,
+    panel: choice(s.panel, ['closed', 'gmail', 'reminders', 'tasks'], 'closed'),
+    panelTab: choice(s.panelTab, ['gmail', 'reminders', 'tasks'], choice(s.panel, ['gmail', 'reminders', 'tasks'], 'tasks')),
     reminderTab: choice(s.reminderTab, ['today', 'tomorrow', 'this-week', 'next-week', 'due-soon', 'overdue'], 'today')
   };
 }

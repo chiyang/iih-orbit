@@ -1,0 +1,28 @@
+.workspace-heading-actions {align-items: stretch;}
+.header-mode-toggle {display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; align-self: stretch; width: max(28px, calc(34px * var(--font-scale))); min-height: 28px; padding: var(--sp6); border: 1px solid var(--border); border-radius: 7px; background: var(--control-bg); color: var(--text-muted);}
+.header-mode-toggle:hover {color: var(--accent-text); background: var(--accent-soft);}
+.header-mode-toggle:disabled {opacity: .45; cursor: default;}
+.header-mode-toggle app-icon {width: 15px; height: 15px;}
+.project-header.is-compact {padding-block: var(--sp12);}
+.project-header.is-compact .project-icon, .project-header.is-compact .eyebrow, .project-header.is-compact .title-edit {display: none;}
+.project-header.is-compact .project-heading-row {flex-wrap: nowrap; gap: var(--sp10);}
+.project-header.is-compact .project-heading {flex: 1; min-width: 0;}
+.project-header.is-compact .project-heading > div:last-child, .project-header.is-compact .project-title-row {width: 100%; min-width: 0;}
+.project-header.is-compact h1 {font-size: var(--font-17); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+.project-header.is-compact .workspace-heading-actions {flex-shrink: 0; gap: var(--sp6);}
+.project-header.is-compact .workspace-heading-actions .button {font-size: var(--font-10); padding: var(--sp7) var(--sp9); gap: var(--sp5);}
+.project-header.is-compact .workspace-heading-actions .button app-icon {width: 13px; height: 13px;}
+.view-actions {display: flex; align-items: center; gap: var(--sp12); flex-shrink: 0;}
+.history-actions {display: flex; align-items: center; gap: var(--sp5);}
+.view-toolbar, .has-side-panel .view-toolbar {overflow: visible; gap: var(--sp12);}
+.view-tabs, .has-side-panel .view-tabs {flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none;}
+.view-tabs button {flex-shrink: 0; white-space: nowrap;}
+.undo-button {display: inline-flex; align-items: center; justify-content: center; gap: var(--sp5); padding: var(--sp7) var(--sp9); border: 1px solid var(--border); border-radius: 6px; color: var(--accent-text); background: var(--control-bg); font-size: var(--font-10); white-space: nowrap;}
+.undo-button app-icon {width: 15px; height: 15px;}
+.undo-button:hover {background: var(--accent-soft);}
+.undo-button:disabled {opacity: .4; cursor: default; color: var(--text-muted);}
+.category-section .manage-categories {margin-bottom: var(--sp12);}
+.trash-nav {margin-top: var(--sp8); border-top: 1px solid var(--border); padding-top: var(--sp8); margin-bottom: var(--sp26);}
+.trash-nav button {width: 100%;}
+.trash-nav app-icon {width: 16px; height: 16px; color: var(--text-muted);}
+@container workspace-main (max-width: 600px) {.undo-button {width: max(28px, calc(32px * var(--font-scale))); padding: var(--sp6);} .undo-button span {display: none;} .project-header.is-compact h1 {font-size: var(--font-13);} .project-header.is-compact .workspace-heading-actions .button {padding-inline: var(--sp6);}}

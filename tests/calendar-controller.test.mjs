@@ -284,6 +284,13 @@ test('月曆每天預覽四項，超過可逐日或全部展開，全部展開�
   } finally { close(); }
 });
 
+function assertEditedTask(actual, expected) {
+  const {updatedAt, ...content} = actual;
+  assert.equal(typeof updatedAt, 'string');
+  assert.equal(new Date(updatedAt).toISOString(), updatedAt);
+  assert.deepEqual(content, expected);
+}
+
 test('月曆拖曳保存本機任務並保留其他欄位，取消拖曳不寫入且不誤開編輯', async () => {
   const {calendar, store, close} = calendarController();
   let edits = 0;
@@ -291,7 +298,7 @@ test('月曆拖曳保存本機任務並保留其他欄位，取消拖曳不寫�
   try {
     calendar.startDrag(dragEvent(), base, {kind: 'month', day: base.startDate});
     await calendar.drop(dragEvent(), {kind: 'month', day: '2026-10-12'});
-    assert.deepEqual(store.tasks()[0], {...base, startDate: '2026-10-12', dueDate: '2026-10-12'});
+    assertEditedTask(store.tasks()[0], {...base, startDate: '2026-10-12', dueDate: '2026-10-12'});
     assert.match(calendar.moveNotice(), /已調整/); assert.equal(calendar.draggedTaskId(), '');
     calendar.openEntry(store.tasks()[0]); assert.equal(edits, 0);
     calendar.ignoreClickUntil = 0;
@@ -311,10 +318,10 @@ test('週時間拖曳使用滑鼠抓取偏移定位，保存開始與截止；�
     const target = calendar.timePosition('2026-10-10', element, calendar.hourHeight() * 11.25);
     assert.equal(target.minute, 660);
     await calendar.drop(dragEvent(), target);
-    assert.deepEqual(store.tasks()[0], {...base, startDate: '2026-10-10', startTime: '11:00', dueDate: '2026-10-10', dueTime: '12:00'});
+    assertEditedTask(store.tasks()[0], {...base, startDate: '2026-10-10', startTime: '11:00', dueDate: '2026-10-10', dueTime: '12:00'});
     calendar.startDrag(dragEvent(), store.tasks()[0], {kind: 'time', day: '2026-10-10', minute: 660});
     await calendar.drop(dragEvent(), {kind: 'all-day', day: '2026-10-11'});
-    assert.deepEqual(store.tasks()[0], {...base, startDate: '2026-10-11', startTime: '', dueDate: '2026-10-11', dueTime: ''});
+    assertEditedTask(store.tasks()[0], {...base, startDate: '2026-10-11', startTime: '', dueDate: '2026-10-11', dueTime: ''});
   } finally { close(); }
 });
 
@@ -355,7 +362,7 @@ test('未排程任務可拖至日期或時段，設定截止標記；無效目�
   try {
     calendar.startDrag(dragEvent(), store.tasks()[0], {kind: 'all-day', day: '2026-10-09'});
     await calendar.drop(dragEvent(), {kind: 'time', day: '2026-10-10', minute: 600});
-    assert.deepEqual(store.tasks()[0], {...empty, dueDate: '2026-10-10', dueTime: '10:00'});
+    assertEditedTask(store.tasks()[0], {...empty, dueDate: '2026-10-10', dueTime: '10:00'});
     calendar.startDrag(dragEvent(), store.tasks()[0], {kind: 'time', day: '2026-10-10', minute: 600});
     await calendar.drop(dragEvent(), {kind: 'time', day: '2026-02-30', minute: 600});
     assert.equal(store.tasks()[0].dueDate, '2026-10-10'); assert.match(calendar.moveError(), /不合法/);

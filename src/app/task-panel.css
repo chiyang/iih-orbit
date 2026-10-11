@@ -1,0 +1,30 @@
+:host {display: flex; flex: 1; flex-direction: column; min-height: 0; height: 100%; color: var(--text);}
+.task-panel-intro {padding: var(--sp18) var(--sp16) var(--sp14); border-bottom: 1px solid var(--border);}
+.task-panel-intro strong {display: block; font-size: var(--font-13); overflow-wrap: anywhere;}
+.task-panel-intro p {margin: var(--sp6) 0 0; color: var(--text-muted); font-size: var(--font-10); line-height: 1.6;}
+.task-panel-lists {flex: 1; min-height: 0; padding: var(--sp16); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; background: var(--section-bg);}
+section + section {margin-top: var(--sp26);}
+.task-section-heading {display: flex; align-items: center; justify-content: space-between; gap: var(--sp8); margin-bottom: var(--sp12);}
+h2 {display: flex; align-items: center; gap: var(--sp7); margin: 0; font-size: var(--font-12); font-weight: 650;}
+h2 app-icon {width: 16px; height: 16px; color: var(--accent-text);}
+.task-section-heading > span {min-width: 24px; text-align: center; border-radius: 5px; padding: var(--sp2) var(--sp6); background: var(--accent-soft); color: var(--accent-text); font-size: var(--font-10);}
+.task-section-heading small {font-size: var(--font-9); color: var(--text-muted);}
+.task-shortcut-row {display: flex; align-items: flex-start; gap: var(--sp4); margin-bottom: var(--sp8); padding: var(--sp5); border: 1px solid var(--border); border-radius: 8px; background: var(--surface);}
+.task-shortcut-row:hover {border-color: var(--accent-border);}
+.task-shortcut-open {flex: 1; min-width: 0; text-align: left; padding: var(--sp9); background: transparent; color: inherit; border: 0; border-radius: 5px; font: inherit; cursor: pointer;}
+.task-shortcut-open:hover {background: var(--surface-hover);}
+.task-shortcut-open strong {display: block; overflow-wrap: anywhere; font-size: var(--font-12); line-height: 1.6; font-weight: 600;}
+.task-shortcut-meta {display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp6); margin-top: var(--sp7); font-size: var(--font-9); color: var(--text-muted); overflow-wrap: anywhere;}
+.task-shortcut-status {padding: var(--sp2) var(--sp5); border-radius: 4px; background: var(--surface-soft);}
+time {display: block; margin-top: var(--sp7); color: var(--text-muted); font-size: var(--font-9);}
+.shortcut-pin {display: grid; place-items: center; flex-shrink: 0; width: max(28px, calc(30px * var(--font-scale))); height: max(28px, calc(30px * var(--font-scale))); padding: var(--sp6); margin: var(--sp4); color: var(--text-muted); background: transparent; border: 1px solid transparent; border-radius: 5px; cursor: pointer;}
+.shortcut-pin:hover, .shortcut-pin.selected {background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-border);}
+.shortcut-pin.selected app-icon {transform: rotate(-25deg);}
+.shortcut-pin app-icon {width: 15px; height: 15px;}
+.shortcut-pinned {display: grid; place-items: center; flex-shrink: 0; width: max(28px, calc(30px * var(--font-scale))); height: max(28px, calc(30px * var(--font-scale))); margin: var(--sp4); color: var(--accent-text);}
+.shortcut-pinned app-icon {width: 15px; height: 15px; transform: rotate(-25deg);}
+button:focus-visible {outline: 2px solid var(--accent-text); outline-offset: 2px;}
+button:disabled {opacity: .5; cursor: default;}
+.task-panel-empty {padding: var(--sp16); border: 1px dashed var(--border); border-radius: 8px; color: var(--text-muted);}
+.task-panel-empty p {margin: 0 0 var(--sp6); color: var(--text); font-size: var(--font-11);}
+.task-panel-empty small {font-size: var(--font-10); line-height: 1.8;}

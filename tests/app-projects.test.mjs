@@ -9,6 +9,7 @@ import { resolve } from 'node:path';
 import { COLUMNS } from '../src/app/models.ts';
 import { reminderItems } from '../src/app/reminder-items.ts';
 import { externalEvent } from '../src/app/google-data.ts';
+import { readBrowseState, saveBrowseState } from '../src/app/browse-state.ts';
 
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -44,6 +45,141 @@ function application(fresh = false) {
   };
   return {app, settings, store, values, flush, reopen, guide: () => runInInjectionContext(injector, () => new StartupGuide()), close: () => { clearTimeout(app.toastTimer); injector.destroy(); }};
 }
+
+test('垃圾桶排除任務視圖、專案進度與側欄來源，還原及復原接回任務，精簡模式保留篩選', async () => {
+  const f = application();
+  try {
+    const {app, store} = f;
+    await app.toggleWorkspaceHeader(); app.projectFilter.set('welcome'); app.progressExpanded.set(true);
+    await store.setTaskPinned('welcome-task', true);
+    await store.deleteTask('welcome-task');
+    assert.equal(app.visibleTasks().length, 0); assert.equal(app.selectedProgress().taskCount, 0);
+    assert.equal(app.calendarTasks().length, 0); assert.equal(store.tasks().some(task => task.pinned), false);
+    app.openTrash(); assert.equal(app.navigationTitle(), '垃圾桶');
+    app.rememberBrowse(); const reopened = f.reopen();
+    assert.equal(reopened.trashOpen(), true); assert.equal(reopened.headerCompact(), true);
+    assert.equal(reopened.progressExpanded(), true); assert.equal(reopened.projectFilter(), 'welcome');
+    await app.restoreTrashedTask(store.trashedTasks()[0]); assert.equal(store.trashedTasks().length, 0);
+    await app.undoLastAction(); assert.equal(store.trashedTasks().length, 1);
+    app.requestEmptyTrash(); assert.equal(app.modal(), 'empty-trash'); assert.equal(app.emptyTrashContext().tasks.length, 1);
+    app.closeModal(); assert.equal(app.emptyTrashContext(), null); assert.equal(store.trashedTasks().length, 1);
+    app.selectCategory('design'); assert.equal(app.trashOpen(), false); assert.equal(app.headerCompact(), true);
+  } finally {f.close();}
+});
+
+test('復原與重做快捷鍵保護表單及原生文字操作，只有工作區未忙碌時才攔截', async () => {
+  const f = application();
+  try {
+    const {app, store} = f;
+    await store.setTaskPinned('welcome-task', true);
+    let prevented = 0;
+    const event = {key: 'z', ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, defaultPrevented: false, target: {closest: () => ({})}, preventDefault() {prevented++;}};
+    app.undoKey(event); assert.equal(prevented, 0);
+    event.target.closest = () => null; app.modal.set('task'); app.undoKey(event); assert.equal(prevented, 0); app.modal.set(null);
+    app.undoKey({...event, shiftKey: true}); assert.equal(prevented, 0);
+    app.undoKey(event); assert.equal(prevented, 1);
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(store.tasks()[0].pinned, undefined); assert.equal(store.canUndo(), false);
+    assert.equal(store.canRedo(), true);
+    event.target.closest = () => ({}); app.undoKey({...event, shiftKey: true}); assert.equal(prevented, 1);
+    event.target.closest = () => null; app.modal.set('task'); app.undoKey({...event, key: 'y'}); assert.equal(prevented, 1); app.modal.set(null);
+    app.undoKey({...event, ctrlKey: false, metaKey: true, shiftKey: true}); assert.equal(prevented, 2);
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(store.tasks()[0].pinned, true); assert.equal(store.canRedo(), false);
+    await store.undo(); app.undoKey({...event, key: 'y'}); assert.equal(prevented, 3);
+    for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(store.tasks()[0].pinned, true);
+  } finally {f.close();}
+});
+
+test('舊本機精簡模式升級至工作空間，跨分頁更新及備份設定優先於本機瀏覽偏好', async () => {
+  const f = application();
+  try {
+    const {store} = f;
+    saveBrowseState(store.generation(), store.currentWorkspace().id, readBrowseState({headerCompact: true}));
+    const reopened = f.reopen(); assert.equal(reopened.headerCompact(), true);
+    f.flush(); for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(store.currentWorkspace().headerCompact, true);
+    const peer = new BoardStore(); await peer.setWorkspaceHeaderCompact(false);
+    store.refreshFromStorage(); assert.equal(reopened.headerCompact(), false);
+    f.flush(); assert.equal(reopened.headerCompact(), false);
+    await reopened.toggleWorkspaceHeader(); assert.equal(store.currentWorkspace().headerCompact, true);
+    reopened.selectWorkspace('second'); f.flush(); assert.equal(reopened.headerCompact(), false);
+    await reopened.toggleWorkspaceHeader(); assert.equal(reopened.headerCompact(), true);
+    reopened.selectWorkspace('first'); f.flush(); assert.equal(reopened.headerCompact(), true);
+    await reopened.toggleWorkspaceHeader(); assert.equal(reopened.headerCompact(), false);
+    reopened.selectWorkspace('second'); f.flush(); assert.equal(reopened.headerCompact(), true);
+  } finally {f.close();}
+});
+
+test('釘選與最近編輯 toggle 連動各視圖及原篩選，清除、重開與工作空間切換一致', async () => {
+  const f = application();
+  try {
+    const {app, store} = f;
+    await app.togglePin(store.tasks()[0]); assert.equal(store.tasks()[0].pinned, true);
+    assert.equal(store.tasks()[0].updatedAt, undefined);
+    await store.saveTask({...store.tasks()[0], description: '最新描述'});
+    app.now.set(new Date()); app.pinnedOnly.set(true); app.recentOnly.set(true);
+    assert.deepEqual(app.visibleTasks().map(item => item.id), ['welcome-task']);
+    assert.deepEqual(app.sortedTasks().map(item => item.id), ['welcome-task']);
+    assert.deepEqual(app.columns().flatMap(column => column.tasks).map(item => item.id), ['welcome-task']);
+    assert.deepEqual(app.calendarTasks().map(item => item.id), ['welcome-task']);
+    app.query.set('不存在'); assert.equal(app.visibleTasks().length, 0); app.query.set('');
+    app.categoryFilter.set(''); assert.equal(app.visibleTasks().length, 0); app.categoryFilter.set('all');
+    app.deadlineFilter.set('unset'); assert.equal(app.visibleTasks().length, 0); app.deadlineFilter.set('all');
+    app.openTaskPanel(); app.rememberBrowse();
+    const reopened = f.reopen();
+    assert.equal(reopened.tasksOpen(), true); assert.equal(reopened.pinnedOnly(), true); assert.equal(reopened.recentOnly(), true);
+    app.clearFilters(); assert.equal(app.pinnedOnly(), false); assert.equal(app.recentOnly(), false); assert.equal(app.hasFilters(), false);
+    f.flush(); app.pinnedOnly.set(true); app.rememberBrowse(); store.switchWorkspace('second'); f.flush();
+    assert.equal(app.pinnedOnly(), false); assert.equal(app.tasksOpen(), true); assert.equal(store.tasks().length, 0);
+    store.switchWorkspace('first'); f.flush(); assert.equal(app.pinnedOnly(), true);
+  } finally { f.close(); }
+});
+
+test('任務側欄與 Gmail／提醒互斥，保留主畫面篩選並開啟最新任務，Escape 及重新載入接續', async () => {
+  const f = application();
+  try {
+    const {app, store} = f;
+    app.query.set('網站'); app.view.set('list'); app.openTaskPanel();
+    assert.equal(app.panelOpen(), true); assert.equal(app.tasksOpen(), true);
+    app.openMail(); assert.equal(app.tasksOpen(), false); assert.equal(app.mailOpen(), true);
+    app.openReminders(); assert.equal(app.mailOpen(), false); assert.equal(app.remindersOpen(), true);
+    app.openTaskPanel(); assert.equal(app.remindersOpen(), false);
+    assert.equal(app.query(), '網站'); assert.equal(app.view(), 'list');
+    const old = structuredClone(store.tasks()[0]);
+    await store.saveTask({...store.tasks()[0], title: '更新後的任務'});
+    app.openPanelTask(old); assert.equal(app.draft.title, '更新後的任務'); assert.equal(app.tasksOpen(), true);
+    app.escape(); assert.equal(app.modal(), null); assert.equal(app.tasksOpen(), true);
+    app.rememberBrowse(); assert.equal(f.reopen().tasksOpen(), true);
+    app.escape(); assert.equal(app.panelOpen(), false);
+    app.togglePanel(); assert.equal(app.tasksOpen(), true); app.togglePanel(); assert.equal(app.panelOpen(), false);
+    await store.deleteTask(old.id); app.openPanelTask(old); assert.equal(app.modal(), null); assert.match(app.toast(), /刪除/);
+    app.openTask(); app.draft.title = '未儲存的草稿'; app.openTaskPanel(); app.openPanelTask(store.tasks()[0]);
+    assert.equal(app.tasksOpen(), false); assert.equal(app.draft.title, '未儲存的草稿');
+  } finally { f.close(); }
+});
+
+test('右側欄開關保留 Gmail 或提醒分頁，關閉後重新載入仍可接續，編輯中不切換', () => {
+  const f = application();
+  try {
+    const {app} = f;
+    app.togglePanel(); assert.equal(app.tasksOpen(), true);
+    app.openMail(); app.togglePanel();
+    assert.equal(app.panelOpen(), false); assert.equal(app.panelTab(), 'gmail');
+    app.togglePanel(); assert.equal(app.mailOpen(), true); assert.equal(app.tasksOpen(), false);
+    app.closePanel(); app.rememberBrowse();
+    const reopened = f.reopen();
+    assert.equal(reopened.panelOpen(), false); reopened.togglePanel(); assert.equal(reopened.mailOpen(), true);
+    app.openReminders('next-week'); app.escape(); app.togglePanel();
+    assert.equal(app.remindersOpen(), true); assert.equal(app.reminderTab(), 'next-week');
+    app.openTask(); app.draft.title = '編輯中的任務'; app.togglePanel();
+    assert.equal(app.remindersOpen(), true); assert.equal(app.draft.title, '編輯中的任務');
+    app.closeModal(); app.closePanel(); app.rememberBrowse();
+    const reminders = f.reopen(); reminders.togglePanel();
+    assert.equal(reminders.remindersOpen(), true); assert.equal(reminders.reminderTab(), 'next-week');
+  } finally { f.close(); }
+});
 
 test('首次引導可以前後查看且不加入資料；完成接續第一個樣板空間，稍後建立仍可重開', async () => {
   const f = application(true);

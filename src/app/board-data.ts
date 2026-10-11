@@ -3,6 +3,7 @@ import { COLUMNS, PRIORITIES } from './models.ts';
 import { validColor } from './appearance-data.ts';
 import { scheduleError, validDate } from './task-schedule.ts';
 import { readCalendarOrigin, readCalendarTransfers } from './calendar-transfer-data.ts';
+import { validTaskEditTime } from './task-activity-data.ts';
 
 /** Read saved schemas without mutating the source or discarding legacy tasks. */
 export function readBoardState(value: unknown): BoardState | null {
@@ -26,6 +27,9 @@ export function readBoardState(value: unknown): BoardState | null {
     && (!modern || (typeof task.projectId === 'string' && (!task.projectId || projects.some(project => project.id === task.projectId))))
     && statuses.some(column => column.id === task.status) && PRIORITIES.some(priority => priority.id === task.priority)
     && typeof task.dueDate === 'string' && validDate(task.dueDate)
+    && (task.pinned === undefined || typeof task.pinned === 'boolean')
+    && (task.updatedAt === undefined || validTaskEditTime(task.updatedAt))
+    && (task.deletedAt === undefined || validTaskEditTime(task.deletedAt))
     && (legacy || (typeof task.startDate === 'string' && typeof task.startTime === 'string' && typeof task.dueTime === 'string' && !scheduleError(task)))
     && Array.isArray(task.subtasks) && task.subtasks.every(subtask => subtask && typeof subtask.id === 'string'
       && typeof subtask.title === 'string' && typeof subtask.done === 'boolean'));
@@ -46,6 +50,9 @@ export function readBoardState(value: unknown): BoardState | null {
     dueDate: task.dueDate,
     dueTime: legacy ? '' : task.dueTime,
     subtasks: task.subtasks.map(subtask => ({id: subtask.id, title: subtask.title, done: subtask.done})),
+    ...(task.pinned === undefined ? {} : {pinned: task.pinned}),
+    ...(task.updatedAt === undefined ? {} : {updatedAt: task.updatedAt}),
+    ...(task.deletedAt === undefined ? {} : {deletedAt: task.deletedAt}),
     ...(task.calendarOrigin ? {calendarOrigin: readCalendarOrigin(task.calendarOrigin)!} : {})
   }));
   return {

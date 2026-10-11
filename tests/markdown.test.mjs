@@ -38,13 +38,24 @@ test('郵件副本的寄件地址與原信連結可讀、可點；不將寄件�
 });
 test('Markdown 編輯／預覽／放大共用原始草稿；格式工具只改選取文字，不提交表單或丟失內容', () => {
   const injector = createEnvironmentInjector([]);
+  const serverMode = globalThis.ngServerMode; globalThis.ngServerMode = true;
   try {
     const editor = runInInjectionContext(injector, () => new MarkdownEditor()); editor.value = signal('任務描述與原信連結'); editor.initialMode = signal('preview');
-    editor.valueChange.subscribe(value => editor.value.set(value)); assert.equal(editor.mode(), 'preview'); editor.mode.set('edit');
-    const textarea = dom.window.document.createElement('textarea'); textarea.value = editor.value(); textarea.setSelectionRange(0, 4); editor.textarea = () => ({nativeElement: textarea});
+    let changes = 0, prevented = 0;
+    editor.valueChange.subscribe(value => {changes++; editor.value.set(value);}); assert.equal(editor.mode(), 'preview');
+    const link = rendered('<a href="https://example.test"><span>連結</span></a>').querySelector('span');
+    editor.editPreview({target: link, preventDefault() {prevented++;}}); assert.equal(editor.mode(), 'preview'); assert.equal(prevented, 0);
+    editor.editPreview({target: dom.window.document.createElement('p'), preventDefault() {prevented++;}});
+    assert.equal(editor.mode(), 'edit'); assert.equal(prevented, 1); assert.equal(editor.expanded(), false); assert.equal(changes, 0);
+    const textarea = dom.window.document.createElement('textarea'); dom.window.document.body.append(textarea); textarea.value = editor.value(); textarea.setSelectionRange(0, 4); editor.textarea = () => ({nativeElement: textarea});
     editor.insert('bold'); assert.equal(editor.value(), '**任務描述**與原信連結'); assert.equal(textarea.value.slice(textarea.selectionStart, textarea.selectionEnd), '任務描述');
-    editor.mode.set('preview'); editor.expanded = signal(true); assert.equal(editor.value(), '**任務描述**與原信連結'); editor.mode.set('edit'); assert.equal(editor.value(), textarea.value);
-  } finally {injector.destroy();}
+    editor.mode.set('preview'); editor.expanded = signal(false); editor.expandedChange.subscribe(value => editor.expanded.set(value));
+    editor.setExpanded(true); assert.equal(editor.mode(), 'edit'); assert.equal(editor.expanded(), true); assert.equal(dom.window.document.activeElement, textarea);
+    const focusControl = dom.window.document.createElement('button'); dom.window.document.body.append(focusControl); editor.focusControl = () => ({nativeElement: focusControl});
+    editor.setExpanded(false); assert.equal(editor.expanded(), false); assert.equal(dom.window.document.activeElement, focusControl);
+    assert.equal(editor.value(), '**任務描述**與原信連結'); assert.equal(editor.value(), textarea.value); assert.equal(changes, 1);
+    textarea.remove(); focusControl.remove();
+  } finally {injector.destroy(); if (serverMode === undefined) delete globalThis.ngServerMode; else globalThis.ngServerMode = serverMode;}
 });
 
 test('郵件排版表格去除空白欄與巢狀框線，保留內文順序、連結及真正的表格標頭', () => {

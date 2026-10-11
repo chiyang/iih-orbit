@@ -1,0 +1,26 @@
+:host {display: block; padding-top: var(--sp20); color: var(--text);}
+.trash-heading {display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp16); flex-wrap: wrap; margin-bottom: var(--sp20);}
+h2 {display: flex; align-items: center; gap: var(--sp8); margin: 0; font-size: var(--font-18);}
+h2 span {padding: var(--sp3) var(--sp7); border-radius: 5px; background: var(--surface-soft); font-size: var(--font-12); color: var(--text-muted);}
+.trash-heading p {font-size: var(--font-11); line-height: 1.7; color: var(--text-muted); margin: var(--sp8) 0 0;}
+.trash-actions {display: flex; gap: var(--sp8); flex-wrap: wrap;}
+button {display: inline-flex; align-items: center; justify-content: center; gap: var(--sp6); padding: var(--sp9) var(--sp12); border: 1px solid var(--border); border-radius: 7px; background: var(--control-bg); color: var(--text-muted); font-size: var(--font-11); white-space: nowrap; cursor: pointer;}
+button:hover {background: var(--accent-soft); color: var(--accent-text);}
+button:disabled {opacity: .45; cursor: default;}
+button:focus-visible {outline: 2px solid var(--accent-text); outline-offset: 3px;}
+button app-icon {width: 15px; height: 15px;}
+.empty-trash {color: var(--danger-text);}
+.trash-task {display: flex; align-items: flex-start; gap: var(--sp16); padding: var(--sp18); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); margin-bottom: var(--sp10);}
+.trash-task-content {flex: 1; min-width: 0;}
+h3 {display: flex; align-items: center; gap: var(--sp8); margin: 0 0 var(--sp9); font-size: var(--font-14); overflow-wrap: anywhere;}
+h3 app-icon {width: 14px; height: 14px; color: var(--accent-text);}
+.trash-task-meta {display: flex; flex-wrap: wrap; gap: var(--sp8); font-size: var(--font-10); color: var(--text-muted);}
+.trash-task-meta span {padding: var(--sp2) var(--sp5); border-radius: 4px; background: var(--surface-soft);}
+time {align-self: center;}
+.trash-task-content p {color: var(--text-muted); font-size: var(--font-11); line-height: 1.7; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;}
+.trash-task-content small {font-size: var(--font-10); color: var(--text-muted);}
+.restore-task {flex-shrink: 0; color: var(--accent-text);}
+.trash-empty {display: flex; align-items: center; flex-direction: column; gap: var(--sp10); padding: var(--sp40) var(--sp16); border: 1px dashed var(--border); border-radius: 8px; color: var(--text-muted); text-align: center;}
+.trash-empty > app-icon {width: 32px; height: 32px;}
+.trash-empty strong {font-size: var(--font-14);}
+.trash-empty p {margin: 0; font-size: var(--font-11); line-height: 1.7;}

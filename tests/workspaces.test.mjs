@@ -41,6 +41,16 @@ test('多工作空間、自訂狀態、工作空間選擇經過儲存與讀取�
   assert.deepEqual(readWorkspaceState(JSON.parse(JSON.stringify(state))), state);
 });
 
+test('工作空間縮放模式接受布林並保留舊資料缺少欄位的原形', () => {
+  const original = createWorkspaceState(board);
+  assert.equal(Object.hasOwn(readWorkspaceState(original).workspaces[0], 'headerCompact'), false);
+  for (const headerCompact of [true, false]) {
+    const state = {...original, workspaces: [{...original.workspaces[0], headerCompact}]};
+    assert.deepEqual(readWorkspaceState(state), state);
+  }
+  for (const headerCompact of ['true', null, 1, {}]) assert.equal(readWorkspaceState({...original, workspaces: [{...original.workspaces[0], headerCompact}]}), null);
+});
+
 test('拒絕未知工作空間、重複識別碼、空狀態及任務的無效狀態', () => {
   const state = createWorkspaceState(board);
   assert.equal(readWorkspaceState({...state, activeWorkspaceId: 'missing'}), null);

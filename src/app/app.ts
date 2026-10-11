@@ -3,7 +3,7 @@ import { CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup } from '@angular/cd
 import { CdkScrollable } from '@angular/cdk/scrolling';
 import { afterRenderEffect, Component, computed, DestroyRef, effect, ElementRef, HostListener, inject, Injector, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { BoardStore, StoreResult, TaskEditContext } from './board-store';
+import { BoardStore, StoreResult, TaskEditContext, TrashContext } from './board-store';
 import { Calendar } from './calendar';
 import type { CalendarCreate } from './calendar';
 import { Icon } from './icon';
@@ -43,15 +43,18 @@ import { DatePickerTrigger, adjacentHour } from './schedule-controls';
 import { RichContent } from './rich-content';
 import { loadBrowseState, readBrowseState, saveBrowseState, type BrowseState } from './browse-state';
 import { StartupGuide } from './startup-guide';
+import { TaskPanel } from './task-panel';
+import { recentlyEdited } from './task-activity-data';
+import { TrashView } from './trash-view';
 
-type Modal = 'intro' | 'task' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | null;
+type Modal = 'intro' | 'task' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'empty-trash' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide],
+  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView],
   templateUrl: './app.html',
-  styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css', './startup.css']
+  styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css', './startup.css', './task-shortcuts.css', './workspace-controls.css']
 })
 export class App {
   readonly store = inject(BoardStore);
@@ -61,16 +64,42 @@ export class App {
   private readonly injector = inject(Injector);
   get mailTasks(): MailTasks { return this.injector.get(MailTasks); }
   readonly mailOpen = signal(this.savedBrowse.panel === 'gmail');
-  readonly panelOpen = computed(() => this.mailOpen() || this.remindersOpen());
+  readonly tasksOpen = signal(this.savedBrowse.panel === 'tasks');
+  readonly panelTab = signal(this.savedBrowse.panelTab);
+  readonly panelOpen = computed(() => this.mailOpen() || this.remindersOpen() || this.tasksOpen());
   readonly panelOverlay = signal(window.innerWidth <= 700);
   readonly narrowPanelViewport = signal(window.innerWidth <= 1100);
   readonly compactNavigation = computed(() => this.mobileViewport() || this.panelOpen() && this.narrowPanelViewport());
   readonly panelWidth = signal(this.readPanelWidth());
   private resizingPanel = false;
   private readPanelWidth(): number { try { return Math.min(520, Math.max(300, Number(localStorage.getItem('orbit-side-panel-width-v1')) || 360)); } catch { return 360; } }
-  openMail(): void { if (!this.modal()) { this.sidebarOpen.set(false); this.remindersOpen.set(false); this.mailOpen.set(true); } }
+  openMail(): void { if (!this.modal()) { this.sidebarOpen.set(false); this.tasksOpen.set(false); this.remindersOpen.set(false); this.mailOpen.set(true); this.panelTab.set('gmail'); } }
   toggleMail(): void { if (this.mailOpen()) this.closePanel(); else this.openMail(); }
-  closePanel(): void { this.mailOpen.set(false); this.remindersOpen.set(false); }
+  closePanel(): void { this.mailOpen.set(false); this.remindersOpen.set(false); this.tasksOpen.set(false); }
+  openTaskPanel(): void {
+    if (this.modal()) return;
+    this.sidebarOpen.set(false); this.mailOpen.set(false); this.remindersOpen.set(false); this.tasksOpen.set(true); this.panelTab.set('tasks');
+  }
+  togglePanel(): void {
+    if (this.modal()) return;
+    if (this.panelOpen()) this.closePanel();
+    else if (this.panelTab() === 'gmail') this.openMail();
+    else if (this.panelTab() === 'reminders') this.openReminders(this.reminderTab());
+    else this.openTaskPanel();
+  }
+  openPanelTask(task: Task): void {
+    if (this.modal()) return;
+    this.store.refreshFromStorage();
+    const current = this.store.tasks().find(item => item.id === task.id);
+    if (current) this.openTask(current.status, current);
+    else this.notify('這個任務已被刪除或移至其他工作空間。');
+  }
+  async togglePin(task: Task): Promise<void> {
+    if (this.modal() || this.store.pendingWrites()) return;
+    const pinned = !task.pinned;
+    const result = await this.store.setTaskPinned(task.id, pinned);
+    if (this.handleResult(result)) this.notifySaved(pinned ? '任務已釘選，可在右側任務欄查看' : '已取消釘選');
+  }
   startPanelResize(event: PointerEvent): void { event.preventDefault(); this.resizingPanel = true; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); }
   @HostListener('document:pointermove', ['$event'])
   resizePanel(event: PointerEvent): void { if (this.resizingPanel) this.panelWidth.set(Math.min(520, Math.max(300, window.innerWidth - event.clientX))); }
@@ -161,6 +190,10 @@ export class App {
   readonly categoryFilter = signal(this.validCategoryFilter(this.savedBrowse.category));
   readonly projectFilter = signal(this.validProjectFilter(this.savedBrowse.project));
   readonly progressExpanded = signal(this.savedBrowse.progressExpanded);
+  private readonly legacyHeaderCompact = signal(this.savedBrowse.headerCompact);
+  readonly headerCompact = computed(() => this.store.currentWorkspace().headerCompact ?? this.legacyHeaderCompact());
+  readonly trashOpen = signal(this.savedBrowse.trashOpen);
+  readonly emptyTrashContext = signal<TrashContext | null>(null);
   readonly selectedProjectId = computed(() => {
     const id = this.projectFilter();
     return id === '' || this.store.projects().some(project => project.id === id) ? id : 'all';
@@ -175,6 +208,11 @@ export class App {
   readonly projectEditing = signal<Project | null>(null);
   readonly projectToDelete = signal<Project | null>(null);
   readonly priorityFilter = signal(this.savedBrowse.priority);
+  readonly priorityFilterLabel = computed(() => this.priorities.find(priority => priority.id === this.priorityFilter())?.label ?? '');
+  readonly pinnedOnly = signal(this.savedBrowse.pinnedOnly);
+  readonly advancedFiltersOpen = signal(false);
+  readonly advancedFilterCount = computed(() => Number(this.categoryFilter() !== 'all') + Number(this.deadlineFilter() !== 'all') + Number(this.priorityFilter() !== 'all') + Number(this.pinnedOnly()) + Number(this.recentOnly()));
+  readonly recentOnly = signal(this.savedBrowse.recentOnly);
   readonly deadlineFilter = signal<DeadlineFilter>(this.savedBrowse.deadline);
   readonly deadlineDays = signal<number | null>(this.savedBrowse.deadlineDays);
   readonly effectiveDeadlineDays = computed(() => this.deadlineDays() ?? this.store.reminders().dueSoonDays);
@@ -268,6 +306,8 @@ export class App {
         : deadlineState(task, this.now(), this.effectiveDeadlineDays(), this.statuses()) === deadline);
       return matchesQuery && (this.categoryFilter() === 'all' || task.categoryId === this.categoryFilter())
         && matchesDate
+        && (!this.pinnedOnly() || !!task.pinned)
+        && (!this.recentOnly() || recentlyEdited(task, this.now()))
         && (this.priorityFilter() === 'all' || task.priority === this.priorityFilter())
         && (this.scope() !== 'active' || (!this.store.isDone(task) && !this.store.isArchived(task)))
         && (this.scope() !== 'done' || this.store.isDone(task))
@@ -276,6 +316,7 @@ export class App {
   });
   readonly columns = computed(() => boardStatusesForScope(this.statuses(), this.scope()).map(column => ({...column, tasks: this.visibleTasks().filter(task => task.status === column.id)})));
   readonly navigationTitle = computed(() => {
+    if (this.trashOpen()) return '垃圾桶';
     const labels = {all: '專案看板', active: '待完成任務', done: '已完成任務', archived: '封存任務'};
     return this.scope() === 'all' && this.categoryFilter() !== 'all' ? this.category(this.categoryFilter()).name : labels[this.scope()];
   });
@@ -283,7 +324,7 @@ export class App {
   readonly calendarTasks = computed(() => this.visibleTasks().filter(task => !this.store.isArchived(task)));
   readonly effectiveSortKey = computed(() => this.sortKey() ?? (this.deadlineFilter() === 'all' || this.deadlineFilter() === 'unset' ? null : this.deadlineFilter() === 'this-week' ? 'startDate' : 'dueDate'));
   readonly sortedTasks = computed(() => sortTasks(this.visibleTasks(), this.store.categories(), this.effectiveSortKey(), this.sortKey() ? this.sortDirection() : 'asc', this.statuses(), this.store.projects()));
-  readonly hasFilters = computed(() => !!this.query() || this.selectedProjectId() !== 'all' || this.categoryFilter() !== 'all' || this.priorityFilter() !== 'all' || this.scope() !== 'all' || this.deadlineFilter() !== 'all');
+  readonly hasFilters = computed(() => !!this.query() || this.selectedProjectId() !== 'all' || this.categoryFilter() !== 'all' || this.priorityFilter() !== 'all' || this.scope() !== 'all' || this.deadlineFilter() !== 'all' || this.pinnedOnly() || this.recentOnly());
   readonly deadlineCounts = computed(() => this.store.tasks().reduce((counts, task) => {
     const state = deadlineState(task, this.now(), this.effectiveDeadlineDays(), this.statuses());
     if (state) counts[state]++;
@@ -316,6 +357,9 @@ export class App {
       });
       const state = this.browseSnapshot();
       untracked(() => saveBrowseState(generation, workspace, state));
+      if (this.store.currentWorkspace().headerCompact === undefined && state.headerCompact) untracked(() => {
+        void this.store.setWorkspaceHeaderCompact(true, workspace, generation, true);
+      });
     });
     const timer = setInterval(() => this.now.set(new Date()), 30000);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
@@ -324,17 +368,20 @@ export class App {
   private validProjectFilter(id: string): string { return id === '' || id === 'all' || this.store.projects().some(project => project.id === id) ? id : 'all'; }
   private validCategoryFilter(id: string): string { return id === '' || id === 'all' || this.store.categories().some(category => category.id === id) ? id : 'all'; }
   private browseSnapshot(): BrowseState {
-    return {view: this.view(), scope: this.scope(), query: this.query(), project: this.projectFilter(), category: this.categoryFilter(), priority: this.priorityFilter(), deadline: this.deadlineFilter(), deadlineDays: this.deadlineDays(), sort: this.sortKey(), direction: this.sortDirection(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour(), showOrbit: this.calendarShowOrbit(), showGoogle: this.calendarShowGoogle(), progressExpanded: this.progressExpanded(), panel: this.mailOpen() ? 'gmail' : this.remindersOpen() ? 'reminders' : 'closed', reminderTab: this.reminderTab()};
+    return {view: this.view(), scope: this.scope(), query: this.query(), project: this.projectFilter(), category: this.categoryFilter(), priority: this.priorityFilter(), pinnedOnly: this.pinnedOnly(), recentOnly: this.recentOnly(), deadline: this.deadlineFilter(), deadlineDays: this.deadlineDays(), sort: this.sortKey(), direction: this.sortDirection(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour(), showOrbit: this.calendarShowOrbit(), showGoogle: this.calendarShowGoogle(), progressExpanded: this.progressExpanded(), headerCompact: this.headerCompact(), trashOpen: this.trashOpen(), panel: this.tasksOpen() ? 'tasks' : this.mailOpen() ? 'gmail' : this.remindersOpen() ? 'reminders' : 'closed', panelTab: this.panelTab(), reminderTab: this.reminderTab()};
   }
   private restoreBrowse(state: BrowseState, preserveSharedControls = false): void {
     this.view.set(state.view); this.scope.set(state.scope); this.query.set(state.query);
     this.projectFilter.set(this.validProjectFilter(state.project)); this.categoryFilter.set(this.validCategoryFilter(state.category));
     this.priorityFilter.set(state.priority); this.deadlineFilter.set(state.deadline); this.deadlineDays.set(state.deadlineDays);
+    this.pinnedOnly.set(state.pinnedOnly); this.recentOnly.set(state.recentOnly);
     this.sortKey.set(state.sort); this.sortDirection.set(state.direction); this.progressExpanded.set(state.progressExpanded);
+    this.legacyHeaderCompact.set(state.headerCompact); this.trashOpen.set(state.trashOpen);
     this.calendarDate.set(state.calendarDate); this.calendarScrollHour.set(state.calendarScrollHour);
     if (!preserveSharedControls) {
       this.calendarShowOrbit.set(state.showOrbit); this.calendarShowGoogle.set(state.showGoogle);
-      this.mailOpen.set(state.panel === 'gmail'); this.remindersOpen.set(state.panel === 'reminders'); this.reminderTab.set(state.reminderTab);
+      this.mailOpen.set(state.panel === 'gmail'); this.remindersOpen.set(state.panel === 'reminders'); this.tasksOpen.set(state.panel === 'tasks'); this.reminderTab.set(state.reminderTab);
+      this.panelTab.set(state.panel === 'closed' ? state.panelTab : state.panel);
     }
   }
   openCalendarWeek(date: string): void {
@@ -377,7 +424,7 @@ export class App {
   }
   openReminders(tab: ReminderTab = 'today'): void {
     if (this.modal()) return;
-    this.reminderTab.set(tab); this.sidebarOpen.set(false); this.mailOpen.set(false); this.remindersOpen.set(true);
+    this.reminderTab.set(tab); this.sidebarOpen.set(false); this.mailOpen.set(false); this.tasksOpen.set(false); this.remindersOpen.set(true); this.panelTab.set('reminders');
   }
   toggleReminders(): void {
     if (this.modal()) return;
@@ -438,6 +485,7 @@ export class App {
   }
 
   selectProject(id: string): void {
+    this.trashOpen.set(false);
     this.clearFilters();
     this.projectFilter.set(id);
   }
@@ -498,6 +546,7 @@ export class App {
   }
 
   selectScope(scope: TaskScope): void {
+    this.trashOpen.set(false);
     if (scope === 'all') this.projectFilter.set('all');
     this.scope.set(scope);
     this.deadlineFilter.set('all');
@@ -508,6 +557,7 @@ export class App {
   }
 
   selectCategory(id: string): void {
+    this.trashOpen.set(false);
     this.categoryFilter.set(id);
     this.scope.set('all');
     this.deadlineFilter.set('all');
@@ -516,10 +566,13 @@ export class App {
   }
 
   clearFilters(): void {
+    this.trashOpen.set(false);
     this.query.set('');
     this.categoryFilter.set('all');
     this.projectFilter.set('all');
     this.priorityFilter.set('all');
+    this.pinnedOnly.set(false);
+    this.recentOnly.set(false);
     this.deadlineFilter.set('all');
     this.deadlineDays.set(null);
     this.scope.set('all');
@@ -527,6 +580,8 @@ export class App {
 
   openTask(status: TaskStatus = 'todo', task?: Task, date = ''): void {
     if (Date.now() - this.dragEndedAt < 200) return;
+    if (task?.deletedAt) { this.openTrash(); return; }
+    if (!task) this.trashOpen.set(false);
     const initialStatus = this.statuses().some(item => item.id === status) ? status : this.statuses().find(item => item.kind === 'active')?.id ?? this.statuses()[0].id;
     this.draft = task ? structuredClone(task) : this.emptyTask(initialStatus);
     this.taskEditContext.set(this.store.taskContext(this.draft.id));
@@ -667,7 +722,58 @@ export class App {
     if (!task) return;
     if (!this.handleResult(await this.store.deleteTask(task.id, this.deletionContext))) return;
     this.closeModal();
-    this.notifySaved('任務已刪除');
+    this.notifySaved('任務已移至垃圾桶，可還原');
+  }
+
+  openTrash(): void { if (!this.modal()) { this.trashOpen.set(true); this.sidebarOpen.set(false); } }
+
+  async restoreTrashedTask(task: Task): Promise<void> {
+    if (this.modal() || this.store.pendingWrites()) return;
+    const context = {...this.store.taskContext(task.id), original: structuredClone(task)};
+    if (this.handleResult(await this.store.restoreTask(task.id, context))) this.notifySaved('任務已還原');
+  }
+
+  requestEmptyTrash(): void {
+    if (this.modal() || this.store.pendingWrites()) return;
+    this.store.refreshFromStorage();
+    const context = this.store.trashContext();
+    if (!context.tasks.length) return;
+    this.emptyTrashContext.set(context); this.formError.set(''); this.modal.set('empty-trash');
+  }
+
+  async emptyTrash(): Promise<void> {
+    const context = this.emptyTrashContext();
+    if (!context || this.store.pendingWrites()) return;
+    if (!this.handleResult(await this.store.emptyTrash(context))) return;
+    this.closeModal(); this.notifySaved('垃圾桶已清空');
+  }
+
+  async undoLastAction(): Promise<void> {
+    if (this.modal() || this.store.pendingWrites() || !this.store.canUndo()) return;
+    const label = this.store.undoLabel();
+    if (this.handleResult(await this.store.undo())) this.notifySaved('已復原：' + label);
+  }
+
+  async redoLastAction(): Promise<void> {
+    if (this.modal() || this.store.pendingWrites() || !this.store.canRedo()) return;
+    const label = this.store.redoLabel();
+    if (this.handleResult(await this.store.redo())) this.notifySaved('已重做：' + label);
+  }
+
+  async toggleWorkspaceHeader(): Promise<void> {
+    if (this.modal() || this.store.pendingWrites()) return;
+    this.handleResult(await this.store.setWorkspaceHeaderCompact(!this.headerCompact()));
+  }
+
+  @HostListener('document:keydown', ['$event'])
+  undoKey(event: KeyboardEvent): void {
+    const target = event.target as HTMLElement | null;
+    const key = event.key.toLowerCase();
+    const redo = key === 'z' && event.shiftKey || key === 'y' && event.ctrlKey && !event.metaKey && !event.shiftKey;
+    if (event.defaultPrevented || event.altKey || !(event.metaKey || event.ctrlKey) || key !== 'z' && !redo) return;
+    if (this.modal() || this.sidebarOpen() || this.panelOverlay() && this.panelOpen() || target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
+    if (!(redo ? this.store.canRedo() : this.store.canUndo()) || this.store.pendingWrites()) return;
+    event.preventDefault(); void (redo ? this.redoLastAction() : this.undoLastAction());
   }
 
   async drop(event: CdkDragDrop<BoardColumn, BoardColumn, Task>): Promise<void> {
@@ -1011,6 +1117,7 @@ export class App {
     this.externalEntry.set(null);
     this.categoryToDelete.set(null);
     this.taskToDelete.set(null);
+    this.emptyTrashContext.set(null);
     this.statusToDelete.set(null);
     this.workspaceToDelete.set(null);
     this.projectToDelete.set(null);

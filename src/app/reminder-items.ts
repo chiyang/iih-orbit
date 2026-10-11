@@ -18,6 +18,7 @@ export interface ReminderItem {
 export function reminderItems(workspace: Workspace, generation: string, external: readonly ExternalEvent[]): ReminderItem[] {
   const items: ReminderItem[] = [];
   for (const task of workspace.tasks) {
+    if (task.deletedAt) continue;
     if ((workspace.statuses.find(status => status.id === task.status)?.kind ?? 'active') !== 'active') continue;
     items.push({id: 'orbit:' + task.id, generation, workspaceId: workspace.id, task, start: taskMoment(task.startDate, task.startTime), allDay: !task.startTime});
   }

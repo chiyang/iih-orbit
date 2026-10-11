@@ -1,0 +1,24 @@
+<div class="task-panel-intro"><strong>{{ store.currentWorkspace().name }}</strong><p>目前工作空間的所有專案 · 點選任務即可編輯</p></div>
+<div class="task-panel-lists">
+  <section aria-labelledby="pinned-tasks-heading">
+    <div class="task-section-heading"><h2 id="pinned-tasks-heading"><app-icon name="pin" />釘選任務</h2><span>{{ pinned().length }}</span></div>
+    @for (task of pinned(); track task.id) {<ng-container [ngTemplateOutlet]="taskRow" [ngTemplateOutletContext]="{task, recent: false}" />}
+    @empty {<div class="task-panel-empty"><p>把常用任務釘在這裡</p><small>點任務卡片的圖釘，或在編輯任務時勾選「釘選任務」。</small></div>}
+  </section>
+  <section aria-labelledby="recent-tasks-heading">
+    <div class="task-section-heading"><h2 id="recent-tasks-heading"><app-icon name="clock" />最近編輯</h2><small>最新 {{ recentLimit }} 筆</small></div>
+    @for (task of recent(); track task.id) {<ng-container [ngTemplateOutlet]="taskRow" [ngTemplateOutletContext]="{task, recent: true}" />}
+    @empty {<div class="task-panel-empty"><p>還沒有編輯紀錄</p><small>建立或修改任務後，會依最新編輯時間列在這裡。</small></div>}
+  </section>
+</div>
+<ng-template #taskRow let-task="task" let-recent="recent">
+  <article class="task-shortcut-row" [class.is-pinned]="task.pinned">
+    <button type="button" class="task-shortcut-open" [attr.aria-label]="'開啟任務 ' + task.title" (click)="openTask.emit(task)">
+      <strong>{{ task.title }}</strong>
+      <span class="task-shortcut-meta"><span>{{ projectName(task) }}</span><span class="task-shortcut-status">{{ statusLabel(task) }}</span></span>
+      @if (recent) {<time [attr.datetime]="task.updatedAt" [title]="task.updatedAt | date:'yyyy/M/d HH:mm:ss'">編輯於 {{ task.updatedAt | date:'M/d HH:mm' }}</time>}
+    </button>
+    @if (task.pinned) {<span class="shortcut-pinned" aria-label="已釘選" title="已釘選；可在任務表單取消釘選"><app-icon name="pin" /></span>}
+    @else {<button type="button" class="shortcut-pin" [attr.aria-label]="'釘選 ' + task.title" title="釘選任務" [disabled]="store.pendingWrites() > 0" (click)="pinTask.emit(task)"><app-icon name="pin" /></button>}
+  </article>
+</ng-template>

@@ -35,6 +35,11 @@ export interface Task {
   dueDate: string;
   dueTime: string;
   subtasks: Subtask[];
+  pinned?: boolean;
+  /** Last content edit; absent for tasks saved before edit tracking was introduced. */
+  updatedAt?: string;
+  /** Retained in the workspace and backups while the task is in the trash. */
+  deletedAt?: string;
   /** Legacy field retained only to read older backups; new copies have no source link. */
   calendarOrigin?: CalendarOrigin;
 }
@@ -79,6 +84,7 @@ export interface BoardStatus {
 export interface Workspace extends BoardState {
   id: string;
   name: string;
+  headerCompact?: boolean;
 }
 
 export interface WorkspaceState {

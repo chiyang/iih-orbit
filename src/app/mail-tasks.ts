@@ -57,7 +57,8 @@ export class MailTasks implements OnDestroy {
     try {
       const task = mailTask(mail, email, base, schedule), result = await this.store.saveTask(task, context, beforeId);
       if (!result.ok) { this.notice.set(result.message); return; }
-      this.undoContext.set({...context, original: structuredClone(task)});
+      const saved = this.store.workspaces().find(workspace => workspace.id === context.workspaceId)?.tasks.find(item => item.id === task.id);
+      this.undoContext.set(saved ? {...context, original: structuredClone(saved)} : null);
       this.notice.set(result.persisted ? `已建立「${task.title}」${schedule.time ? '，時段為一小時' : schedule.date ? '，已安排全天' : ''}。` : '任務只暫存在此分頁，請匯出備份。');
     } catch (error) { this.notice.set(error instanceof Error ? error.message : '未能建立任務，請重試。'); }
     finally { this.busy.set(false); }
@@ -66,7 +67,7 @@ export class MailTasks implements OnDestroy {
     const context = this.undoContext(); if (!context?.original || this.busy()) return;
     this.busy.set(true);
     try {
-      const result = await this.store.deleteTask(context.original.id, context);
+      const result = await this.store.cancelTaskCreation(context);
       if (result.ok) { this.undoContext.set(null); this.notice.set(result.persisted ? '已撤銷任務建立。' : '已撤銷任務建立，變更只暫存在此分頁。'); }
       else { this.undoContext.set(null); this.notice.set(result.message); }
     } finally { this.busy.set(false); }

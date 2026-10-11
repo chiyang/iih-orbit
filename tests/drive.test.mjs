@@ -41,6 +41,22 @@ function fixture() {
   return {engine, api, repository, board, documents, runtime: () => runtime, local: () => local, revision: () => revision, uploads: () => uploads, edit(title) {local.data.workspaces[0].tasks[0].title = title; revision = crypto.randomUUID();}, async branch(title) {const b = structuredClone(local); b.data.workspaces[0].tasks[0].title = title; const link = runtime.link; const d = await createDriveDocument(b, link.datasetId, [link.baseVersionId], 'sync'); documents.set('cloud_' + d.cloud.versionId, d); return d;}};
 }
 
+test('工作空間縮放模式隨 Drive 保存並改變同步版本，舊檔案的校驗保持相容', async () => {
+  const original = backup();
+  for (const formatVersion of [1, 2]) {
+    const cloud = {formatVersion, datasetId: crypto.randomUUID(), versionId: crypto.randomUUID(), parents: [], purpose: 'sync', fileHash: await checksum(original), syncHash: await syncHash(original, formatVersion)};
+    const legacy = await readDriveDocument({...original, cloud});
+    assert.equal(Object.hasOwn(legacy.data.workspaces[0], 'headerCompact'), false);
+    for (const headerCompact of [true, false]) {
+      const changed = structuredClone(original); changed.data.workspaces[0].headerCompact = headerCompact;
+      assert.notEqual(await backupHash(changed), await backupHash(original));
+      assert.notEqual(await syncHash(changed, formatVersion), cloud.syncHash);
+      const document = await createDriveDocument(changed);
+      assert.equal((await readDriveDocument(document)).data.workspaces[0].headerCompact, headerCompact);
+    }
+  }
+});
+
 test('既有沒有封存旗標的 Drive 校驗仍相容，專案封存及分類順序會改變同步版本', async () => {
   const old = backup();
   old.appVersion = '1.5.0';
@@ -215,7 +231,10 @@ test('自動同步追蹤本機任務與偏好修改，每次相同內容不重�
   f.edit('本機修改'); await f.engine.synchronize('sync'); assert.equal(f.uploads(), 2);
   f.local().preferences.theme = 'dark'; await f.engine.synchronize('sync'); assert.equal(f.uploads(), 3);
   await f.engine.synchronize('sync'); assert.equal(f.uploads(), 3);
-  assert.equal(f.runtime().conflict, undefined); assert.equal(f.documents.size, 3);
+  f.local().data.workspaces[0].headerCompact = true; await f.engine.synchronize('sync'); assert.equal(f.uploads(), 4);
+  assert.equal([...f.documents.values()].at(-1).data.workspaces[0].headerCompact, true);
+  await f.engine.synchronize('sync'); assert.equal(f.uploads(), 4);
+  assert.equal(f.runtime().conflict, undefined); assert.equal(f.documents.size, 4);
 });
 
 test('自動備份集合的雲端基準已刪除且沒有標記時，不重新建立舊集合或丟失本機修改', async () => {
@@ -228,9 +247,13 @@ test('自動備份集合的雲端基準已刪除且沒有標記時，不重新�
 test('只有雲端變更時拉取後不回傳重複版本，備份模式不套用雲端', async () => {
   const f = fixture(); await f.engine.start('full', [], 'sync');
   const remote = await f.branch('雲端更新');
+  remote.data.workspaces[0].headerCompact = true;
+  const compactRemote = await createDriveDocument(remote, remote.cloud.datasetId, remote.cloud.parents, 'sync');
+  f.documents.delete('cloud_' + remote.cloud.versionId); f.documents.set('cloud_' + compactRemote.cloud.versionId, compactRemote);
   await f.engine.synchronize('backup'); assert.equal(f.local().data.workspaces[0].tasks[0].title, '原始內容');
   await f.engine.synchronize('sync'); assert.equal(f.local().data.workspaces[0].tasks[0].title, '雲端更新');
-  assert.equal(f.runtime().link.baseVersionId, remote.cloud.versionId); await f.engine.synchronize('sync'); assert.equal(f.uploads(), 1);
+  assert.equal(f.local().data.workspaces[0].headerCompact, true);
+  assert.equal(f.runtime().link.baseVersionId, compactRemote.cloud.versionId); await f.engine.synchronize('sync'); assert.equal(f.uploads(), 1);
 });
 
 test('兩端修改保存本機分支並暫停，使用本機內容產生合併版本，歷史仍保留', async () => {

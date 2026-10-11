@@ -22,6 +22,195 @@ const task = {id: 'task', title: '既有任務', description: '保留內容', ca
 const legacy = {version: 2, projectName: '原專案', categories: [], tasks: [task, {...task, id: 'done', status: 'done'}]};
 const migratedTasks = legacy.tasks.map(item => ({...item, projectId: 'project-legacy'}));
 
+test('刪除保存垃圾桶內容、原順序與備份，還原保留釘選、子任務及時間', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore();
+  await store.saveTask({...store.tasks()[0], pinned: true, subtasks: [{id: 'step', title: '保留步驟', done: true}]});
+  const saved = structuredClone(store.tasks()[0]);
+  await store.deleteTask(saved.id);
+  assert.equal(store.tasks().some(item => item.id === saved.id), false);
+  assert.equal(store.trashedTasks().length, 1); assert.ok(Number.isFinite(Date.parse(store.trashedTasks()[0].deletedAt)));
+  const {deletedAt, ...retained} = store.trashedTasks()[0]; assert.deepEqual(retained, saved);
+  assert.deepEqual(new BoardStore().trashedTasks(), store.trashedTasks());
+  const backup = await store.backupForExport('full');
+  assert.equal(backup.data.workspaces[0].tasks[0].deletedAt, deletedAt);
+  await store.importBackup(backup, store.revision());
+  assert.equal(store.trashedTasks().length, 1); assert.equal(store.canUndo(), false);
+  await store.restoreTask(saved.id);
+  assert.deepEqual(store.tasks()[0], saved); assert.deepEqual(store.trashedTasks(), []);
+  assert.equal(store.undoLabel(), '還原任務'); await store.undo(); assert.equal(store.trashedTasks().length, 1);
+});
+
+test('垃圾桶隔離工作空間、拒絕過期清空與還原，清空失敗保留內容，成功後不能復原清空', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(); await store.deleteTask('task');
+  const stale = store.trashContext();
+  await store.deleteTask('done'); assert.equal((await store.emptyTrash(stale)).ok, false);
+  const context = store.trashContext(), restore = store.taskContext('task');
+  const write = localStorage.setItem; localStorage.setItem = () => {throw new Error('full');};
+  try { assert.equal((await store.emptyTrash(context)).ok, false); assert.equal(store.trashedTasks().length, 2); }
+  finally { localStorage.setItem = write; }
+  await store.saveWorkspace('', '另一個空間');
+  const second = store.workspaces().find(item => item.name === '另一個空間'); store.switchWorkspace(second.id);
+  await store.saveTask({...task, id: 'other'}); await store.deleteTask('other');
+  assert.equal(store.trashedTasks().length, 1);
+  assert.equal((await store.emptyTrash(context)).ok, true);
+  assert.equal(store.trashedTasks().length, 1); assert.equal(store.canUndo(), true);
+  store.switchWorkspace(context.workspaceId);
+  assert.deepEqual(store.trashedTasks(), []); assert.equal(store.canUndo(), false);
+  assert.equal((await store.restoreTask('task', restore)).ok, false);
+  assert.equal((await store.undo()).ok, false);
+  await store.resetData(false, store.revision()); assert.equal((await store.emptyTrash(context)).ok, false);
+});
+
+test('多步復原與重做任務建立、編輯、移動、排序、釘選、刪除與管理分類專案狀態', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(), original = structuredClone(store.state());
+  await store.saveProject({id: 'project', name: '新專案'});
+  await store.saveCategory({id: 'category', name: '新分類', color: 'green'});
+  await store.saveStatus({id: 'new-status', label: '新狀態', subtitle: '', color: 'blue', kind: 'active'});
+  await store.saveTask({...task, id: 'new', projectId: 'project', categoryId: 'category'});
+  await store.saveTask({...store.tasks().find(item => item.id === 'new'), description: '編輯後'});
+  await store.moveTask('new', 'progress'); await store.moveTask('task', 'todo', 'new');
+  await store.setTaskPinned('new', true); await store.deleteTask('new');
+  const final = structuredClone(store.state());
+  const steps = store.history().length;
+  for (let i = 0; i < steps; i++) {assert.equal(store.canUndo(), true); assert.equal((await store.undo()).ok, true);}
+  assert.deepEqual(store.state(), original); assert.equal(store.canUndo(), false);
+  for (let i = 0; i < steps; i++) {assert.equal(store.canRedo(), true); assert.equal((await store.redo()).ok, true);}
+  assert.deepEqual(store.state(), final); assert.equal(store.canRedo(), false);
+  for (let i = 0; i < steps; i++) await store.undo();
+  assert.equal(new BoardStore().canUndo(), false);
+  assert.equal(new BoardStore().canRedo(), false);
+  await store.saveCategory({id: 'category', name: '新分類', color: 'green'});
+  await store.saveTask({...store.tasks()[0], categoryId: 'category'});
+  const before = structuredClone(store.state()); await store.deleteCategory('category'); await store.undo(); assert.deepEqual(store.state(), before);
+});
+
+test('復原不覆蓋跨分頁新內容、重置或其他空間，失敗與無變更操作不加入記錄', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const first = new BoardStore(), peer = new BoardStore();
+  await first.saveTask({...first.tasks()[0], title: '自己的編輯'});
+  await peer.saveTask({...peer.tasks()[1], title: '另一分頁的內容'});
+  assert.equal((await first.undo()).ok, false); assert.equal(first.tasks()[0].title, '自己的編輯');
+  assert.equal(first.tasks()[1].title, '另一分頁的內容'); assert.equal(first.canUndo(), false);
+  const firstId = first.currentWorkspace().id; await first.saveWorkspace('', '第二空間'); const second = first.workspaces().find(item => item.name === '第二空間');
+  first.switchWorkspace(second.id); assert.equal(first.canUndo(), false);
+  await first.saveTask({...task, id: 'second-task'}); first.switchWorkspace(firstId); assert.equal(first.canUndo(), false);
+  first.switchWorkspace(second.id); assert.equal(first.canUndo(), true); await first.undo(); assert.deepEqual(first.tasks(), []);
+  await first.saveTask({...task, id: 'second-task'}); const count = first.history().length;
+  await first.saveTask(first.tasks()[0]); assert.equal(first.history().length, count);
+  assert.equal((await first.saveTask({...task, id: 'bad', projectId: 'missing'})).ok, false); assert.equal(first.history().length, count);
+  await first.resetData(false, first.revision()); assert.equal(first.canUndo(), false);
+});
+
+test('復原記錄最多保留最近 50 步，儲存失敗時仍可復原本分頁的暫存修改', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore();
+  for (let i = 1; i <= 55; i++) await store.saveTask({...store.tasks()[0], title: '修改 ' + i});
+  for (let i = 0; i < 50; i++) assert.equal((await store.undo()).ok, true);
+  assert.equal(store.tasks()[0].title, '修改 5'); assert.equal(store.canUndo(), false);
+  for (let i = 0; i < 50; i++) assert.equal((await store.redo()).ok, true);
+  assert.equal(store.tasks()[0].title, '修改 55'); assert.equal(store.canRedo(), false);
+  const write = localStorage.setItem; localStorage.setItem = () => {throw new Error('full');};
+  try {
+    await store.saveTask({...store.tasks()[0], title: '暫存內容'}); assert.equal(store.canUndo(), true);
+    const result = await store.undo(); assert.equal(result.ok, true); assert.equal(result.persisted, false); assert.equal(store.tasks()[0].title, '修改 55');
+    const redo = await store.redo(); assert.equal(redo.ok, true); assert.equal(redo.persisted, false); assert.equal(store.tasks()[0].title, '暫存內容');
+  } finally { localStorage.setItem = write; }
+});
+
+test('重做依序恢復，失敗與無變更不清除路徑，新修改只清除目前空間的重做', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(), first = store.currentWorkspace().id;
+  await store.setTaskPinned('task', true); await store.undo(); assert.equal(store.canRedo(), true);
+  await store.saveTask(store.tasks()[0]); assert.equal(store.canRedo(), true);
+  assert.equal((await store.saveTask({...store.tasks()[0], projectId: 'missing'})).ok, false); assert.equal(store.canRedo(), true);
+  await store.saveWorkspace('', '第二空間'); const second = store.currentWorkspace().id;
+  await store.saveTask({...task, id: 'second'}); await store.undo(); assert.equal(store.canRedo(), true);
+  store.switchWorkspace(first); await store.saveTask({...store.tasks()[0], title: '新的修改'});
+  assert.equal(store.canRedo(), false); assert.equal((await store.redo()).ok, false);
+  store.switchWorkspace(second); assert.equal(store.canRedo(), true); await store.redo(); assert.equal(store.tasks()[0].id, 'second');
+  await store.undo(); await store.resetData(false, store.revision()); assert.equal(store.canRedo(), false);
+});
+
+test('重做不覆蓋跨分頁內容，縮放設定不阻擋重做且不被快照覆蓋', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(); await store.setTaskPinned('task', true); await store.undo();
+  const peer = new BoardStore(); await peer.setWorkspaceHeaderCompact(true);
+  store.refreshFromStorage(); assert.equal(store.canRedo(), true);
+  await store.redo(); assert.equal(store.currentWorkspace().headerCompact, true); assert.equal(store.tasks()[0].pinned, true);
+  await store.undo(); assert.equal(store.currentWorkspace().headerCompact, true);
+  await peer.saveTask({...peer.tasks()[1], title: '另一分頁新內容'});
+  assert.equal((await store.redo()).ok, false); assert.equal(store.tasks()[1].title, '另一分頁新內容');
+  assert.equal(store.canRedo(), false); assert.equal(store.tasks()[0].pinned, undefined);
+});
+
+test('清空垃圾桶清除復原和重做紀錄，不能帶回已清空的任務', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(); await store.deleteTask('task'); await store.restoreTask('task'); await store.undo();
+  assert.equal(store.canRedo(), true); assert.equal(store.canUndo(), true);
+  assert.equal((await store.emptyTrash(store.trashContext())).ok, true);
+  assert.equal(store.canRedo(), false); assert.equal(store.canUndo(), false);
+  assert.equal((await store.redo()).ok, false); assert.equal(store.state().tasks.some(task => task.id === 'task'), false);
+});
+
+test('工作空間縮放模式逐欄合併、各空間獨立並隨全部和選定備份往返，舊預設不虛構欄位', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(), first = store.currentWorkspace().id, generation = store.generation();
+  assert.equal(Object.hasOwn(store.currentWorkspace(), 'headerCompact'), false);
+  const peer = new BoardStore(); await peer.saveTask({...peer.tasks()[0], title: '另一分頁編輯'});
+  assert.equal((await store.setWorkspaceHeaderCompact(true)).ok, true);
+  assert.equal(store.tasks()[0].title, '另一分頁編輯'); assert.equal(store.canUndo(), false);
+  assert.equal(new BoardStore().currentWorkspace().headerCompact, true);
+  await store.saveWorkspace('', '第二空間'); const second = store.currentWorkspace().id;
+  await store.setWorkspaceHeaderCompact(false); store.switchWorkspace(first);
+  assert.equal(store.currentWorkspace().headerCompact, true);
+  const full = await store.backupForExport('full'), selected = await store.backupForExport('workspaces', [first]);
+  assert.equal(full.data.workspaces.find(workspace => workspace.id === second).headerCompact, false);
+  assert.equal(selected.data.workspaces[0].headerCompact, true);
+  await store.importBackup(selected, store.revision()); assert.equal(store.workspaces().at(-1).headerCompact, true);
+  await store.importBackup(full, store.revision()); assert.equal(store.workspaces().find(workspace => workspace.id === first).headerCompact, true);
+  assert.equal((await store.setWorkspaceHeaderCompact(false, first, generation)).ok, false);
+  assert.equal((await store.setWorkspaceHeaderCompact(false, 'missing')).ok, false);
+  await store.setWorkspaceHeaderCompact(false, first);
+  await store.setWorkspaceHeaderCompact(true, first, store.generation(), true);
+  assert.equal(store.workspaces().find(workspace => workspace.id === first).headerCompact, false);
+});
+
+test('釘選逐欄合併跨分頁最新內容，重新載入及備份保留，刪除或重置後不復活', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const first = new BoardStore(), second = new BoardStore(), context = first.taskContext('task');
+  await second.saveTask({...second.tasks()[0], title: '另一分頁的新內容'});
+  const editedAt = second.tasks()[0].updatedAt;
+  assert.equal((await first.setTaskPinned('task', true, context)).ok, true);
+  assert.equal(first.tasks()[0].title, '另一分頁的新內容'); assert.equal(first.tasks()[0].updatedAt, editedAt);
+  assert.equal(new BoardStore().tasks()[0].pinned, true);
+  const backup = await first.backupForExport('full');
+  assert.equal(backup.data.workspaces[0].tasks[0].pinned, true); assert.equal(backup.data.workspaces[0].tasks[0].updatedAt, editedAt);
+  await first.setTaskPinned('task', false); assert.equal(first.tasks()[0].updatedAt, editedAt);
+  await first.importBackup(backup, first.revision()); assert.equal(first.tasks()[0].pinned, true);
+  const restoredContext = first.taskContext('task');
+  await first.deleteTask('task'); assert.equal((await first.setTaskPinned('task', true, restoredContext)).ok, false);
+  assert.equal(first.tasks().some(item => item.id === 'task'), false);
+  await first.resetData(false, first.revision());
+  assert.equal((await first.setTaskPinned('done', true, context)).ok, false); assert.deepEqual(first.tasks(), []);
+});
+
+test('內容編輯記錄時間，釘選及同欄排序保留時間，不幫未修改的舊任務補造紀錄', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore();
+  await store.setTaskPinned('task', true); assert.equal(store.tasks()[0].updatedAt, undefined);
+  await store.saveTask({...store.tasks()[0], description: '第一次修改'});
+  const saved = structuredClone(store.tasks()[0]); assert.ok(Number.isFinite(Date.parse(saved.updatedAt)));
+  await store.moveTask('task', 'todo'); await store.setTaskPinned('task', false);
+  assert.equal(store.tasks().find(item => item.id === 'task').updatedAt, saved.updatedAt);
+  assert.equal(store.tasks().find(item => item.id === 'done').updatedAt, undefined);
+  await store.saveTask({...task, id: 'new'}); assert.ok(store.tasks().find(item => item.id === 'new').updatedAt);
+  await store.moveTask('done', 'progress'); assert.ok(store.tasks().find(item => item.id === 'done').updatedAt);
+  assert.equal(new BoardStore().tasks().find(item => item.id === 'task').updatedAt, saved.updatedAt);
+});
+
 test('首次使用只有空白工作空間，略過或完成引導後重新載入接續建立；空白選擇不產生專案', async () => {
   storage();
   const store = new BoardStore();
@@ -671,10 +860,11 @@ test('Drive 全部同步套用外觀、提醒與月曆設定，保留 Google 連
   await store.updateGoogle({accountId: 'local', email: 'local@example.com', refreshMinutes: 15});
   await store.updateDrive({accountId: 'drive', email: 'drive@example.com', mode: 'sync'});
   const snapshot = await store.driveSnapshot('full', []), remote = structuredClone(snapshot.backup);
-  remote.data.workspaces[0].tasks[0].title = '雲端更新'; remote.preferences = {theme: 'light', accent: '#7951b0', textSize: 'extra-small'}; remote.reminders.leadMinutes = 15;
+  remote.data.workspaces[0].tasks[0].title = '雲端更新'; remote.data.workspaces[0].headerCompact = true; remote.preferences = {theme: 'light', accent: '#7951b0', textSize: 'extra-small'}; remote.reminders.leadMinutes = 15;
   remote.google = {...remote.google, clientId: '456-remote.apps.googleusercontent.com', accountId: 'remote', email: 'remote@example.com', refreshMinutes: 1, sources: [{id: 'remote-source', accountId: 'remote', calendarId: 'calendar', name: '研究行事曆', color: '#31584b', visible: true, workspaceIds: [id]}]};
   assert.equal((await store.applyDriveBackup(remote, snapshot.revision, [])).ok, true);
   assert.equal(store.tasks()[0].title, '雲端更新'); assert.deepEqual(store.appearance(), remote.preferences); assert.deepEqual(store.reminders(), remote.reminders);
+  assert.equal(store.currentWorkspace().headerCompact, true);
   assert.equal(store.google().clientId, '123-local.apps.googleusercontent.com'); assert.equal(store.google().accountId, 'local'); assert.equal(store.google().refreshMinutes, 1);
   assert.equal(store.google().email, 'local@example.com'); assert.deepEqual(store.drive(), snapshot.backup.drive);
   assert.equal(store.google().sources[0].calendarId, 'calendar'); assert.notEqual(store.google().sources[0].id, 'remote-source'); assert.equal(store.drive().accountId, 'drive');
@@ -708,13 +898,15 @@ test('Drive 選定範圍套用保留其他空間與整體偏好，同步來源�
   storage({'orbit-board-v1': JSON.stringify(legacy)});
   const store = new BoardStore(), first = store.currentWorkspace().id;
   await store.saveWorkspace('', '保留的空間'); const second = store.currentWorkspace().id;
+  await store.setWorkspaceHeaderCompact(false);
   await store.updateGoogle({clientId: '123-local.apps.googleusercontent.com', accountId: 'account', email: 'a@example.com'});
   await store.saveCalendarSource({id: 'local-source', accountId: 'account', calendarId: 'calendar', name: '自訂名稱', color: '#123456', visible: false, workspaceIds: [first, second]});
   const snapshot = await store.driveSnapshot('workspaces', [first]), remote = structuredClone(snapshot.backup);
-  remote.data.workspaces[0].name = '雲端研究'; remote.calendarSources[0].id = 'remote-source'; remote.calendarSources[0].name = '遠端名稱';
+  remote.data.workspaces[0].name = '雲端研究'; remote.data.workspaces[0].headerCompact = true; remote.calendarSources[0].id = 'remote-source'; remote.calendarSources[0].name = '遠端名稱';
   await store.updateAppearance({theme: 'dark'}); assert.equal((await store.applyDriveBackup(remote, snapshot.revision, [first])).ok, false);
   assert.equal((await store.applyDriveBackup(remote, store.revision(), [first])).ok, true);
   assert.equal(store.workspaces().find(w => w.id === second).name, '保留的空間'); assert.equal(store.workspaces().find(w => w.id === first).name, '雲端研究');
+  assert.equal(store.workspaces().find(w => w.id === second).headerCompact, false); assert.equal(store.workspaces().find(w => w.id === first).headerCompact, true);
   const source = store.google().sources[0]; assert.equal(source.id, 'local-source'); assert.equal(source.name, '遠端名稱'); assert.equal(source.visible, false); assert.deepEqual(new Set(source.workspaceIds), new Set([first, second]));
   assert.equal(store.appearance().theme, 'dark');
   const original = globalThis.localStorage.setItem;

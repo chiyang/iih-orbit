@@ -20,7 +20,8 @@ export function readWorkspaceState(value: unknown): WorkspaceState | null {
     if (!workspace || typeof workspace.id !== 'string' || !workspace.id || typeof workspace.name !== 'string' || !workspace.name.trim()) return null;
     const board = readBoardState(workspace);
     if (!board) return null;
-    workspaces.push({...board, id: workspace.id, name: workspace.name.trim()});
+    if (workspace.headerCompact !== undefined && typeof workspace.headerCompact !== 'boolean') return null;
+    workspaces.push({...board, id: workspace.id, name: workspace.name.trim(), ...(workspace.headerCompact === undefined ? {} : {headerCompact: workspace.headerCompact})});
   }
   if (new Set(workspaces.map(workspace => workspace.id)).size !== workspaces.length
     || !workspaces.some(workspace => workspace.id === source.activeWorkspaceId)) return null;

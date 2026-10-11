@@ -164,7 +164,7 @@ h1 { font-size: var(--font-26); letter-spacing: .3px; font-weight: 620; margin: 
 .filter-summary { display: flex; align-items: center; gap: var(--sp13); color: var(--text-muted); font-size: var(--font-11); margin: calc(-1 * var(--sp6)) 0 var(--sp16); }
 .filter-summary button { display: flex; align-items: center; gap: var(--sp4); background: var(--accent-soft); border-radius: 4px; font-size: var(--font-10); color: var(--text-muted); padding: var(--sp4) var(--sp7); }
 .filter-summary app-icon { width: 11px; height: 11px; }
-.kanban-scroll { overflow-x: auto; padding-bottom: var(--sp6); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.kanban-scroll { overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: var(--sp6); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .kanban { --column-width: calc(240px * var(--font-scale)); --column-gap: var(--sp16); display: grid; grid-template-columns: repeat(var(--column-count), minmax(var(--column-width), 1fr)); gap: var(--column-gap); min-width: calc(var(--column-count) * var(--column-width) + (var(--column-count) - 1) * var(--column-gap)); align-items: start; }
 .kanban-column { background: color-mix(in srgb, var(--category-bg) 50%, var(--surface)); border: 1px solid var(--category-bg); border-radius: 11px; padding: var(--sp16) var(--sp11) var(--sp11); min-height: calc(500px * var(--font-scale)); }
 .column-header { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--sp2) 0 var(--sp4); }
@@ -175,7 +175,7 @@ h1 { font-size: var(--font-26); letter-spacing: .3px; font-weight: 620; margin: 
 .column-subtitle { font-size: var(--font-10); color: var(--text-soft); margin: var(--sp7) 0 var(--sp19) var(--sp5); }
 .task-list { display: flex; flex-direction: column; gap: var(--sp12); min-height: calc(260px * var(--font-scale)); }
 .task-list.cdk-drop-list-receiving { outline: 1px dashed var(--border); outline-offset: 4px; border-radius: 6px; }
-.task-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: var(--sp15) var(--sp13) var(--sp12); box-shadow: 0 2px 3px rgb(var(--shadow-rgb) / 0.012); cursor: grab; transition: box-shadow .15s, border-color .15s; touch-action: pan-y; }
+.task-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: var(--sp15) var(--sp13) var(--sp12); box-shadow: 0 2px 3px rgb(var(--shadow-rgb) / 0.012); cursor: grab; transition: box-shadow .15s, border-color .15s; touch-action: pan-x pan-y pinch-zoom; }
 .task-card:hover { border-color: var(--border); box-shadow: 0 3px 9px rgb(var(--shadow-rgb) / 0.039); }
 .task-card:active { cursor: grabbing; }
 .card-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp6); margin-bottom: var(--sp12); }
