@@ -218,6 +218,7 @@ h1 { font-size: var(--font-26); letter-spacing: .3px; font-weight: 620; margin: 
 .board-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--sp20); font-size: var(--font-9); color: var(--text-soft); margin-top: var(--sp17); }
 .board-footer span { display: flex; align-items: center; gap: var(--sp5); }
 .board-footer app-icon { width: 12px; height: 12px; }
+.board-footer app-brand-mark { width: 27px; height: 20px; flex-shrink: 0; }
 .list-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 9px; }
 .task-table { width: 100%; min-width: 1050px; border-collapse: collapse; text-align: left; font-size: var(--font-11); }
 .task-table th { background: var(--header-bg); font-size: var(--font-10); font-weight: 500; color: var(--text-soft); padding: var(--sp15); border-bottom: 1px solid var(--border); }

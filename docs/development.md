@@ -56,6 +56,12 @@ npm run build:pages
 
 正式 Google 授權來源為 `https://chiyang.github.io`，不含 `/iih-orbit/`。使用者將本機資料搬至正式站台時，先下載備份，再於正式站台匯入並重新連線 Google。參考 [GitHub Pages 自訂 workflow](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)。
 
+### 手機安裝資產
+
+[manifest.webmanifest](../public/manifest.webmanifest) 設定 `display: standalone`，並提供 192、512 像素 PNG 圖示及獨立的 512 像素 maskable 圖示。[index.html](../src/index.html) 連結 manifest 與 180 像素 Apple Touch 圖示，保留既有 SVG favicon。圖示的可編輯 SVG 原稿放在 [public/icons](../public/icons/)；maskable 版本保留裁切安全範圍。
+
+Manifest 的 `start_url`、`scope` 與圖示路徑皆相對於 manifest 所在位置，HTML 連結則沿用建置的 base href，因此本機根目錄與 Pages 的 `/iih-orbit/` 都能使用。省略 `id`，讓識別碼沿用 `start_url`；[相對的 id 會依來源根目錄解析](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest/Reference/id)，不適合直接設為 `./`。`public` 資產由 Angular 原樣複製，無須加入 `@angular/pwa`、Service Worker 或離線快取。部署後的手機操作見 [使用指南](user-guide.md#安裝到手機主畫面)。
+
 ## 主要程式入口
 
 下表列出各功能入口；相鄰的 HTML／CSS 負責介面與樣式。
