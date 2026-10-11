@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { GoogleAuth } from './google-auth';
 import { GMAIL_SCOPE } from './gmail-data';
 import type { SessionOptions } from './google-session';
+import type { GoogleSessionContext } from './google-session';
 import { GmailReadQueue } from './gmail-requests';
 
 @Injectable({providedIn: 'root'})
@@ -14,6 +15,10 @@ export class GmailAuth extends GoogleAuth {
   protected override get networkMessage(): string { return 'Gmail 連線中斷或逾時，請確認網路後再試。'; }
   protected override get resourceName(): string { return 'Gmail 郵件'; }
   protected override get maxResponseBytes(): number { return 2 * 1024 * 1024; }
+  override useSession(context: GoogleSessionContext): void {
+    this.reads.useContext(JSON.stringify([context.generation, context.clientId, context.accountId]));
+    super.useSession(context);
+  }
   api(path: string, parameters: Record<string, string> = {}, signal?: AbortSignal): Promise<unknown> {
     if (!/^(labels|threads(?:\/[A-Za-z0-9_-]{1,200})?|messages(?:\/[A-Za-z0-9_-]{1,200}(?:\/attachments\/[A-Za-z0-9_-]{1,1000})?)?)$/.test(path)) throw new Error('Gmail 讀取位址不正確。');
     // metadataHeaders is a repeated query parameter, not a comma-separated header name.

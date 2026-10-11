@@ -20,7 +20,7 @@ export class ReminderDelivery {
       }
       if (records.some(record => record.key === key) || expires < now) return false;
       // Do not evict live identities: doing so could repeat a still-active reminder in another tab.
-      if (records.length >= 2000) throw new Error('提醒記錄已滿，暫停自動提示；仍可使用訊息中心。');
+      if (records.length >= 2000) throw new Error('提醒記錄已滿，暫停自動提示；仍可使用訊息提醒。');
       this.storage.setItem(REMINDER_DELIVERY_KEY, JSON.stringify([...records, {key, expires}]));
       return true;
     });

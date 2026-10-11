@@ -46,7 +46,7 @@ export class GmailPanel {
   }
   resetLabels(): void { this.labelDraft.set([...this.gmail.selected()]); }
   applyLabels(selector?: HTMLDetailsElement): void {
-    if (!this.labelsChanged() || !this.gmail.auth.connected() || !this.gmail.online()) return;
+    if (!this.labelsChanged() || !this.gmail.preferences().accountId) return;
     this.gmail.applyLabels(this.labelDraft());
     if (selector) {selector.open = false; selector.querySelector('summary')?.focus();}
   }

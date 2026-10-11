@@ -1,0 +1,21 @@
+:host {display: block; margin-bottom: var(--sp22); color: var(--text);}
+.service-connection {padding: var(--sp16); border: 1px solid var(--border); border-radius: 9px; background: var(--section-bg);}
+.service-heading {display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--sp10);}
+.service-heading > div {flex: 1 1 240px; min-width: 0;}
+h3 {margin: 0 0 var(--sp8); font-size: var(--font-15); line-height: 1.5;}
+p {margin: 0; color: var(--text-muted); font-size: var(--font-11); line-height: 1.8;}
+.service-status {display: inline-flex; align-items: center; gap: var(--sp6); flex-shrink: 0; padding: var(--sp5) var(--sp8); border-radius: 5px; background: var(--control-bg); color: var(--text-muted); font-size: var(--font-10);}
+.service-status i {width: 5px; height: 5px; border-radius: 50%; background: currentColor;}
+.service-status.connected {background: var(--accent-soft); color: var(--accent-text);}
+.service-account {display: flex; align-items: center; gap: var(--sp10); margin: var(--sp16) 0;}
+.google-mark {display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 7px; background: var(--control-bg); color: var(--text-muted); font-size: var(--font-13); font-weight: 700;}
+.service-account > div {display: grid; gap: var(--sp3); min-width: 0;}
+.service-account div > span {color: var(--text-muted); font-size: var(--font-10);}
+.service-account strong {font-size: var(--font-11); font-weight: 600; overflow-wrap: anywhere;}
+.service-actions {display: flex; flex-wrap: wrap; gap: var(--sp8);}
+button {min-height: max(28px, calc(36px * var(--font-scale))); padding: var(--sp8) var(--sp12); border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font-size: var(--font-11); line-height: 1.5; cursor: pointer;}
+button:hover:not(:disabled) {background: var(--surface-hover);}
+button:disabled {opacity: .5; cursor: default;}
+button:focus-visible {outline: 2px solid var(--accent-text); outline-offset: 2px;}
+button.primary {background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent);}
+button.primary:hover:not(:disabled) {background: var(--accent-strong); filter: brightness(.96);}

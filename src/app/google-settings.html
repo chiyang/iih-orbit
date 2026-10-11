@@ -1,8 +1,5 @@
-<section class="google-settings" aria-labelledby="google-title">
-  <h3 id="google-title">Google Calendar</h3>
-  <p>將 Google 活動顯示在月曆與週視圖。Orbit 任務可移至可寫入月曆；Google 活動可複製為 Orbit 任務。</p>
-  <div class="google-actions"><button type="button" (click)="configure.emit()">{{ calendar.auth.connected() ? '管理 Google 連線' : '前往 Google 連線' }}</button></div>
-  <p class="google-status" role="status">{{ calendar.auth.connected() ? '已連線' : '尚未連線' }}@if (store.google().email) { · {{ store.google().email }}}</p>
+<section class="google-settings" aria-label="Google 月曆設定">
+  <app-google-service-header title="Google 月曆" serviceName="Google 月曆" description="將 Google 活動顯示在月曆與週視圖。Orbit 任務可移至可寫入月曆；Google 活動可複製為 Orbit 任務。" [auth]="calendar.auth" [clientId]="store.google().clientId" [email]="store.google().email" [busy]="connectionBusy()" [canDisconnect]="calendar.auth.connected()" (connect)="calendar.connect()" (disconnect)="disconnect()" (prepare)="prepare()" (configure)="configure.emit()" />
   <label class="google-field">月曆更新頻率<select aria-label="Google 月曆更新頻率" [ngModel]="store.google().refreshMinutes" (ngModelChange)="interval($event)"><option [ngValue]="0">手動更新</option><option [ngValue]="1">每 1 分鐘</option><option [ngValue]="5">每 5 分鐘</option><option [ngValue]="15">每 15 分鐘</option></select></label>
   <p class="google-note">切換日期時會讀取該段活動。自動更新限程式開啟、網路可用及授權有效期間；授權到期後需點擊重新連線。</p>
   @if (calendar.auth.connected()) {

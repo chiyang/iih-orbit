@@ -61,6 +61,7 @@
 .color-picker button.selected { outline: 2px solid var(--category-color); outline-offset: 3px; }
 .color-picker app-icon { width: 16px; height: 16px; }
 .category-form-actions { display: flex; justify-content: flex-end; gap: var(--sp8); }
+.modal[data-modal="workspaces"] .category-form-actions { flex-wrap: wrap; }
 .form-error { color: var(--danger-text); font-size: var(--font-11); margin: var(--sp12) 0; }
 .category-delete-confirm { margin-top: var(--sp15); background: var(--warning-bg); border: 1px solid var(--warning-border); border-radius: 7px; padding: var(--sp16); }
 .category-delete-confirm strong { font-size: var(--font-12); color: var(--warning-text); }

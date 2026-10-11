@@ -4,10 +4,9 @@ h3 {font-size: var(--font-15); margin: 0 0 var(--sp8);}
 h4 {font-size: var(--font-15); margin: var(--sp5) 0 0; overflow-wrap: anywhere;}
 p, li, label, button, summary, a {font-size: var(--font-11); line-height: 1.7;}
 p {color: var(--text-muted); margin: var(--sp8) 0 var(--sp16);}
-.heading, .actions, .connection-bar {display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp10);}
+.heading, .actions {display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp10);}
 .heading {justify-content: space-between; align-items: flex-start;}
 .heading > div {min-width: 0; flex: 1;}
-.state {font-size: var(--font-10); color: var(--accent-text); padding: var(--sp6) var(--sp10); background: var(--accent-soft); border-radius: 6px;}
 label {display: grid; gap: var(--sp7); margin: var(--sp16) 0;}
 input[type='text'], select {width: 100%; min-width: 0; padding: var(--sp10) var(--sp12); color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; font-size: var(--font-11);}
 button {display: inline-flex; align-items: center; justify-content: center; gap: var(--sp7); color: var(--text); background: var(--surface); padding: var(--sp9) var(--sp12); border: 1px solid var(--border); border-radius: 7px; cursor: pointer;}
@@ -25,7 +24,6 @@ input[type='checkbox'], input[type='radio'] {accent-color: var(--accent-strong);
 .workspace-choices {display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp5) var(--sp20); margin-bottom: var(--sp16);}
 .workspace-choices label {overflow-wrap: anywhere;}
 .note, small, .eyebrow {font-size: var(--font-10); color: var(--text-soft); line-height: 1.7; overflow-wrap: anywhere;}
-.account {display: inline-flex; align-items: center; gap: var(--sp7); color: var(--accent-text); font-size: var(--font-11); overflow-wrap: anywhere;}
 .notice, .preview, .setup, .warning-box {padding: var(--sp16); border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); margin: var(--sp16) 0;}
 summary {cursor: pointer;}
 .setup summary {font-weight: 600;}
@@ -35,9 +33,6 @@ summary {cursor: pointer;}
 .mode-choice input {margin-top: var(--sp7);}
 .mode-choice.selected {border-color: var(--accent-text); background: var(--accent-soft);}
 .mode-choice small {display: block; margin-top: var(--sp4); color: var(--text-muted);}
-.drive-heading p {margin-bottom: var(--sp12);}
-.connection-bar {justify-content: space-between; padding: var(--sp10) var(--sp12); border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft);}
-.connection-bar .quiet {border: 0; background: transparent; padding: var(--sp3) var(--sp6); font-size: var(--font-10); color: var(--text-muted);}
 .connect-prompt {padding: var(--sp12) 0 var(--sp4);}
 .connect-prompt p {margin-top: 0;}
 .save-time {font-size: var(--font-10); margin: var(--sp8) 0 var(--sp14);}
@@ -98,4 +93,4 @@ summary {cursor: pointer;}
 .preview-options small {display: block; margin-top: var(--sp6);}
 .saved-appearance {display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp7); padding: var(--sp10) var(--sp12); border: 1px solid var(--border); border-radius: 7px; background: var(--surface);}
 .saved-appearance i {display: inline-block; width: 16px; height: 16px; border: 1px solid var(--border); border-radius: 4px; flex-shrink: 0;}
-@media (max-width: 600px) {.field-pair, .workspace-choices, .mode-choices, .preview-options {grid-template-columns: 1fr;} .heading {display: grid;} .state {justify-self: start;} .cloud-card, .create-section {padding: var(--sp14);} .item-title {align-items: flex-start;} .connection-bar {align-items: flex-start;} .connection-bar .account {flex: 1;} .cloud-card .actions > button {flex: 1 1 auto;}}
+@media (max-width: 600px) {.field-pair, .workspace-choices, .mode-choices, .preview-options {grid-template-columns: 1fr;} .heading {display: grid;} .cloud-card, .create-section {padding: var(--sp14);} .item-title {align-items: flex-start;} .cloud-card .actions > button {flex: 1 1 auto;}}

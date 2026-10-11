@@ -1,0 +1,20 @@
+:host { display: block; }
+.guide-content { padding: var(--sp27); min-height: 340px; }
+.guide-progress { margin: 0 0 var(--sp20); color: var(--text-muted); font-size: var(--font-11); }
+.guide-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 14px; background: var(--accent-soft); color: var(--accent-text); }
+.guide-icon app-icon { width: 28px; height: 28px; }
+h3 { margin: var(--sp20) 0 var(--sp12); color: var(--text); font-size: var(--font-20); }
+.guide-description, .guide-hint { color: var(--text-muted); font-size: var(--font-13); line-height: 1.9; }
+.guide-description { margin: 0; }
+.guide-actions { display: flex; flex-wrap: wrap; gap: var(--sp8); padding: 0; margin: var(--sp20) 0; list-style: none; counter-reset: action; }
+.guide-actions li { counter-increment: action; display: flex; align-items: center; gap: var(--sp8); padding: var(--sp9) var(--sp12); border: 1px solid var(--border); border-radius: 8px; font-size: var(--font-12); color: var(--text); }
+.guide-actions li::before { content: counter(action); color: var(--accent-text); font-weight: 600; }
+.guide-hint { margin: 0; padding-left: var(--sp12); border-left: 3px solid var(--accent-border); }
+.guide-footer { padding: var(--sp18) var(--sp27); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp12); border-top: 1px solid var(--border); background: var(--surface-soft); }
+.guide-footer > div { display: flex; flex-wrap: wrap; gap: var(--sp8); }
+.guide-button { padding: var(--sp10) var(--sp15); border: 1px solid var(--border); border-radius: 8px; background: var(--control-bg); color: var(--text); font-size: var(--font-12); }
+.guide-button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
+.guide-skip { padding: var(--sp10) 0; background: transparent; color: var(--text-muted); text-decoration: underline; text-underline-offset: 3px; font-size: var(--font-12); }
+button:disabled { opacity: .55; cursor: default; }
+button:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.guide-error { padding: 0 var(--sp27) var(--sp12); color: var(--danger-text); font-size: var(--font-12); }

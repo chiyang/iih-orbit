@@ -1,8 +1,7 @@
-<h3>Gmail 郵件</h3>
-<p>連線後可在右側欄瀏覽郵件，拖曳建立 Orbit 任務。</p>
-<div class="mail-settings-actions"><button type="button" (click)="configure.emit()">{{ gmail.auth.connected() ? '管理 Google 連線' : '前往 Google 連線' }}</button></div>
-@if (gmail.preferences().email) {<p class="mail-account"><strong>{{ gmail.preferences().email }}</strong><span>{{ gmail.auth.connected() ? '已連線' : '需要重新連線' }}</span></p>}
+<app-google-service-header title="Gmail 郵件" serviceName="Gmail" description="連線後可在右側欄瀏覽郵件，拖曳建立 Orbit 任務。" [auth]="gmail.auth" [clientId]="gmail.clientId()" [email]="gmail.preferences().email" [busy]="gmail.auth.authorizing()" [canDisconnect]="gmail.auth.connected() || !!gmail.preferences().accountId" (connect)="gmail.connect()" (disconnect)="gmail.disconnect()" (prepare)="gmail.prepare()" (configure)="configure.emit()" />
 @if (gmail.error()) {<p class="mail-settings-error" role="alert">{{ gmail.error() }}</p>}
 @if (gmail.warning() || gmail.auth.sessionWarning()) {<p role="status">{{ gmail.warning() || gmail.auth.sessionWarning() }}</p>}
+<h3>郵件更新</h3>
+<p>需要最新郵件時，按側欄上方的更新按鈕。開啟側欄、重新整理、搜尋或套用標籤時，先顯示對應快取；超過五分鐘才重新讀取。更新失敗保留原本郵件，遇到讀取限制會先暫停請求。沒有定時自動更新。</p>
 <p>郵件預覽與 Gmail 設定只保存在這個瀏覽器，不放進備份。連線只讀取郵件，不更改信件、標籤或已讀狀態。</p>
 <details class="mail-guide"><summary>搜尋與建立任務</summary><p>搜尋支援 from:、subject:、is:unread 等 Gmail 語法，作用於目前選擇的標籤。多標籤顯示符合任一標籤的郵件。</p><p>拖到看板或清單建立無日期任務；拖到月曆日期建立全天任務，拖到週視圖時段預設一小時。亦可按「建立任務」自行安排。</p></details>

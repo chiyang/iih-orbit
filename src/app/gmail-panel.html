@@ -17,7 +17,7 @@
         <div class="mail-labels" role="group" aria-label="Gmail 系統標籤，可複選">@for (label of systemLabels(); track label.id) {<button type="button" [class.selected]="labelDraft().includes(label.id)" [attr.aria-pressed]="labelDraft().includes(label.id)" (click)="toggleLabel(label.id)">{{ labelName(label) }}</button>}</div>
       </div>
     </details>
-    @if (labelsChanged()) {<div class="mail-filter-actions" role="group" aria-label="套用標籤篩選"><button type="button" (click)="resetLabels()">取消變更</button><button type="button" class="mail-apply-filter" [disabled]="!gmail.auth.connected() || !gmail.online()" (click)="applyLabels(labelSelector)">套用篩選</button></div>}
+    @if (labelsChanged()) {<div class="mail-filter-actions" role="group" aria-label="套用標籤篩選"><button type="button" (click)="resetLabels()">取消變更</button><button type="button" class="mail-apply-filter" (click)="applyLabels(labelSelector)">套用篩選</button></div>}
     <form class="mail-search" (ngSubmit)="gmail.search(searchDraft())"><label for="mail-search" class="visually-hidden">搜尋 Gmail 郵件</label><input id="mail-search" name="mailSearch" [(ngModel)]="searchDraft" maxlength="500" type="search" placeholder="搜尋郵件、寄件人…"><button type="submit" aria-label="搜尋郵件"><app-icon name="search" /></button>@if (gmail.query()) {<button type="button" (click)="gmail.search('')" aria-label="清除搜尋"><app-icon name="close" /></button>}</form>
   }
   @if (gmail.error()) {<p class="mail-error" role="alert">{{ gmail.error() }}<button type="button" [disabled]="gmail.busy() || !gmail.auth.connected() || !gmail.online()" (click)="gmail.load(true)">重試</button></p>}
@@ -25,6 +25,7 @@
   @if (mailTasks.notice()) {<div class="mail-inline-notice" role="status"><span>{{ mailTasks.notice() }}</span><div class="mail-actions">@if (mailTasks.undoContext()) {<button type="button" [disabled]="mailTasks.busy()" (click)="mailTasks.undo()">撤銷建立</button>}<button type="button" (click)="mailTasks.dismiss()">關閉</button></div></div>}
 </div>
 <div class="mail-list" [attr.aria-busy]="gmail.busy()" aria-label="Gmail 郵件列表">
+  @if (gmail.showingPrevious()) {<p class="mail-help" role="status">{{ gmail.busy() ? '先顯示上次的郵件，正在載入新的篩選…' : '新篩選尚未載入，先保留上次的郵件。' }}</p>}
   @for (thread of gmail.threads(); track thread.mail.threadId) {
     <section class="mail-conversation" [attr.aria-label]="thread.mail.subject">
       <ng-container [ngTemplateOutlet]="mailCard" [ngTemplateOutletContext]="{$implicit: thread.mail, unread: thread.unread, count: thread.count}" />

@@ -34,6 +34,8 @@ async function fixture() {
   }
   for (const [key, value] of Object.entries({window, document: {visibilityState: 'visible'}, navigator, BroadcastChannel: Channel, localStorage: storage, sessionStorage: storage})) Object.defineProperty(globalThis, key, {value, configurable: true, writable: true});
   const store = new BoardStore();
+  // Sync scenarios start with explicit test data, independent of the empty first-use experience.
+  await store.saveTask({id: 'sync-task', title: '同步測試任務', description: '模擬內容', categoryId: '', projectId: '', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: []});
   await store.updateGoogle({clientId: '123-example.apps.googleusercontent.com'}); await store.updateDrive({accountId: 'account', email: 'a@example.com'});
   const effects = new Set(), scheduler = {add(e) {effects.add(e); queueMicrotask(() => this.flush());}, schedule() {queueMicrotask(() => this.flush());}, remove(e) {effects.delete(e);}, flush() {for (let i = 0; i < 30 && [...effects].some(e => e.dirty); i++) for (const e of effects) if (e.dirty) e.run();}};
   const auth = {connected: signal(true), connectionVersion: signal(0), ready: signal(true), preparing: signal(false), authorizing: signal(false), account: signal({id: 'account', email: 'a@example.com'}), sessionWarning: signal(''), useSession() {}, cancelRequests() {}, prepare: async () => {}, disconnect() {this.connected.set(false); this.connectionVersion.update(v => v + 1);}};

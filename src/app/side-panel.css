@@ -1,6 +1,14 @@
 .right-panel {width: var(--right-panel-width); flex: 0 0 var(--right-panel-width); min-width: 0; position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface); z-index: 30;}
 .right-panel-header {display: flex; align-items: center; justify-content: space-between; gap: var(--sp6); min-height: 65px; padding: var(--sp10) var(--sp12); border-bottom: 1px solid var(--border); flex-shrink: 0;}
-.right-panel-header > div {display: flex; gap: var(--sp4); min-width: 0; flex-wrap: wrap;} .right-panel-header > div button {display: flex; align-items: center; gap: var(--sp6); padding: var(--sp9); border-radius: 6px; background: transparent; color: var(--text-muted); font-size: var(--font-11);} .right-panel-header .selected {background: var(--accent-soft); color: var(--accent-text);} .right-panel-header app-icon {width: 16px; height: 16px;}
+.panel-switcher {display: grid; grid-template-columns: 1fr 1fr; flex: 1; gap: var(--sp3); min-width: 0; max-width: 320px; padding: var(--sp3); border: 1px solid var(--border); border-radius: 9px; background: var(--control-bg);}
+.panel-switcher button {display: flex; align-items: center; justify-content: center; gap: var(--sp5); min-width: 0; padding: var(--sp8) var(--sp4); border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: var(--font-11); font-weight: 600; white-space: nowrap; cursor: pointer; transition: background-color .15s;}
+.panel-switcher button:hover {background: var(--surface-hover); color: var(--accent-text);}
+.panel-switcher button:active {background: var(--accent-border);}
+.panel-switcher button.selected {background: var(--surface); color: var(--accent-text); box-shadow: 0 1px 4px rgb(var(--shadow-rgb) / .12);}
+.panel-switcher button:focus-visible {outline: 2px solid var(--accent-text); outline-offset: 2px;}
+.right-panel-header app-icon {width: 16px; height: 16px;}
+.panel-switcher app-icon {width: 14px; height: 14px;}
+@media (prefers-reduced-motion: reduce) {.panel-switcher button {transition: none;}}
 .panel-pane {flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;} .panel-pane[hidden] {display: none;} .panel-pane > app-reminder-center {flex: 1; min-height: 0;}
 .panel-resize-handle {position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; z-index: 1;} .panel-resize-handle:hover, .panel-resize-handle:focus-visible {background: var(--accent-border);}
 .right-panel.panel-overlay {position: fixed; top: 0; right: 0; width: min(440px, 94vw); height: 100dvh; z-index: 950; box-shadow: -8px 0 30px rgb(var(--shadow-rgb) / .15);} .right-panel-scrim {position: fixed; inset: 0; background: rgb(var(--shadow-rgb) / .25); z-index: 949;}

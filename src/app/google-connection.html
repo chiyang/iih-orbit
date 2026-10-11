@@ -1,10 +1,20 @@
 <h3>Google 連線</h3>
+<details class="google-guide"><summary>首次設定：建立自己的 Google Client ID</summary>
+  <ol><li>到 <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> 建立專案，啟用要使用的 Gmail API、Google Calendar API 或 Google Drive API。</li><li>設定 Google Auth Platform 的品牌、對象與資料存取權；外部測試模式需將使用帳號加入測試使用者。</li><li>建立「網頁應用程式」OAuth 用戶端，已授權的 JavaScript 來源加入 <span class="google-origin"><a href="https://chiyang.github.io" target="_blank" rel="noopener noreferrer">https://chiyang.github.io</a>。</span></li><li>將 Client ID 貼到本頁保存，再分別連線所需服務。不需要 API Key 或 Client Secret。</li></ol>
+  <p>授權到期需重新連線；授權憑證不放進備份。解除本機連線會停止同來源分頁對該服務的存取。可到 <a href="https://myaccount.google.com/connections" target="_blank" rel="noopener noreferrer">Google 帳號管理存取權</a> 撤銷授權。</p>
+  <a href="https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid" target="_blank" rel="noopener noreferrer">Google 官方設定說明 ↗</a>
+</details>
 <p>三個服務共用一個 Client ID，各自選擇帳號與授權。</p>
 <label class="google-field">OAuth Client ID<input type="text" autocomplete="off" spellcheck="false" aria-label="共用 Google OAuth Client ID" [ngModel]="draft()" (ngModelChange)="draft.set($event)" placeholder="…apps.googleusercontent.com"></label>
 <div class="google-actions"><button type="button" [disabled]="busy()" (click)="save()">保存 Client ID</button>@if (store.google().clientId && unsaved()) {<button type="button" [disabled]="busy()" (click)="draft.set(store.google().clientId); error.set('')">取消變更</button>}@if (store.google().clientId && (!calendar.auth.ready() || !gmail.auth.ready() || !drive.auth.ready())) {<button type="button" [disabled]="preparing()" (click)="prepare()">{{ preparing() ? '準備連線…' : '重新準備連線' }}</button>}</div>
 @if (store.google().clientId && unsaved()) {<p class="google-note">更換 Client ID 需重新授權，月曆綁定會清除，Drive 自動儲存會暫停。請先確認沒有待上傳的資料。</p>}
 @if (message()) {<p class="google-status" role="status">{{ message() }}</p>}
 @if (error()) {<p class="google-error" role="alert">{{ error() }}</p>}
+<div class="google-connect-all">
+  <button type="button" class="google-primary" [disabled]="busy() || unsaved() || !store.google().clientId || !combined.ready() || !drive.online() || !!drive.runtime().pending" (click)="connectAll()">{{ connectingAll() ? '等待全部授權…' : '一次授權全部服務' }}</button>
+  <p>一次選擇同一帳號，授權 Calendar（讀取與移轉）、Gmail 與 Drive；下方仍可分別連線。</p>
+  @if (drive.runtime().pending) {<p class="google-note">請先完成 Drive 等待上傳的資料。</p>}
+</div>
 <div class="google-services">
   <section class="google-service" aria-labelledby="connection-calendar">
     <div class="service-heading"><h4 id="connection-calendar">Google Calendar</h4><span [class.connected]="calendar.auth.connected()">{{ calendar.auth.connected() ? '已連線' : '尚未連線' }}</span></div>
@@ -17,19 +27,14 @@
     <div class="service-heading"><h4 id="connection-gmail">Gmail</h4><span [class.connected]="gmail.auth.connected()">{{ gmail.auth.connected() ? '已連線' : '尚未連線' }}</span></div>
     <p>唯讀瀏覽郵件，拖曳建立 Orbit 任務。</p>
     @if (gmail.preferences().email) {<p class="service-account">{{ gmail.preferences().email }}</p>}
-    <div class="google-actions"><button type="button" class="google-primary" [disabled]="busy() || unsaved() || !store.google().clientId || !gmail.auth.ready()" (click)="gmail.connect()">{{ gmail.auth.authorizing() ? '等待授權…' : gmail.auth.connected() ? '切換帳號／重新授權' : '連線 Gmail' }}</button>@if (gmail.preferences().accountId || gmail.auth.authorizing()) {<button type="button" [disabled]="saving() || drive.busy()" (click)="gmail.disconnect()">解除連線</button>}<button type="button" (click)="configure.emit('gmail')">郵件設定</button></div>
+    <div class="google-actions"><button type="button" class="google-primary" [disabled]="busy() || unsaved() || !store.google().clientId || !gmail.auth.ready()" (click)="gmail.connect()">{{ gmail.auth.authorizing() ? '等待授權…' : gmail.auth.connected() ? '切換帳號／重新授權' : '連線 Gmail' }}</button>@if (gmail.preferences().accountId || gmail.auth.authorizing()) {<button type="button" [disabled]="busy()" (click)="gmail.disconnect()">解除連線</button>}<button type="button" (click)="configure.emit('gmail')">郵件設定</button></div>
     @if (gmail.error() || gmail.warning() || gmail.auth.sessionWarning()) {<p class="google-error" role="alert">{{ gmail.error() || gmail.warning() || gmail.auth.sessionWarning() }}</p>}
   </section>
   <section class="google-service" aria-labelledby="connection-drive">
     <div class="service-heading"><h4 id="connection-drive">Google Drive</h4><span [class.connected]="drive.auth.connected()">{{ drive.auth.connected() ? '已連線' : '尚未連線' }}</span></div>
     <p>管理 Orbit 雲端備份與跨裝置同步。</p>
     @if (store.drive().email) {<p class="service-account">{{ store.drive().email }}</p>}
-    <div class="google-actions"><button type="button" class="google-primary" [disabled]="busy() || unsaved() || !store.google().clientId || !drive.auth.ready() || !drive.online()" (click)="drive.connect()">{{ drive.auth.authorizing() ? '等待授權…' : drive.auth.connected() ? '切換帳號／重新授權' : '連線 Drive' }}</button>@if (drive.auth.connected()) {<button type="button" [disabled]="busy()" (click)="drive.disconnect()">解除連線</button>}<button type="button" (click)="configure.emit('drive')">備份與同步設定</button></div>
+    <div class="google-actions"><button type="button" class="google-primary" [disabled]="busy() || unsaved() || !store.google().clientId || !drive.auth.ready() || !drive.online()" (click)="drive.connect()">{{ drive.auth.authorizing() ? '等待授權…' : drive.auth.connected() ? '切換帳號／重新授權' : '連線 Drive' }}</button>@if (drive.auth.connected()) {<button type="button" [disabled]="busy()" (click)="drive.disconnect()">解除連線</button>}<button type="button" (click)="configure.emit('drive')">遠端同步備份設定</button></div>
     @if (drive.error() || drive.auth.sessionWarning()) {<p class="google-error" role="alert">{{ drive.error() || drive.auth.sessionWarning() }}</p>}
   </section>
 </div>
-<details class="google-guide"><summary>首次設定：建立自己的 Google Client ID</summary>
-  <ol><li>到 <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> 建立專案，啟用要使用的 Gmail API、Google Calendar API 或 Google Drive API。</li><li>設定 Google Auth Platform 的品牌、對象與資料存取權；外部測試模式需將使用帳號加入測試使用者。</li><li>建立「網頁應用程式」OAuth 用戶端，已授權的 JavaScript 來源加入 <code>https://chiyang.github.io</code>，不包含 /iih-orbit/ 路徑。@if (origin && origin !== 'https://chiyang.github.io') {目前測試網址也需加入 <code>{{ origin }}</code>。}</li><li>將 Client ID 貼到本頁保存，再分別連線所需服務。不需要 API Key 或 Client Secret。</li></ol>
-  <p>授權到期需重新連線；授權憑證不放進備份。解除本機連線會停止同來源分頁對該服務的存取。可到 <a href="https://myaccount.google.com/connections" target="_blank" rel="noopener noreferrer">Google 帳號管理存取權</a> 撤銷授權。</p>
-  <a href="https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid" target="_blank" rel="noopener noreferrer">Google 官方設定說明 ↗</a>
-</details>

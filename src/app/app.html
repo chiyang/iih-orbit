@@ -39,13 +39,23 @@
     <header class="topbar">
       <div class="breadcrumb"><button class="icon-button mobile-menu" aria-label="開啟側邊欄" (click)="sidebarOpen.set(true)"><app-icon name="menu" /></button><span class="mobile-wordmark" aria-label="TMU IIH Orbit"><app-brand-mark /><span class="mobile-brand-text"><span>TMU</span><strong>IIH Orbit</strong></span></span><span class="desktop-crumb workspace-crumb">{{ store.currentWorkspace().name }}</span><app-icon class="desktop-crumb" name="chevron" /><strong class="desktop-crumb navigation-crumb" [title]="navigationTitle()">{{ navigationTitle() }}</strong></div>
       <div class="topbar-right">
-        <div class="topbar-tools"><button class="settings-entry" aria-label="開啟 Gmail 側欄" aria-controls="right-panel" [attr.aria-expanded]="mailOpen()" (click)="toggleMail()"><app-icon name="mail" /><span>Gmail</span></button><app-reminder-badge [expanded]="remindersOpen()" (openCenter)="toggleReminders()" />
-        <details class="toolbar-menu" #toolbarMenu (keydown.escape)="$event.stopPropagation(); toolbarMenu.open = false"><summary class="settings-entry" aria-label="顯示與設定"><app-icon name="settings" /><span>設定</span></summary><div class="toolbar-menu-body"><button (click)="toolbarMenu.open = false; openSettings()"><app-icon name="settings" />所有設定</button><button (click)="preferences.cycleTheme()"><app-icon [name]="preferences.themeIcon()" />主題：{{ preferences.themeLabel() }}</button><label class="text-size-control"><span class="font-symbol" aria-hidden="true">Aa</span>字體<select aria-label="字體大小" [ngModel]="preferences.textSize()" (ngModelChange)="preferences.setTextSize($event)">@for (option of preferences.options; track option.id) {<option [value]="option.id">{{ option.label }}</option>}</select></label></div></details></div>
+        <div class="topbar-tools">
+          <button type="button" class="toolbar-icon-entry help-entry" aria-label="開啟操作引導" title="操作引導" (click)="openIntroduction()"><app-icon name="help" /></button>
+          <button type="button" class="toolbar-icon-entry" [attr.aria-label]="'切換主題，目前為' + preferences.themeLabel()" [title]="'主題：' + preferences.themeLabel()" (click)="preferences.cycleTheme()"><app-icon [name]="preferences.themeIcon()" /></button>
+          <label class="text-size-control" title="字體大小"><span class="font-symbol" aria-hidden="true">Aa</span><select aria-label="字體大小" [ngModel]="preferences.textSize()" (ngModelChange)="preferences.setTextSize($event)">@for (option of preferences.options; track option.id) {<option [value]="option.id">{{ option.label }}</option>}</select></label>
+          @if (!store.google().clientId) {<button type="button" class="toolbar-icon-entry google-entry" aria-label="開啟 Google 連線設定" title="Google 連線" (click)="openSettings('google')"><span class="google-mark" aria-hidden="true">G</span></button>}
+          <button type="button" class="toolbar-icon-entry" aria-label="開啟 Gmail 側欄" title="Gmail" aria-controls="right-panel" [attr.aria-expanded]="mailOpen()" (click)="toggleMail()"><app-icon name="mail" /></button>
+          <app-reminder-badge [expanded]="remindersOpen()" (openCenter)="toggleReminders()" />
+          <button type="button" class="settings-entry" aria-label="開啟設定" title="設定" (click)="openSettings()"><app-icon name="settings" /><span>設定</span></button>
+        </div>
         <div class="storage-status-group"><button class="save-status" [class.warning]="store.storageWarning()" (click)="openBackup()" title="開啟資料與備份"><span class="status-dot"></span>{{ store.storageWarning() ? '儲存需要留意' : '本機自動儲存' }}</button>@defer (on idle) {<app-drive-status [compact]="true" (configure)="openSettings('drive')" />}</div>
       </div>
     </header>
 
     <section class="project-header" aria-labelledby="project-title">
+      @if (store.onboarding() === 'workspace') {
+        <div class="first-workspace-notice"><div><strong>建立你的第一個工作空間</strong><p>取個名稱，從空白開始，或選擇適合你的樣板。</p></div><button type="button" class="button primary" (click)="openWorkspaces()">選擇工作空間</button></div>
+      }
       <div class="project-heading-row"><div class="project-heading"><div class="project-icon workspace-initial" aria-hidden="true">{{ currentWorkspaceInitial() }}</div><div><div class="eyebrow">WORKSPACE <span></span> 讓日程，穩步向前</div><div class="project-title-row"><h1 id="project-title">{{ store.currentWorkspace().name }}</h1><button class="title-edit" aria-label="修改工作空間名稱" (click)="openWorkspaceName()"><app-icon name="edit" /></button></div></div></div><div class="workspace-heading-actions"><button class="button secondary" (click)="openProjects()"><app-icon name="plus" />新增專案</button><button class="button primary" (click)="openTask()"><app-icon name="plus" />新增任務</button></div></div>
       <p class="project-description">{{ projectDescription }}</p>
       <div class="project-meta project-group-meta">
@@ -136,11 +146,11 @@
   </main>
   @if (panelOpen()) {
     @if (panelOverlay()) {<button class="right-panel-scrim" aria-label="關閉右側欄" (click)="closePanel()"></button>}
-    <aside id="right-panel" class="right-panel" [class.panel-overlay]="panelOverlay()" [attr.role]="panelOverlay() ? 'dialog' : 'complementary'" [attr.aria-modal]="panelOverlay() ? 'true' : null" aria-label="Gmail 與訊息中心" [attr.inert]="modal() || sidebarOpen() ? '' : null" [cdkTrapFocus]="panelOverlay() && !modal()" [cdkTrapFocusAutoCapture]="panelOverlay()">
+    <aside id="right-panel" class="right-panel" [class.panel-overlay]="panelOverlay()" [attr.role]="panelOverlay() ? 'dialog' : 'complementary'" [attr.aria-modal]="panelOverlay() ? 'true' : null" [attr.aria-label]="mailOpen() ? 'Gmail 郵件' : '訊息提醒'" [attr.inert]="modal() || sidebarOpen() ? '' : null" [cdkTrapFocus]="panelOverlay() && !modal()" [cdkTrapFocusAutoCapture]="panelOverlay()">
       @if (!panelOverlay()) {<div class="panel-resize-handle" role="separator" tabindex="0" aria-label="調整右側欄寬度" aria-orientation="vertical" aria-valuemin="300" aria-valuemax="520" [attr.aria-valuenow]="panelWidth()" (pointerdown)="startPanelResize($event)" (keydown)="panelResizeKey($event)"></div>}
-      <header class="right-panel-header"><div role="group" aria-label="右側欄內容"><button [class.selected]="mailOpen()" [attr.aria-pressed]="mailOpen()" (click)="openMail()"><app-icon name="mail" />Gmail</button><button [class.selected]="remindersOpen()" [attr.aria-pressed]="remindersOpen()" (click)="openReminders(reminderTab())"><app-icon name="bell" />訊息中心</button></div><button class="icon-button" aria-label="關閉右側欄" (click)="closePanel()"><app-icon name="close" /></button></header>
-      <div class="panel-pane" [hidden]="!mailOpen()">@defer (when mailOpen()) {<app-gmail-panel [active]="mailOpen()" (createTask)="openMailTask($event)" (previewMail)="openMailPreview($event)" (configure)="openSettings('google')" />} @placeholder {<p class="reminder-panel-loading">開啟 Gmail 側欄即可瀏覽郵件。</p>} @error {<p class="reminder-panel-loading" role="alert">郵件側欄無法載入，請關閉後重試。</p>}</div>
-      <div class="panel-pane" [hidden]="!remindersOpen()">@defer (when remindersOpen()) {<app-reminder-center [initialTab]="reminderTab()" (openItem)="openReminder($event)" (openSettings)="openSettings('reminders')" (showDeadline)="showReminderDeadline($event)" />} @placeholder {<p class="reminder-panel-loading" role="status">正在開啟訊息中心…</p>} @error {<p class="reminder-panel-loading" role="alert">訊息中心無法載入，請關閉後重試。</p>}</div>
+      <header class="right-panel-header"><div class="panel-switcher" role="group" aria-label="切換右側欄內容"><button type="button" id="right-panel-mail-tab" title="切換至 Gmail" aria-controls="mail-panel-pane" [class.selected]="mailOpen()" [attr.aria-pressed]="mailOpen()" (click)="openMail()"><app-icon name="mail" />Gmail</button><button type="button" id="right-panel-reminders-tab" title="切換至訊息提醒" aria-controls="reminders-panel-pane" [class.selected]="remindersOpen()" [attr.aria-pressed]="remindersOpen()" (click)="openReminders(reminderTab())"><app-icon name="bell" />訊息提醒</button></div><button class="icon-button" aria-label="關閉右側欄" (click)="closePanel()"><app-icon name="close" /></button></header>
+      <div id="mail-panel-pane" class="panel-pane" role="region" aria-labelledby="right-panel-mail-tab" [hidden]="!mailOpen()">@defer (when mailOpen()) {<app-gmail-panel [active]="mailOpen()" (createTask)="openMailTask($event)" (previewMail)="openMailPreview($event)" (configure)="openSettings('google')" />} @placeholder {<p class="reminder-panel-loading">開啟 Gmail 側欄即可瀏覽郵件。</p>} @error {<p class="reminder-panel-loading" role="alert">郵件側欄無法載入，請關閉後重試。</p>}</div>
+      <div id="reminders-panel-pane" class="panel-pane" role="region" aria-labelledby="right-panel-reminders-tab" [hidden]="!remindersOpen()">@defer (when remindersOpen()) {<app-reminder-center [initialTab]="reminderTab()" (openItem)="openReminder($event)" (openSettings)="openSettings('reminders')" (showDeadline)="showReminderDeadline($event)" />} @placeholder {<p class="reminder-panel-loading" role="status">正在開啟訊息提醒…</p>} @error {<p class="reminder-panel-loading" role="alert">訊息提醒無法載入，請關閉後重試。</p>}</div>
     </aside>
   }
 </div>
@@ -148,8 +158,11 @@
 @if (modal()) {
   <div class="modal-backdrop" (click)="closeModal()">
     <section class="modal" [attr.data-modal]="modal()" [class.description-focused]="descriptionFocused()" [class.category-modal]="modal() === 'categories'" role="dialog" aria-modal="true" aria-labelledby="modal-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true" (click)="$event.stopPropagation()">
-      <div class="modal-header"><div><span class="modal-eyebrow">TMU IIH ORBIT</span><h2 id="modal-title">@switch (modal()) {@case ('task') {{{ editing() ? '編輯任務' : '建立新任務' }}} @case ('calendar-publish') {移至 Google Calendar} @case ('categories') {管理任務分類} @case ('projects') {專案管理} @case ('statuses') {管理看板狀態} @case ('workspaces') {管理工作空間} @case ('settings') {設定} @case ('external-event') {Google 活動明細} @case ('mail-preview') {郵件預覽} @case ('delete') {刪除任務}}</h2></div><button class="icon-button" aria-label="關閉對話框" [attr.cdkFocusInitial]="modal() === 'statuses' || modal() === 'workspaces' || modal() === 'projects' || modal() === 'settings' || modal() === 'external-event' || modal() === 'mail-preview' ? '' : null" (click)="closeModal()"><app-icon name="close" /></button></div>
+      <div class="modal-header"><div><span class="modal-eyebrow">TMU IIH ORBIT</span><h2 id="modal-title">@switch (modal()) {@case ('intro') {{{ introFirstUse() ? '歡迎使用 IIH Orbit' : '操作引導' }}} @case ('task') {{{ editing() ? '編輯任務' : '建立新任務' }}} @case ('calendar-publish') {移至 Google Calendar} @case ('categories') {管理任務分類} @case ('projects') {專案管理} @case ('statuses') {管理看板狀態} @case ('workspaces') {{{ firstWorkspaceDialog() ? '建立第一個工作空間' : '管理工作空間' }}} @case ('settings') {設定} @case ('external-event') {Google 活動明細} @case ('mail-preview') {郵件預覽} @case ('delete') {刪除任務}}</h2></div><button class="icon-button" [attr.aria-label]="modal() === 'intro' ? (introFirstUse() ? '略過引導，選擇工作空間' : '關閉操作引導') : '關閉對話框'" [disabled]="introSaving() || workspaceSaving()" [attr.cdkFocusInitial]="modal() === 'statuses' || modal() === 'workspaces' || modal() === 'projects' || modal() === 'settings' || modal() === 'external-event' || modal() === 'mail-preview' ? '' : null" (click)="closeModal()"><app-icon name="close" /></button></div>
       @switch (modal()) {
+        @case ('intro') {
+          @defer (on immediate) {<app-startup-guide [firstUse]="introFirstUse()" [busy]="introSaving()" [error]="formError()" (finish)="finishIntroduction()" />} @placeholder {<p class="modal-body" role="status">準備操作引導…</p>} @error {<div class="modal-body"><p>操作引導暫時無法開啟。</p><button class="button primary" [disabled]="introSaving()" (click)="finishIntroduction()">{{ introFirstUse() ? '略過引導，建立工作空間' : '返回原本畫面' }}</button>@if (formError()) {<p class="form-error" role="alert">{{ formError() }}</p>}</div>}
+        }
         @case ('task') {
           <form (ngSubmit)="saveTask()" class="task-form">
             @if (taskDraftConflict()) {
@@ -234,6 +247,7 @@
         }
         @case ('workspaces') {
           <div class="modal-body">
+            @if (firstWorkspaceDialog()) {<p class="modal-description">先為自己的計畫取個名稱。空白樣板不加入任務、分類或專案；也可以選擇下方樣板，示範任務由你決定是否加入。</p>} @else {
             <p class="modal-description">不同工作空間分別保存任務、分類、狀態與專案名稱，切換時不會混在一起。</p>
             <div class="management-list" aria-label="工作空間清單">
               @for (workspace of store.workspaces(); track workspace.id) {
@@ -248,6 +262,7 @@
                 </div>
               }
             </div>
+            }
             @if (workspaceToDelete(); as workspace) {
               <div class="management-confirm" role="alert">
                 <strong>刪除「{{ workspace.name }}」？</strong><p>此工作空間的 {{ workspace.tasks.length }} 個任務、分類與狀態會一起移除，無法復原。其他工作空間會保留。</p>
@@ -256,17 +271,17 @@
               </div>
             }
             <form class="category-form" (ngSubmit)="saveWorkspace()">
-              <h3>{{ workspaceEditingId() ? '修改工作空間名稱' : '建立工作空間' }}</h3>
+              <h3>{{ workspaceEditingId() ? '修改工作空間名稱' : firstWorkspaceDialog() ? '從這裡開始' : '建立工作空間' }}</h3>
               @if (!workspaceEditingId()) {
-                @defer (on immediate) {<app-workspace-template-picker [selected]="workspaceTemplateId()" [workspaceName]="workspaceDraft" [disabled]="store.pendingWrites() > 0 || workspaceSaving()" (choose)="chooseWorkspaceTemplate($event)" />} @placeholder {<p class="management-note" role="status">載入工作空間樣板…</p>} @error {<p class="form-error" role="alert">樣板無法載入。仍可建立空白工作空間，或重新整理後再試。</p>}
+                @defer (on immediate) {<app-workspace-template-picker [selected]="workspaceTemplateId()" [workspaceName]="workspaceDraft" [emptyStart]="firstWorkspaceDialog()" [disabled]="store.pendingWrites() > 0 || workspaceSaving()" (choose)="chooseWorkspaceTemplate($event)" />} @placeholder {<p class="management-note" role="status">載入工作空間樣板…</p>} @error {<p class="form-error" role="alert">樣板無法載入。仍可建立空白工作空間，或重新整理後再試。</p>}
                 @if (workspaceTemplateId() !== 'blank') {<label class="workspace-examples"><input type="checkbox" name="workspaceExamples" [(ngModel)]="workspaceExamples" [disabled]="workspaceSaving()">加入本週示範任務（虛構範例，可編輯或刪除）</label>}
               }
-              <label class="form-field">工作空間名稱<input name="workspaceName" [(ngModel)]="workspaceDraft" required maxlength="40" placeholder="例如：研究計畫、課程安排"></label>
+              <label class="form-field">工作空間名稱<input #workspaceNameInput name="workspaceName" [(ngModel)]="workspaceDraft" required maxlength="40" placeholder="例如：研究計畫、課程安排"></label>
               @if (formError()) {<p class="form-error" role="alert">{{ formError() }}</p>}
-              <div class="category-form-actions">@if (workspaceEditingId()) {<button type="button" class="button secondary" (click)="cancelWorkspaceEdit()">取消改名</button>}<button type="submit" class="button primary" [disabled]="store.pendingWrites() > 0 || workspaceSaving()">{{ workspaceSaving() ? '建立中…' : workspaceEditingId() ? '儲存工作空間名稱' : '建立工作空間' }}</button></div>
+              <div class="category-form-actions">@if (workspaceEditingId()) {<button type="button" class="button secondary" [disabled]="store.pendingWrites() > 0 || workspaceSaving()" (click)="cancelWorkspaceEdit()">取消改名</button><button type="button" class="button secondary" [disabled]="store.pendingWrites() > 0 || workspaceSaving()" (click)="openWorkspaces()"><app-icon name="plus" />建立工作空間</button>}<button type="submit" class="button primary" [disabled]="store.pendingWrites() > 0 || workspaceSaving()">{{ workspaceSaving() ? (workspaceEditingId() ? '儲存中…' : '建立中…') : workspaceEditingId() ? '儲存工作空間名稱' : '建立工作空間' }}</button></div>
             </form>
           </div>
-          <div class="modal-footer"><span class="form-note">新工作空間會建立同名專案；樣板只套用到新空間。</span><button class="button secondary" (click)="closeModal()">完成</button></div>
+          <div class="modal-footer"><span class="form-note">{{ firstWorkspaceDialog() ? '建立後會取代目前的暫時空白空間。' : '新工作空間會建立同名專案；樣板只套用到新空間。' }}</span><button class="button secondary" [disabled]="workspaceSaving()" (click)="closeModal()">{{ firstWorkspaceDialog() ? '稍後建立' : '完成' }}</button></div>
         }
         @case ('projects') {
           <div class="modal-body">

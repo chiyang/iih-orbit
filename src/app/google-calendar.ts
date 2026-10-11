@@ -2,7 +2,7 @@ import { computed, effect, inject, Injectable, OnDestroy, signal, untracked } fr
 import { BoardStore } from './board-store';
 import { CalendarCache } from './calendar-cache';
 import { AvailableCalendar, CalendarApi, CalendarSnapshot, calendarViewForRange } from './google-api';
-import { GoogleAuth } from './google-auth';
+import { GoogleAuth, type GoogleAccount } from './google-auth';
 import { cacheKey, calendarMonthRange, calendarRange, CalendarRange, CalendarSource, externalEvent, ExternalEvent, sourceKey } from './google-data';
 import { dateKey } from './task-schedule';
 import { CALENDAR_SYNC_PREFIX, CalendarSyncCoordinator, CalendarSyncTimeoutError } from './calendar-sync';
@@ -149,15 +149,19 @@ export class GoogleCalendarService implements OnDestroy {
     }
   }
 
-  async connect(): Promise<void> {
+  async connect(authorize?: () => Promise<GoogleAccount>, activate?: () => void): Promise<void> {
     this.error.set('');
     this.connecting = true; this.available.set([]);
+    const generation = this.store.generation(), clientId = this.store.google().clientId;
     try {
-      this.auth.useSession({generation: this.store.generation(), clientId: this.store.google().clientId, accountId: this.store.google().accountId});
-      const account = await this.auth.authorize(this.store.google().clientId);
+      this.auth.useSession({generation, clientId, accountId: this.store.google().accountId});
+      const account = await (authorize ? authorize() : this.auth.authorize(clientId));
+      if (generation !== this.store.generation() || clientId !== this.store.google().clientId) return;
       const result = await this.store.updateGoogle({accountId: account.id, email: account.email});
       if (!result.ok) { this.auth.disconnect(); throw new Error(result.message); }
-      this.auth.useSession({generation: this.store.generation(), clientId: this.store.google().clientId, accountId: account.id});
+      if (generation !== this.store.generation() || clientId !== this.store.google().clientId || this.store.google().accountId !== account.id) return;
+      this.auth.useSession({generation, clientId, accountId: account.id});
+      activate?.();
       await this.listCalendars(false);
       await this.refresh(true);
     } catch (error) { this.error.set(this.message(error)); }

@@ -1,5 +1,9 @@
 # IIH Orbit 下一版設計與實作順序
 
+[文件索引](README.md) · [目前的使用指南](user-guide.md) · [資料儲存與相容性](data-storage.md)
+
+本文件保留改版的設計起點與演進紀錄；各階段描述可能使用當時的命名與儲存方式。日常操作與目前設定請以文件索引中的使用文件為準。
+
 日期：2026-10-10
 
 狀態：階段 1–5 程式已實作。版本 1.4.0 加入 Google Calendar 唯讀整合；版本 1.5.0 加入 Drive 版本備份、自動保存、同步與分歧處理。畫面、真實 Google API 與跨裝置操作仍待實際驗收，不以模擬測試替代。
@@ -35,7 +39,7 @@
 1. **先完成本機備份與同步，再接 Google。** 即使沒有 Google 帳號、沒有網路，任務管理仍可正常使用。
 2. **Google Calendar 活動獨立保存，疊加到月曆與週視圖。** 使用「外部月曆」來源分組，不把每個活動轉成一般任務或任務分類。
 3. **Google Drive 使用可見的 `IIH Orbit` 資料夾保存版本。** 使用者能在 Drive 查看備份；程式只管理自己建立或使用者授權的檔案。
-4. **設定頁保存 OAuth Client ID，不保存 Client Secret。** 依使用者選擇，未過期授權憑證暫存至分頁 sessionStorage，重新整理驗證後恢復，同來源分頁可接續。憑證不放進 localStorage、匯出檔或 Drive，原到期時間不延長。
+4. **設定頁保存 OAuth Client ID，不保存 Client Secret。** 初期 Calendar／Drive 的未過期授權憑證暫存至分頁 sessionStorage，重新整理驗證後恢復，同來源分頁可接續。1.7.0 的 Gmail 依後續需求改用目前瀏覽器 localStorage 接續未過期授權；所有服務均不延長原期限，憑證不進匯出檔或 Drive。目前規則見 [Google 連線設定](google-setup.md)。
 5. **雲端同時修改時保留兩份版本。** 第一版提供衝突選擇與複製工作空間，不自動猜測哪份修改應被丟棄。
 
 Google 的瀏覽器授權流程使用 Client ID；Client Secret 是伺服器端流程才需要的資料。Client ID 可以隨備份攜帶，但匯入後仍須重新授權。[Google Client ID 說明](https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid)

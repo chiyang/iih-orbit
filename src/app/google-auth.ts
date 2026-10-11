@@ -14,7 +14,7 @@ export interface GoogleAccount {id: string; email: string}
 @Injectable({providedIn: 'root'})
 export class GoogleAuth implements OnDestroy {
   protected get sessionOptions(): SessionOptions { return {scope: CALENDAR_SCOPE, storageKey: GOOGLE_SESSION_KEY, controlPrefix: 'iih-orbit-google-session-control-v1:'}; }
-  protected get sessionPersistence(): 'tab' | 'browser' { return 'tab'; }
+  protected get sessionPersistence(): 'tab' | 'browser' | 'memory' { return 'tab'; }
   protected get sessionChannel(): string { return 'iih-orbit-google-session'; }
   protected get permissionMessage(): string { return '尚未取得月曆讀取權限，請重新連線並允許讀取月曆。'; }
   protected get networkMessage(): string { return '網路中斷或 Google 讀取逾時，已保留原有月曆資料。'; }
@@ -41,6 +41,7 @@ export class GoogleAuth implements OnDestroy {
   private session?: GoogleSession;
   private sessionContext?: GoogleSessionContext;
   private authorizationNonce = '';
+  private approvedScopes = new Set<string>();
   private readonly bridge: GoogleSessionBridge;
   private readonly wake = () => this.bridge.verify();
   private readonly storageChanged = (event: StorageEvent) => { if (!event.key || event.key.startsWith(this.sessionOptions.controlPrefix)) this.bridge.verify(); };
@@ -57,7 +58,8 @@ export class GoogleAuth implements OnDestroy {
           setItem: (key, value) => { browserStorage.setItem(key, value); try { window?.sessionStorage.removeItem(key); } catch { /* Validated browser storage remains available. */ } },
           removeItem: key => { browserStorage.removeItem(key); try { window?.sessionStorage.removeItem(key); } catch { /* The invalidation nonce also rejects old tab copies. */ } }
         };
-      } else storage = window?.sessionStorage;
+      } else if (this.sessionPersistence === 'memory') storage = {getItem: () => null, setItem: () => {}, removeItem: () => {}};
+      else storage = window?.sessionStorage;
     }
     catch { this.sessionWarning.set('瀏覽器不允許保存 Google 連線，重新整理後需重新連線。'); }
     try { if (window?.BroadcastChannel) channel = new window.BroadcastChannel(this.sessionChannel); }
@@ -75,6 +77,27 @@ export class GoogleAuth implements OnDestroy {
   useSession(context: GoogleSessionContext): void {
     this.sessionContext = {...context};
     this.bridge.activate(context);
+  }
+
+  authorizationMarker(): string { return this.bridge.currentNonce(); }
+  authorizationIsCurrent(nonce: string): boolean { return !nonce || this.bridge.isCurrent(nonce); }
+  hasScope(scope: string): boolean { return scope.split(' ').every(value => this.approvedScopes.has(value)); }
+  protected acceptsScopes(scopes: string[]): boolean { return this.sessionOptions.scope.split(' ').every(scope => scopes.includes(scope)); }
+
+  /** Copy a newly approved grant into an independently managed service session. */
+  copyAuthorizationTo(target: GoogleAuth, context: GoogleSessionContext, nonce: string): void {
+    this.bridge.verify(false);
+    const source = this.session;
+    if (!source || !this.connected() || source.expiresAt <= Date.now() || !this.hasScope(target.sessionOptions.scope)
+      || source.clientId !== context.clientId || source.generation !== context.generation || source.account.id !== context.accountId
+      || target.sessionContext?.clientId !== context.clientId || target.sessionContext.generation !== context.generation
+      || target.sessionContext.accountId !== context.accountId || nonce && !target.bridge.isCurrent(nonce)) {
+      throw new Error('Google 授權或連線設定已變更，請重新連線。');
+    }
+    target.disconnect();
+    const session = {...source, id: crypto.randomUUID(), scope: target.sessionOptions.scope, nonce: target.bridge.currentNonce()};
+    target.approvedScopes = new Set(target.sessionOptions.scope.split(' '));
+    target.adopt(session, 'Google 已連線'); target.bridge.remember(session);
   }
 
   private adopt(session: GoogleSession, message: string): void {
@@ -127,7 +150,9 @@ export class GoogleAuth implements OnDestroy {
         callback: async response => {
           if (epoch !== this.epoch) return;
           if (nonce && !this.bridge.isCurrent(nonce)) { this.clearLocal('Google 授權已在其他分頁取消或更新。'); return; }
-          if (response.error || !response.access_token || !Number.isFinite(Number(response.expires_in)) || !this.sessionOptions.scope.split(' ').every(scope => this.oauth!.hasGrantedAllScopes(response, scope))) { finishError(this.permissionMessage); return; }
+          if (response.error || !response.access_token || !Number.isFinite(Number(response.expires_in))) { finishError(this.permissionMessage); return; }
+          const scopes = this.sessionOptions.scope.split(' ').filter(scope => this.oauth!.hasGrantedAllScopes(response, scope));
+          if (!this.acceptsScopes(scopes)) { finishError(this.permissionMessage); return; }
           this.token = response.access_token;
           this.expiresAt = Date.now() + Math.max(0, Number(response.expires_in) - 30) * 1000;
           try {
@@ -138,6 +163,7 @@ export class GoogleAuth implements OnDestroy {
             const account = {id: identity.sub, email: identity.email};
             const session: GoogleSession = {version: 1, id: crypto.randomUUID(), clientId, generation: this.sessionContext?.generation ?? '', account, scope: this.sessionOptions.scope, token: this.token, expiresAt: this.expiresAt, nonce};
             this.pendingReject = undefined;
+            this.approvedScopes = new Set(scopes);
             this.adopt(session, 'Google 已連線');
             this.bridge.remember(session);
             resolve(account);
@@ -218,6 +244,7 @@ export class GoogleAuth implements OnDestroy {
   private clearLocal(message: string): void {
     this.connectionVersion.update(version => version + 1);
     this.epoch++; this.token = ''; this.expiresAt = 0;
+    this.approvedScopes.clear();
     this.session = undefined; this.authorizationNonce = '';
     clearTimeout(this.expiryTimer);
     for (const controller of this.controllers) controller.abort();

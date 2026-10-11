@@ -8,8 +8,9 @@ import { DriveService, type DriveRemovalReview } from './drive-service';
 import { driveCatalog, fileScope } from './drive-catalog';
 import { Icon } from './icon';
 import { TEXT_SIZES } from './ui-preferences';
+import { GoogleServiceHeader } from './google-service-header';
 
-@Component({selector: 'app-drive-panel', imports: [FormsModule, Icon, DatePipe, DecimalPipe, NgTemplateOutlet], templateUrl: './drive-panel.html', styleUrl: './drive-panel.css'})
+@Component({selector: 'app-drive-panel', imports: [FormsModule, Icon, DatePipe, DecimalPipe, NgTemplateOutlet, GoogleServiceHeader], templateUrl: './drive-panel.html', styleUrl: './drive-panel.css'})
 export class DrivePanel {
   readonly drive = inject(DriveService);
   readonly store = this.drive.store;
@@ -107,7 +108,7 @@ export class DrivePanel {
   private readonly previewPanel = viewChild<ElementRef<HTMLElement>>('previewPanel');
   private readonly cloudList = viewChild<ElementRef<HTMLElement>>('cloudList');
   constructor() {
-    void this.drive.prepare();
+    effect(() => { const clientId = this.store.google().clientId; untracked(() => { if (clientId) void this.drive.prepare(); }); });
     effect(() => {
       const key = JSON.stringify([this.store.google().clientId, this.store.generation(), this.store.drive().accountId, this.drive.auth.connectionVersion()]);
       if (this.drive.runtimeReady() && this.drive.auth.connected() && this.drive.online() && !this.drive.busy() && this.loadedConnection !== key) {

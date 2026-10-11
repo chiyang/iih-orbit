@@ -70,7 +70,7 @@ export class Reminders implements OnDestroy {
         }
       }
     } catch (error) {
-      this.warning.set(error instanceof Error && error.message.includes('提醒記錄已滿') ? error.message : '無法保存跨分頁提醒記錄，已暫停自動提示；仍可使用訊息中心。');
+      this.warning.set(error instanceof Error && error.message.includes('提醒記錄已滿') ? error.message : '無法保存跨分頁提醒記錄，已暫停自動提示；仍可使用訊息提醒。');
     } finally { this.running = false; }
   }
 

@@ -2,11 +2,11 @@ import { computed, Injectable, OnDestroy, signal } from '@angular/core';
 import { BoardState, BoardStatus, CalendarTransfer, Category, Project, Task, TaskStatus, WorkspaceState } from './models';
 import { originKey, taskFingerprint } from './calendar-transfer-data';
 import { readBoardState } from './board-data';
-import { createInitialState } from './seed';
+import { createInitialState, isInitialWorkspace } from './seed';
 import { createWorkspaceState, emptyWorkspace, readWorkspaceState, removeBoardStatus, statusKind } from './workspace-data';
 import { BackupKind, copyWorkspaces, createBackup, OrbitBackup, readBackup } from './backup-data';
 import { AppearancePreferences, DEFAULT_APPEARANCE, readAppearance } from './appearance-data';
-import { readStoredData, StoredWorkspaceData, WORKSPACE_SELECTION_KEY, WORKSPACE_STORAGE_KEY } from './stored-data';
+import { OnboardingPhase, readStoredData, StoredWorkspaceData, WORKSPACE_SELECTION_KEY, WORKSPACE_STORAGE_KEY } from './stored-data';
 import { withStorageLock } from './storage-coordinator';
 import { CalendarSource, DEFAULT_GOOGLE, GoogleSettings, readGoogleSettings } from './google-data';
 import { DEFAULT_REMINDERS, ReminderPreferences, readReminders } from './reminder-data';
@@ -32,6 +32,7 @@ export class BoardStore implements OnDestroy {
   private lastSavedRevision = this.snapshot.revision;
   readonly generation = signal(this.snapshot.generation);
   readonly revision = signal(this.snapshot.revision);
+  readonly onboarding = signal<OnboardingPhase | null>(!this.storageWarning() && isInitialWorkspace(this.snapshot.state) ? this.snapshot.onboarding ?? null : null);
   readonly appearance = signal<AppearancePreferences>(this.snapshot.preferences ?? this.legacyAppearance());
   readonly google = signal<GoogleSettings>(this.snapshot.google ?? structuredClone(DEFAULT_GOOGLE));
   readonly reminders = signal<ReminderPreferences>(this.snapshot.reminders ?? {...DEFAULT_REMINDERS});
@@ -233,7 +234,22 @@ export class BoardStore implements OnDestroy {
     this.rememberSelection(id);
   }
 
-  async saveWorkspace(id: string, name: string, options: WorkspaceCreationOptions = {}): Promise<StoreResult> {
+  finishIntroduction(): Promise<StoreResult> {
+    return this.transact(data => {
+      if (!isInitialWorkspace(data.state) || data.onboarding !== 'guide') throw new Error('首次使用流程已在其他分頁更新，請重新查看目前的工作空間。');
+      return {...data, onboarding: 'workspace'};
+    });
+  }
+
+  saveWorkspace(id: string, name: string, options: WorkspaceCreationOptions = {}): Promise<StoreResult> {
+    return this.writeWorkspace(id, name, options, false);
+  }
+
+  createFirstWorkspace(name: string, options: WorkspaceCreationOptions = {}): Promise<StoreResult> {
+    return this.writeWorkspace('', name, {...options, includeExamples: options.includeExamples === true}, true);
+  }
+
+  private async writeWorkspace(id: string, name: string, options: WorkspaceCreationOptions, first: boolean): Promise<StoreResult> {
     const label = name.trim();
     const generation = this.generation();
     let newWorkspace = id ? null : emptyWorkspace(crypto.randomUUID(), label);
@@ -246,9 +262,18 @@ export class BoardStore implements OnDestroy {
     return this.transact(data => {
       if (data.generation !== generation) throw new Error('原資料已被其他分頁取代，請重新開啟工作空間設定。');
       if (!label) throw new Error('請輸入工作空間名稱。');
+      if (first) {
+        if (data.onboarding !== 'workspace' || !isInitialWorkspace(data.state)) throw new Error('空白工作空間已在其他分頁使用或取代，請重新查看，現有資料不會被覆蓋。');
+        if (!options.templateId || options.templateId === 'blank') newWorkspace!.projects = [];
+        const workspace = newWorkspace!, previousId = data.state.workspaces[0].id;
+        const remap = (ids: string[]) => ids.map(id => id === previousId ? workspace.id : id);
+        return {...data, onboarding: undefined, google: {...data.google!, sources: data.google!.sources.map(source => ({...source, workspaceIds: remap(source.workspaceIds)}))},
+          ...(data.drive ? {drive: {...data.drive, workspaceIds: remap(data.drive.workspaceIds)}} : {}),
+          state: {version: 1, activeWorkspaceId: workspace.id, workspaces: [workspace]}};
+      }
       if (id && !data.state.workspaces.some(workspace => workspace.id === id)) throw new Error('這個工作空間已被刪除。');
       return {...data, state: {...data.state, workspaces: newWorkspace ? [...data.state.workspaces, newWorkspace] : data.state.workspaces.map(workspace => workspace.id === id ? {...workspace, name: label} : workspace)}};
-    }, {select: newWorkspace?.id});
+    }, {select: newWorkspace?.id, requirePersistence: first, persistenceMessage: first ? '無法保存第一個工作空間，請檢查瀏覽器儲存空間後再試。' : undefined});
   }
 
   deleteWorkspace(id: string): Promise<StoreResult> {
@@ -339,7 +364,7 @@ export class BoardStore implements OnDestroy {
         if (old) {old.workspaceIds = [...new Set([...old.workspaceIds, ...source.workspaceIds])]; old.name = source.name; old.color = source.color; old.visible = source.visible;}
         else oldSources.push({...structuredClone(source), id: crypto.randomUUID()});
       }
-      return {...data, state: {...data.state, workspaces, activeWorkspaceId: incomingIds.has(data.state.activeWorkspaceId) ? data.state.activeWorkspaceId : workspaces[0].id},
+      return {...data, onboarding: undefined, state: {...data.state, workspaces, activeWorkspaceId: incomingIds.has(data.state.activeWorkspaceId) ? data.state.activeWorkspaceId : workspaces[0].id},
         ...(backup.kind === 'full' && backup.preferences ? {preferences: structuredClone(backup.preferences)} : {}),
         ...(backup.kind === 'full' && backup.reminders ? {reminders: {...backup.reminders}} : {}),
         google: {...data.google!, ...(backup.kind === 'full' && backup.google ? {refreshMinutes: backup.google.refreshMinutes} : {}), sources: oldSources.filter(s => s.workspaceIds.length)}};
@@ -433,7 +458,7 @@ export class BoardStore implements OnDestroy {
     }, {generation});
   }
 
-  private async transact(change: (data: StoredWorkspaceData) => StoredWorkspaceData, options: {generation?: string; requirePersistence?: boolean; select?: string; afterPersist?: () => void} = {}): Promise<StoreResult> {
+  private async transact(change: (data: StoredWorkspaceData) => StoredWorkspaceData, options: {generation?: string; requirePersistence?: boolean; persistenceMessage?: string; select?: string; afterPersist?: () => void} = {}): Promise<StoreResult> {
     const expectedGeneration = options.generation ?? this.generation();
     this.pendingWrites.update(count => count + 1);
     try {
@@ -454,10 +479,11 @@ export class BoardStore implements OnDestroy {
         const workspaceIds = settings.workspaceIds.filter(id => state.workspaces.some(w => w.id === id));
         const drive = readDriveSettings({...settings, workspaceIds, ...(settings.kind === 'workspaces' && workspaceIds.length !== settings.workspaceIds.length ? {mode: 'off'} : {})}, state.workspaces.map(w => w.id));
         if (!drive) throw new Error('Drive 設定不合法，未儲存這次變更。');
-        const next: StoredWorkspaceData = {...changed, state, google, drive, revision: crypto.randomUUID(), updatedAt: new Date().toISOString()};
+        const onboarding = changed.generation === latest.generation && isInitialWorkspace(state) ? changed.onboarding : undefined;
+        const next: StoredWorkspaceData = {...changed, onboarding, state, google, drive, revision: crypto.randomUUID(), updatedAt: new Date().toISOString()};
         try { localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(next)); }
         catch {
-          if (options.requirePersistence) throw new Error('瀏覽器儲存空間不足或無法保存，還原或重置未套用；原有資料保留。');
+          if (options.requirePersistence) throw new Error(options.persistenceMessage ?? '瀏覽器儲存空間不足或無法保存，還原或重置未套用；原有資料保留。');
           this.apply(next, options.select, false);
           this.hasUnsavedChanges.set(true);
           this.storageWarning.set('瀏覽器目前無法儲存資料。變更只保留在此分頁，請保持開啟並匯出備份。');
@@ -484,6 +510,7 @@ export class BoardStore implements OnDestroy {
     this.snapshot = data;
     this.generation.set(data.generation);
     this.revision.set(data.revision);
+    this.onboarding.set(isInitialWorkspace(data.state) ? data.onboarding ?? null : null);
     this.appearance.set(data.preferences ?? this.legacyAppearance());
     this.google.set(data.google ?? structuredClone(DEFAULT_GOOGLE));
     this.reminders.set(data.reminders ?? {...DEFAULT_REMINDERS});
@@ -539,11 +566,13 @@ export class BoardStore implements OnDestroy {
     const legacy = localStorage.getItem('orbit-board-v1');
     const board = legacy ? readBoardState(JSON.parse(legacy)) : createInitialState();
     if (!board) throw new Error('舊版看板資料格式不完整。');
-    return this.initialData(createWorkspaceState(board));
+    const state = createWorkspaceState(board);
+    if (!legacy) state.workspaces[0].name = '空白工作空間';
+    return this.initialData(state, legacy ? undefined : 'guide');
   }
 
-  private initialData(state: WorkspaceState): StoredWorkspaceData {
-    return {formatVersion: 2, generation: 'local-v1', revision: 'legacy', updatedAt: new Date(0).toISOString(), state, preferences: this.legacyAppearance(), google: structuredClone(DEFAULT_GOOGLE)};
+  private initialData(state: WorkspaceState, onboarding?: OnboardingPhase): StoredWorkspaceData {
+    return {formatVersion: 2, generation: 'local-v1', revision: 'legacy', updatedAt: new Date(0).toISOString(), state, preferences: this.legacyAppearance(), google: structuredClone(DEFAULT_GOOGLE), ...(onboarding ? {onboarding} : {})};
   }
 
   private legacyAppearance(): AppearancePreferences {

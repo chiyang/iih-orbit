@@ -23,7 +23,7 @@ export interface DriveFile {
 export interface DriveDeletePlan {kind: 'file' | 'collection'; datasetId: string; files: DriveFile[]}
 export class DriveCollectionDeleted extends Error {
   readonly datasetId: string;
-  constructor(datasetId: string) {super('這份雲端資料已刪除或缺少必要的備份。本機資料保留，請在 Google Drive 設定清除舊連結後重新開始自動儲存。'); this.datasetId = datasetId;}
+  constructor(datasetId: string) {super('這份雲端資料已刪除或缺少必要的備份。本機資料保留，請在遠端同步備份設定清除舊連結後重新開始自動儲存。'); this.datasetId = datasetId;}
 }
 export interface DriveLink {datasetId: string; kind: BackupKind; workspaceIds: string[]; baseVersionId: string; baseHash: string; baseHashVersion?: 1 | 2; baseBackupHash?: string}
 export interface DrivePending {fileId: string; document: DriveDocument}

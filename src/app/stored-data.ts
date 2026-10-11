@@ -9,6 +9,7 @@ import { type DriveSettings, readDriveSettings } from './drive-settings.ts';
 
 export const WORKSPACE_STORAGE_KEY = 'orbit-workspaces-v2';
 export const WORKSPACE_SELECTION_KEY = 'orbit-active-workspace-v1';
+export type OnboardingPhase = 'guide' | 'workspace';
 
 export interface StoredWorkspaceData {
   formatVersion: 2;
@@ -16,6 +17,8 @@ export interface StoredWorkspaceData {
   revision: string;
   updatedAt: string;
   state: WorkspaceState;
+  /** Local startup progress; excluded from exported workspaces and backups. */
+  onboarding?: OnboardingPhase;
   preferences?: AppearancePreferences;
   google?: GoogleSettings;
   reminders?: ReminderPreferences;
@@ -37,5 +40,6 @@ export function readStoredData(value: unknown): StoredWorkspaceData | null {
   if (reminders === null) return null;
   const drive = source.drive === undefined ? undefined : readDriveSettings(source.drive, state.workspaces.map(workspace => workspace.id));
   if (drive === null) return null;
-  return {formatVersion: 2, generation: source.generation, revision: source.revision, updatedAt: source.updatedAt, state, ...(preferences ? {preferences} : {}), ...(google ? {google} : {}), ...(reminders ? {reminders} : {}), ...(drive ? {drive} : {})};
+  const onboarding = source.onboarding === 'guide' || source.onboarding === 'workspace' ? source.onboarding : undefined;
+  return {formatVersion: 2, generation: source.generation, revision: source.revision, updatedAt: source.updatedAt, state, ...(onboarding ? {onboarding} : {}), ...(preferences ? {preferences} : {}), ...(google ? {google} : {}), ...(reminders ? {reminders} : {}), ...(drive ? {drive} : {})};
 }

@@ -15,15 +15,15 @@ const { build } = createRequire(require.resolve('@angular/build/package.json'))(
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/app-project-test-'));
 const output = resolve(directory, 'app.mjs');
-await build({stdin: {contents: "export {App} from './src/app/app.ts'; export {Settings} from './src/app/settings.ts'; export {BoardStore} from './src/app/board-store.ts'; export {UiPreferences} from './src/app/ui-preferences.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const { App, Settings, BoardStore, UiPreferences } = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {App} from './src/app/app.ts'; export {Settings} from './src/app/settings.ts'; export {BoardStore} from './src/app/board-store.ts'; export {UiPreferences} from './src/app/ui-preferences.ts'; export {StartupGuide} from './src/app/startup-guide.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const { App, Settings, BoardStore, UiPreferences, StartupGuide } = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 
 const task = {id: 'welcome-task', title: '迎新海報', description: '', projectId: 'welcome', categoryId: 'design', status: 'todo', priority: 'medium', startDate: '2026-10-08', startTime: '', dueDate: '2026-10-08', dueTime: '', subtasks: []};
 
-function application() {
+function application(fresh = false) {
   const state = {version: 1, activeWorkspaceId: 'first', workspaces: [{version: 4, id: 'first', name: '學程工作', projects: [{id: 'welcome', name: '迎新活動'}, {id: 'website', name: '網站改版'}], categories: [{id: 'design', name: '設計', color: 'green'}], statuses: COLUMNS, tasks: [task, {...task, id: 'website-task', title: '網站首頁', projectId: 'website', status: 'done'}, {...task, id: 'daily', title: '日常任務', projectId: ''}]}, {version: 4, id: 'second', name: '個人生活', projects: [], categories: [], statuses: COLUMNS, tasks: []}]};
-  const values = new Map([['orbit-workspaces-v1', JSON.stringify(state)]]);
+  const values = new Map(fresh ? [] : [['orbit-workspaces-v1', JSON.stringify(state)]]);
   globalThis.localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key)};
   const store = new BoardStore();
   const effects = new Set();
@@ -42,8 +42,100 @@ function application() {
     try {return runInInjectionContext(injector, () => new App());}
     finally {delete globalThis.window; delete globalThis.ngServerMode;}
   };
-  return {app, settings, store, values, flush, reopen, close: () => { clearTimeout(app.toastTimer); injector.destroy(); }};
+  return {app, settings, store, values, flush, reopen, guide: () => runInInjectionContext(injector, () => new StartupGuide()), close: () => { clearTimeout(app.toastTimer); injector.destroy(); }};
 }
+
+test('首次引導可以前後查看且不加入資料；完成接續第一個樣板空間，稍後建立仍可重開', async () => {
+  const f = application(true);
+  try {
+    f.flush(); assert.equal(f.app.modal(), 'intro'); assert.equal(f.app.introFirstUse(), true);
+    const guide = f.guide(); guide.busy = f.app.introSaving; guide.firstUse = f.app.introFirstUse;
+    assert.match(guide.hint(), /只有一個空白空間/);
+    guide.previous(); assert.equal(guide.step(), 0);
+    guide.next(); guide.previous(); assert.equal(guide.step(), 0);
+    for (let index = 1; index < guide.steps.length; index++) guide.next();
+    assert.match(guide.hint(), /第一個工作空間/);
+    assert.deepEqual(f.store.tasks(), []); assert.deepEqual(f.store.projects(), []); assert.deepEqual(f.store.categories(), []);
+    let finishing;
+    guide.finish.subscribe(() => {finishing = f.app.finishIntroduction();});
+    guide.next(); guide.next(); await finishing; f.flush();
+    assert.equal(f.app.modal(), 'workspaces'); assert.equal(f.app.firstWorkspaceDialog(), true); assert.equal(f.app.workspaceExamples, false);
+    f.app.closeModal(); f.flush(); assert.equal(f.app.modal(), null);
+    const reopened = f.reopen(); f.flush(); assert.equal(reopened.modal(), 'workspaces');
+    f.app.openWorkspaces(); f.app.chooseWorkspaceTemplate({id: 'research', name: '研究計劃'});
+    await f.app.saveWorkspace(); f.flush();
+    assert.equal(f.store.workspaces().length, 1); assert.equal(f.store.currentWorkspace().name, '研究計劃');
+    assert.equal(f.store.categories().length, 4); assert.deepEqual(f.store.tasks(), []); assert.equal(f.store.onboarding(), null);
+    assert.equal(f.app.modal(), null); assert.equal(f.reopen().modal(), null);
+  } finally {f.close();}
+});
+
+test('Escape 略過首次引導，空白選擇不建立同名專案；儲存失敗保留名稱供重試', async () => {
+  const f = application(true);
+  try {
+    f.flush(); f.app.escape();
+    for (let index = 0; index < 5; index++) await new Promise(resolve => setImmediate(resolve));
+    f.flush(); assert.equal(f.app.modal(), 'workspaces'); assert.equal(f.store.onboarding(), 'workspace');
+    await f.app.saveWorkspace(); assert.match(f.app.formError(), /名稱/); assert.equal(f.app.modal(), 'workspaces');
+    f.app.workspaceDraft = '空白工作空間'; const write = localStorage.setItem;
+    localStorage.setItem = () => {throw new Error('full');};
+    try {await f.app.saveWorkspace();} finally {localStorage.setItem = write;}
+    assert.equal(f.app.workspaceDraft, '空白工作空間'); assert.equal(f.app.modal(), 'workspaces'); assert.equal(f.store.onboarding(), 'workspace');
+    await f.app.saveWorkspace(); f.flush();
+    assert.equal(f.store.workspaces().length, 1); assert.deepEqual(f.store.projects(), []); assert.deepEqual(f.store.categories(), []); assert.deepEqual(f.store.tasks(), []);
+    assert.equal(f.app.modal(), null); assert.equal(f.store.onboarding(), null);
+  } finally {f.close();}
+});
+
+test('問號引導完成、關閉及 Escape 均保留資料、篩選與側欄；背景儲存不阻止結束', async () => {
+  const f = application();
+  try {
+    f.flush(); f.app.view.set('week'); f.app.calendarDate.set('2026-10-14');
+    f.app.projectFilter.set('website'); f.app.categoryFilter.set('design'); f.app.query.set('網站');
+    f.app.openMail(); f.flush();
+    const workspaces = JSON.stringify(f.store.workspaces());
+    const saved = f.values.get('orbit-workspaces-v1');
+    const pendingWrites = f.store.pendingWrites;
+    f.store.pendingWrites = signal(1);
+    try {
+      for (const action of ['finish', 'close', 'escape']) {
+        f.app.openIntroduction(); f.flush();
+        assert.equal(f.app.modal(), 'intro'); assert.equal(f.app.introFirstUse(), false);
+        const guide = f.guide(); guide.firstUse = f.app.introFirstUse;
+        assert.equal(guide.step(), 0); assert.doesNotMatch(guide.hint(), /目前只有一個空白空間/);
+        let finishing;
+        guide.finish.subscribe(() => {finishing = f.app.finishIntroduction();});
+        for (let index = 1; index < guide.steps.length; index++) guide.next();
+        assert.doesNotMatch(guide.hint(), /第一個工作空間/);
+        if (action === 'finish') {guide.next(); await finishing;}
+        else if (action === 'close') f.app.closeModal();
+        else f.app.escape();
+        f.flush();
+        assert.equal(f.app.modal(), null); assert.equal(f.app.firstWorkspaceDialog(), false);
+        assert.equal(f.store.onboarding(), null); assert.equal(JSON.stringify(f.store.workspaces()), workspaces);
+        assert.equal(f.values.get('orbit-workspaces-v1'), saved); assert.equal(f.values.has('orbit-workspaces-v2'), false);
+        assert.equal(f.app.view(), 'week'); assert.equal(f.app.calendarDate(), '2026-10-14');
+        assert.equal(f.app.projectFilter(), 'website'); assert.equal(f.app.categoryFilter(), 'design');
+        assert.equal(f.app.query(), '網站'); assert.equal(f.app.mailOpen(), true);
+      }
+    } finally {f.store.pendingWrites = pendingWrites;}
+  } finally {f.close();}
+});
+
+test('延後建立第一個空間後，手動重看引導不改變首次進度；重新整理仍接續建立空間', async () => {
+  const f = application(true);
+  try {
+    f.flush(); await f.app.finishIntroduction(); f.flush(); f.app.closeModal();
+    const saved = f.values.get('orbit-workspaces-v2');
+    f.app.openIntroduction(); f.flush(); assert.equal(f.app.introFirstUse(), false);
+    await f.app.finishIntroduction(); f.flush();
+    assert.equal(f.app.modal(), null); assert.equal(f.store.onboarding(), 'workspace');
+    assert.equal(f.values.get('orbit-workspaces-v2'), saved); assert.equal(f.store.workspaces().length, 1);
+    assert.deepEqual(f.store.projects(), []); assert.deepEqual(f.store.categories(), []); assert.deepEqual(f.store.tasks(), []);
+    const reopened = f.reopen(); f.flush();
+    assert.equal(reopened.modal(), 'workspaces'); assert.equal(reopened.firstWorkspaceDialog(), true);
+  } finally {f.close();}
+});
 
 test('重新建立畫面保留視圖、月曆日期、篩選排序與右側欄；不同工作空間分開保存', () => {
   const f = application();
@@ -155,7 +247,7 @@ test('所有專案下新增任務自動選擇同名或第一個未封存專案�
   } finally { close(); }
 });
 
-test('樣板切換自動建議名稱但保留自訂名稱，範例選項與編輯工作空間互不混用', async () => {
+test('樣板切換保留自訂名稱，改名中可返回建立工作空間，原空間內容不被修改', async () => {
   const {app, store, close} = application();
   try {
     app.openWorkspaces();
@@ -174,7 +266,13 @@ test('樣板切換自動建議名稱但保留自訂名稱，範例選項與編�
     app.openWorkspaces(); app.editWorkspace(store.currentWorkspace());
     app.chooseWorkspaceTemplate({id: 'research', name: '研究計劃'});
     assert.equal(app.workspaceDraft, '我的教學工作');
-    app.cancelWorkspaceEdit(); assert.equal(app.workspaceTemplateId(), 'blank'); assert.equal(app.workspaceDraft, '');
+    const original = structuredClone(store.currentWorkspace());
+    app.workspaceDraft = '尚未儲存的改名'; app.openWorkspaces();
+    assert.equal(app.workspaceEditingId(), ''); assert.equal(app.workspaceTemplateId(), 'blank'); assert.equal(app.workspaceDraft, '');
+    assert.deepEqual(store.workspaces().find(workspace => workspace.id === original.id), original);
+    app.workspaceDraft = '另一個工作空間'; await app.saveWorkspace();
+    assert.notEqual(store.currentWorkspace().id, original.id); assert.equal(store.currentWorkspace().name, '另一個工作空間');
+    assert.deepEqual(store.workspaces().find(workspace => workspace.id === original.id), original);
   } finally { close(); }
 });
 

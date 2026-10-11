@@ -1,0 +1,16 @@
+<section class="guide-content" aria-live="polite" aria-atomic="true">
+  <p class="guide-progress">操作引導 · {{ step() + 1 }} / {{ steps.length }}</p>
+  <span class="guide-icon" aria-hidden="true"><app-icon [name]="current().icon" /></span>
+  <h3>{{ current().title }}</h3>
+  <p class="guide-description">{{ current().text }}</p>
+  <ol class="guide-actions" aria-label="操作順序">@for (action of current().actions; track action) {<li>{{ action }}</li>}</ol>
+  <p class="guide-hint">{{ hint() }}</p>
+</section>
+@if (error()) {<p class="guide-error" role="alert">{{ error() }}</p>}
+<footer class="guide-footer">
+  <button type="button" class="guide-skip" [disabled]="busy()" (click)="finish.emit()">{{ firstUse() ? '略過引導' : '結束引導' }}</button>
+  <div>
+    @if (step() > 0) {<button type="button" class="guide-button" [disabled]="busy()" (click)="previous()">上一步</button>}
+    <button type="button" class="guide-button primary" [disabled]="busy()" (click)="next()">{{ busy() ? '準備中…' : step() === steps.length - 1 ? (firstUse() ? '建立第一個工作空間' : '完成引導') : '下一步' }}</button>
+  </div>
+</footer>

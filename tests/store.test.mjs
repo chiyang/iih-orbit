@@ -22,6 +22,86 @@ const task = {id: 'task', title: '既有任務', description: '保留內容', ca
 const legacy = {version: 2, projectName: '原專案', categories: [], tasks: [task, {...task, id: 'done', status: 'done'}]};
 const migratedTasks = legacy.tasks.map(item => ({...item, projectId: 'project-legacy'}));
 
+test('首次使用只有空白工作空間，略過或完成引導後重新載入接續建立；空白選擇不產生專案', async () => {
+  storage();
+  const store = new BoardStore();
+  assert.equal(store.workspaces().length, 1); assert.equal(store.onboarding(), 'guide');
+  assert.deepEqual(store.tasks(), []); assert.deepEqual(store.projects(), []); assert.deepEqual(store.categories(), []);
+  assert.equal(new BoardStore().onboarding(), 'guide');
+  assert.equal((await store.createFirstWorkspace('提早建立')).ok, false);
+  assert.equal((await store.finishIntroduction()).ok, true);
+  assert.equal(new BoardStore().onboarding(), 'workspace');
+  const backup = await store.backupForExport('full');
+  assert.equal('onboarding' in backup, false); assert.equal('onboarding' in backup.data, false);
+  assert.equal('onboarding' in backup.data.workspaces[0], false);
+  assert.equal((await store.createFirstWorkspace('空白工作空間')).ok, true);
+  assert.equal(store.workspaces().length, 1); assert.notEqual(store.currentWorkspace().id, 'workspace-default');
+  assert.deepEqual(store.projects(), []); assert.deepEqual(store.categories(), []); assert.deepEqual(store.tasks(), []);
+  assert.equal(new BoardStore().onboarding(), null);
+  await store.resetData(true, store.revision()); assert.equal(new BoardStore().onboarding(), null);
+});
+
+test('第一個工作空間的樣板預設不加示範，明確勾選後才加入，全部匯入與雲端還原不帶引導', async () => {
+  for (const includeExamples of [undefined, true]) {
+    storage(); const store = new BoardStore(); await store.finishIntroduction();
+    assert.equal((await store.createFirstWorkspace('研究空間', {templateId: 'research', includeExamples, now: new Date(2026, 9, 9)})).ok, true);
+    assert.equal(store.workspaces().length, 1); assert.equal(store.categories().length, 4);
+    assert.equal(store.projects()[0].name, '研究空間'); assert.equal(store.tasks().length > 0, includeExamples === true);
+    assert.equal(store.onboarding(), null);
+  }
+  storage(); const store = new BoardStore(); await store.finishIntroduction();
+  const blank = await store.backupForExport('full');
+  await store.importBackup(blank, store.revision()); assert.equal(new BoardStore().onboarding(), null);
+  storage(); const other = new BoardStore(); await other.finishIntroduction();
+  await other.applyDriveBackup(blank, other.revision(), []); assert.equal(new BoardStore().onboarding(), null);
+});
+
+test('多個分頁建立第一個空間只成功一次；空白空間若已被使用，保留原資料並拒絕替換', async () => {
+  storage(); const first = new BoardStore(); await first.finishIntroduction(); const second = new BoardStore();
+  const results = await Promise.all([first.createFirstWorkspace('生活'), second.createFirstWorkspace('研究', {templateId: 'research'})]);
+  assert.equal(results.filter(result => result.ok).length, 1);
+  assert.equal(new BoardStore().workspaces().length, 1); assert.equal(new BoardStore().currentWorkspace().name, '生活');
+  storage(); const pending = new BoardStore(); await pending.finishIntroduction(); const peer = new BoardStore();
+  await peer.saveProject({id: 'new-project', name: '已開始的計畫'});
+  assert.equal((await pending.createFirstWorkspace('覆蓋原資料')).ok, false);
+  const saved = new BoardStore(); assert.equal(saved.projects()[0].name, '已開始的計畫'); assert.equal(saved.onboarding(), null);
+});
+
+test('第一個工作空間保存失敗保留空白狀態與建立步驟，可再重試', async () => {
+  storage(); const store = new BoardStore(); await store.finishIntroduction(); const before = structuredClone(store.workspaceState());
+  const write = localStorage.setItem;
+  localStorage.setItem = () => {throw new Error('full');};
+  try {
+    const result = await store.createFirstWorkspace('生活', {templateId: 'students'});
+    assert.equal(result.ok, false); assert.match(result.message, /第一個工作空間/);
+    assert.deepEqual(store.workspaceState(), before); assert.equal(store.onboarding(), 'workspace');
+    assert.equal(new BoardStore().onboarding(), 'workspace');
+  } finally {localStorage.setItem = write;}
+  assert.equal((await store.createFirstWorkspace('生活')).ok, true); assert.equal(new BoardStore().onboarding(), null);
+});
+
+test('稍後建立期間已設定的外部月曆與 Drive 範圍接續到第一個空間，不遺失連線設定', async () => {
+  storage(); const store = new BoardStore(); await store.finishIntroduction();
+  const previousId = store.currentWorkspace().id;
+  assert.equal((await store.updateGoogle({clientId: '123-example.apps.googleusercontent.com'})).ok, true);
+  assert.equal((await store.updateGoogle({accountId: 'account', email: 'a@example.com'})).ok, true);
+  assert.equal((await store.saveCalendarSource({id: 'source', accountId: 'account', calendarId: 'calendar', name: '我的月曆', color: '#4385d8', visible: true, workspaceIds: [previousId]})).ok, true);
+  assert.equal((await store.updateDrive({accountId: 'account', email: 'a@example.com', kind: 'workspaces', workspaceIds: [previousId]})).ok, true);
+  assert.equal((await store.createFirstWorkspace('我的生活')).ok, true);
+  assert.deepEqual(store.google().sources[0].workspaceIds, [store.currentWorkspace().id]);
+  assert.deepEqual(store.drive().workspaceIds, [store.currentWorkspace().id]);
+  assert.equal(store.google().email, 'a@example.com'); assert.equal(store.onboarding(), null);
+});
+
+test('既有資料與既有空白空間不重新引導；儲存內容損壞時不誤判為首次使用', () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const existing = new BoardStore(); assert.equal(existing.onboarding(), null); assert.deepEqual(existing.tasks(), migratedTasks);
+  const empty = {version: 1, activeWorkspaceId: 'workspace-default', workspaces: [{version: 4, id: 'workspace-default', name: '空白工作空間', projects: [], categories: [], tasks: [], statuses: existing.statuses()}]};
+  storage({'orbit-workspaces-v1': JSON.stringify(empty)}); assert.equal(new BoardStore().onboarding(), null);
+  storage({'orbit-workspaces-v2': '{invalid'}); const corrupt = new BoardStore();
+  assert.equal(corrupt.onboarding(), null); assert.ok(corrupt.storageWarning()); assert.equal(localStorage.getItem('orbit-workspaces-v2'), '{invalid');
+});
+
 test('提醒設定升級舊資料，跨分頁保存並與外觀修改合併，非法範圍不覆蓋資料', async () => {
   storage({'orbit-board-v1': JSON.stringify(legacy)});
   const first = new BoardStore(), second = new BoardStore();

@@ -12,6 +12,7 @@ export class WorkspaceTemplatePicker {
   readonly selected = input<WorkspaceTemplateId>('blank');
   readonly workspaceName = input('');
   readonly disabled = input(false);
+  readonly emptyStart = input(false);
   readonly choose = output<{id: WorkspaceTemplateId; name: string}>();
   readonly templates = WORKSPACE_TEMPLATES;
   readonly template = computed(() => this.templates.find(item => item.id === this.selected()));

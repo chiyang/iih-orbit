@@ -4,6 +4,7 @@ import { BackupKind, OrbitBackup } from './backup-data';
 import { CalendarSyncCoordinator } from './calendar-sync';
 import { DriveApi } from './drive-api';
 import { DriveAuth } from './drive-auth';
+import type { GoogleAccount } from './google-auth';
 import { canonical, DriveCollectionDeleted, DriveDeletePlan, DriveDocument, DriveFile, DriveRuntime, versionGraph } from './drive-data';
 import { DriveEngine } from './drive-engine';
 import { fileScope } from './drive-catalog';
@@ -125,16 +126,18 @@ export class DriveService implements OnDestroy {
     if (this.autoReady() && minutes && document.visibilityState !== 'hidden' && Date.now() - this.lastPoll >= minutes * 60000) void this.sync(false);
   }
   async prepare(): Promise<void> { try { await this.auth.prepare(); } catch (error) { this.error.set(this.describe(error)); } }
-  async connect(): Promise<void> {
+  async connect(authorize?: () => Promise<GoogleAccount>, activate?: () => void): Promise<void> {
     this.error.set('');
     const clientId = this.store.google().clientId, generation = this.store.generation();
     try {
-      const account = await this.auth.authorize(clientId);
+      const account = await (authorize ? authorize() : this.auth.authorize(clientId));
       if (generation !== this.store.generation() || clientId !== this.store.google().clientId) return;
       const previous = this.store.drive().accountId;
       const result = await this.store.updateDrive({accountId: account.id, email: account.email, ...(previous && previous !== account.id ? {mode: 'off'} : {})});
       if (!result.ok) throw new Error(result.message);
+      if (generation !== this.store.generation() || clientId !== this.store.google().clientId || this.store.drive().accountId !== account.id) return;
       this.auth.useSession({clientId, generation, accountId: account.id});
+      activate?.();
       this.context = JSON.stringify([clientId, generation, account.id]); this.coordinator.activate(this.context);
       await this.loadRuntime(); await this.list(); this.schedule();
     } catch (error) { this.error.set(this.describe(error)); }

@@ -16,7 +16,7 @@ import { GoogleConnection } from './google-connection';
 export type SettingsTab = 'appearance' | 'reminders' | 'google' | 'calendar' | 'gmail' | 'drive' | 'data' | 'reset';
 export const SETTINGS_TABS: {id: SettingsTab; label: string}[] = [
   {id: 'appearance', label: '外觀與閱讀'}, {id: 'reminders', label: '任務提醒'},
-  {id: 'google', label: 'Google 連線'}, {id: 'calendar', label: 'Google 月曆'}, {id: 'gmail', label: 'Gmail'}, {id: 'drive', label: 'Google Drive'}, {id: 'data', label: '資料與備份'}, {id: 'reset', label: '資料重置'}
+  {id: 'google', label: 'Google 連線'}, {id: 'calendar', label: 'Google 月曆'}, {id: 'gmail', label: 'Gmail'}, {id: 'drive', label: '遠端同步備份'}, {id: 'data', label: '資料與備份'}, {id: 'reset', label: '資料重置'}
 ];
 
 @Component({selector: 'app-settings', imports: [FormsModule, Icon, GoogleSettingsPanel, BackupPanel, DrivePanel, GmailSettings, GoogleConnection], templateUrl: './settings.html', styleUrl: './settings.css'})

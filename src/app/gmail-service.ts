@@ -2,14 +2,14 @@ import { computed, effect, inject, Injectable, OnDestroy, signal, untracked } fr
 import { BoardStore } from './board-store';
 import { GmailAuth } from './gmail-auth';
 import { GmailApi, MailCursor, mailHasMore, mapMailRequests, newMailCursor } from './gmail-api';
-import { mailLabelName, MailLabel, MailPreview, MailThreadSummary, readMailLabels, readMailPreview } from './gmail-data';
+import { mailLabelName, MailLabel, MailPreview, MailThreadSummary } from './gmail-data';
+import { GmailPreviewCache, MAIL_CACHE_TTL } from './gmail-cache';
 import { validClientId } from './google-data';
+import type { GoogleAccount } from './google-auth';
 
-const PREFERENCES = 'iih-orbit-gmail-preferences-v1', CACHE = 'iih-orbit-gmail-cache-v1';
-const TTL = 5 * 60000;
+const PREFERENCES = 'iih-orbit-gmail-preferences-v1', TTL = MAIL_CACHE_TTL;
 interface MailPreferences {generation: string; clientId: string; accountId: string; email: string; selected: string[]}
 type ThreadSummary = MailThreadSummary;
-const cachedPreview = (mail: MailPreview) => readMailPreview({id: mail.id, threadId: mail.threadId, snippet: mail.snippet, internalDate: mail.receivedAt, labelIds: mail.labelIds, payload: {headers: [{name: 'From', value: mail.from}, {name: 'Subject', value: mail.subject}, {name: 'Message-ID', value: mail.messageId}]}});
 @Injectable({providedIn: 'root'})
 export class GmailService implements OnDestroy {
   readonly store = inject(BoardStore);
@@ -38,6 +38,7 @@ export class GmailService implements OnDestroy {
   readonly error = signal('');
   readonly warning = signal('');
   readonly updatedAt = signal(0);
+  readonly showingPrevious = signal(false);
   readonly hasMore = signal(false);
   readonly active = signal(false);
   readonly online = signal(navigator.onLine !== false);
@@ -49,6 +50,8 @@ export class GmailService implements OnDestroy {
   private listController?: AbortController;
   private destroyed = false;
   private configuration = '';
+  private readonly cache = new GmailPreviewCache();
+  private readonly failedLoads = new Map<string, {retryAt: number; message: string}>();
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private readonly threadCache = new Map<string, {updatedAt: number; messages: MailPreview[]}>();
   private readonly threadPending = new Map<string, Promise<MailPreview[]>>();
@@ -80,10 +83,17 @@ export class GmailService implements OnDestroy {
           this.listController?.abort();
           const configuration = JSON.stringify([this.store.generation(), this.clientId(), this.preferences().accountId]);
           const sameAccount = this.configuration === configuration;
+          if (!sameAccount) {
+            if (this.configuration) this.clearCache();
+            else this.api.clearCache();
+          }
           this.configuration = configuration;
           this.identity = identity; this.epoch++; this.pending = undefined; this.busy.set(false); this.error.set(''); this.cursor = undefined; this.hasMore.set(false);
-          if (!sameAccount) this.labels.set([]);
-          this.messages.set([]); this.summaries.set([]); this.expandedMessages.set([]); this.updatedAt.set(0); this.hydrate();
+          if (!sameAccount) {this.labels.set([]); this.messages.set([]); this.summaries.set([]);}
+          this.showingPrevious.set(sameAccount && this.messages().length > 0);
+          this.expandedMessages.set([]); this.updatedAt.set(0); this.hydrate();
+          const failure = this.failedLoads.get(this.scope());
+          if (failure && failure.retryAt > Date.now()) this.error.set(failure.message);
         }
         clearTimeout(this.refreshTimer);
         if (active && connected && !this.auth.authorizing()) this.refreshTimer = setTimeout(() => void this.load(), 400);
@@ -105,18 +115,19 @@ export class GmailService implements OnDestroy {
     catch { this.warning.set('Gmail 設定無法保存，重新整理後需重新設定。'); }
   }
   async prepare(): Promise<void> { try { await this.auth.prepare(); } catch (error) { this.error.set(error instanceof Error ? error.message : '無法載入 Google 授權元件。'); } }
-  async connect(): Promise<void> {
+  async connect(authorize?: () => Promise<GoogleAccount>, activate?: () => void): Promise<void> {
     if (!validClientId(this.clientId()) || this.auth.authorizing()) return;
     this.error.set('');
     this.auth.useSession({clientId: this.clientId(), generation: this.store.generation(), accountId: this.preferences().accountId});
     const generation = this.store.generation(), clientId = this.clientId();
     try {
-      const account = await this.auth.authorize(clientId);
+      const account = await (authorize ? authorize() : this.auth.authorize(clientId));
       if (this.destroyed || generation !== this.store.generation() || clientId !== this.clientId()) return;
       const changedAccount = account.id !== this.preferences().accountId;
       if (changedAccount) this.clearCache();
       this.preferences.set({...this.preferences(), clientId, accountId: account.id, email: account.email, selected: changedAccount ? ['INBOX'] : this.selected()}); this.savePreferences();
       this.auth.useSession({clientId, generation, accountId: account.id});
+      activate?.();
     } catch (error) { if (generation === this.store.generation() && clientId === this.clientId()) this.error.set(error instanceof Error ? error.message : 'Gmail 授權失敗。'); }
   }
   disconnect(): void {
@@ -155,7 +166,7 @@ export class GmailService implements OnDestroy {
         while (this.threadCache.size > 8 || [...this.threadCache.values()].reduce((sum, entry) => sum + entry.messages.length, 0) > 400) this.threadCache.delete(this.threadCache.keys().next().value!);
       }
       this.summaries.update(entries => entries.map(entry => entry.mail.threadId === mail.threadId ? {mail: messages[0], count: messages.length, unread: messages.some(mail => mail.labelIds.includes('UNREAD'))} : entry));
-      if (this.updatedAt()) this.persistCache();
+      if (this.updatedAt() && !this.showingPrevious()) this.persistCache();
       return messages;
     })();
     this.threadPending.set(mail.threadId, run);
@@ -165,6 +176,7 @@ export class GmailService implements OnDestroy {
   async load(force = false, more = false): Promise<void> {
     if (!this.auth.connected() || navigator.onLine === false) return;
     if (this.pending) return this.pending;
+    if (!force && !more && (this.failedLoads.get(this.scope())?.retryAt ?? 0) > Date.now()) return;
     if (!force && !more && this.updatedAt() && Date.now() - this.updatedAt() < TTL) return;
     const epoch = this.epoch, scope = this.scope(), selected = [...this.selected()], accountId = this.preferences().accountId;
     if (!accountId || this.auth.account()?.id !== accountId) return;
@@ -180,16 +192,25 @@ export class GmailService implements OnDestroy {
         if (allowed.length !== selected.length) {
           this.labels.set(labels); this.error.set('部分已選標籤已不存在，請重新選擇標籤或切換收件匣。'); return;
         }
-        const page = await this.api.page(more && this.cursor ? this.cursor : newMailCursor(allowed, this.query()), 25, controller.signal);
+        // Persisted previews have no cursor. Rebuild their prefix before requesting the next page.
+        let cursor = more && !this.showingPrevious() ? this.cursor : undefined;
+        let prefix: MailPreview[] = [];
+        if (more && !cursor && this.updatedAt() && !this.showingPrevious()) {
+          const rebuilt = await this.api.page(newMailCursor(allowed, this.query()), Math.max(25, this.messages().length), controller.signal);
+          cursor = rebuilt.cursor; prefix = rebuilt.messages;
+        }
         if (!current() || controller.signal.aborted) return;
-        const append = more && !!this.cursor;
+        const page = await this.api.page(cursor ?? newMailCursor(allowed, this.query()), 25, controller.signal, force);
+        if (!current() || controller.signal.aborted) return;
+        if (prefix.length) page.messages = [...prefix, ...page.messages];
+        const append = more && !!this.cursor && !this.showingPrevious();
         const summaries = new Map((append ? this.summaries() : []).map(summary => [summary.mail.threadId, summary]));
         // A matching reply may be on the first page while the original is outside the filter.
         // Read the minimal index and first preview; reply previews are loaded only on expansion.
         const ids = [...new Set(page.messages.map(mail => mail.threadId))].filter(id => !summaries.has(id));
         const resolved = await mapMailRequests(ids, async (id, signal) => {
           try {
-            return await this.api.summary(id, page.messages, signal);
+            return await this.api.summary(id, page.messages, signal, force);
           } catch (error) { if ((error as {status?: number})?.status === 404) return null; throw error; }
         }, controller.signal);
         if (!current() || controller.signal.aborted) return;
@@ -199,8 +220,14 @@ export class GmailService implements OnDestroy {
         this.labels.set(labels); this.cursor = page.cursor; this.hasMore.set(mailHasMore(page.cursor));
         this.summaries.set([...summaries.values()]);
         this.messages.set(append ? [...this.messages(), ...messages.filter(mail => !this.messages().some(old => old.id === mail.id))] : messages);
-        this.updatedAt.set(Date.now()); this.persistCache();
-      } catch (error) { if (current() && !controller.signal.aborted) this.error.set(error instanceof Error ? error.message : '無法讀取 Gmail 郵件，請重試。'); }
+        this.showingPrevious.set(false); this.updatedAt.set(Date.now()); this.failedLoads.delete(scope); this.persistCache();
+      } catch (error) {
+        if (current() && !controller.signal.aborted) {
+          const message = error instanceof Error ? error.message : '無法讀取 Gmail 郵件，請重試。';
+          this.error.set(message); this.failedLoads.set(scope, {retryAt: Date.now() + 30000, message});
+          while (this.failedLoads.size > 6) this.failedLoads.delete(this.failedLoads.keys().next().value!);
+        }
+      }
     })(); this.pending = run;
     try { await run; }
     finally { if (this.pending === run) { this.busy.set(false); this.pending = undefined; } if (this.listController === controller) this.listController = undefined; }
@@ -208,25 +235,19 @@ export class GmailService implements OnDestroy {
   private scope(): string { return JSON.stringify([this.store.generation(), this.clientId(), this.preferences().accountId, [...this.selected()].sort(), this.query()]); }
   private hydrate(): void {
     if (!this.preferences().accountId) return;
-    try {
-      const saved = JSON.parse(localStorage.getItem(CACHE) ?? 'null');
-      if (!saved || saved.version !== 2 || saved.scope !== this.scope() || !Number.isSafeInteger(saved.updatedAt) || saved.updatedAt > Date.now() || Date.now() - saved.updatedAt > 86400000 || !Array.isArray(saved.messages) || saved.messages.length > 75 || !Array.isArray(saved.summaries) || saved.summaries.length > 75) return;
-      const messages: MailPreview[] = saved.messages.map(cachedPreview);
-      const summaries: ThreadSummary[] = saved.summaries.map((summary: ThreadSummary) => {
-        if (!summary || !Number.isSafeInteger(summary.count) || summary.count < 1 || typeof summary.unread !== 'boolean') throw new Error('討論串快取不完整。');
-        return {mail: cachedPreview(summary.mail), count: summary.count, unread: summary.unread};
-      });
-      if (messages.some(mail => !summaries.some(summary => summary.mail.threadId === mail.threadId))) return;
-      this.labels.set(readMailLabels({labels: saved.labels})); this.summaries.set(summaries); this.messages.set(messages);
-      // Cached mail is shown immediately. A fresh cursor is rebuilt before paginating after reload.
-      this.updatedAt.set(0);
-    } catch { /* Invalid or unavailable preview cache is rebuilt by a read-only fetch. */ }
+    const saved = this.cache.get(this.scope());
+    if (!saved) return;
+    if (!this.labels().length) this.labels.set(saved.labels);
+    this.summaries.set(saved.summaries); this.messages.set(saved.messages);
+    this.cursor = saved.cursor; this.hasMore.set(saved.hasMore); this.showingPrevious.set(false);
+    // A reload must preserve the successful read time instead of making fresh previews stale.
+    this.updatedAt.set(saved.updatedAt);
   }
   private persistCache(): void {
-    const messages = this.messages().slice(0, 75), ids = new Set(messages.map(mail => mail.threadId));
-    try { localStorage.setItem(CACHE, JSON.stringify({version: 2, scope: this.scope(), labels: this.labels(), messages, summaries: this.summaries().filter(summary => ids.has(summary.mail.threadId)), updatedAt: this.updatedAt()})); }
+    if (this.showingPrevious()) return;
+    try { this.cache.put({scope: this.scope(), labels: this.labels(), messages: this.messages(), summaries: this.summaries(), updatedAt: this.updatedAt(), cursor: this.cursor, hasMore: this.hasMore()}); }
     catch { this.warning.set('郵件已讀取，但無法保存離線預覽；重新整理後會重新讀取。'); }
   }
-  private clearCache(): void { try { localStorage.removeItem(CACHE); } catch { this.warning.set('無法清理郵件預覽快取。'); } }
+  private clearCache(): void { this.api.clearCache(); this.failedLoads.clear(); try { this.cache.clear(); } catch { this.warning.set('無法清理郵件預覽快取。'); } }
   ngOnDestroy(): void { this.destroyed = true; this.epoch++; this.listController?.abort(); this.threadCache.clear(); this.threadPending.clear(); this.expandedMessages.set([]); clearTimeout(this.refreshTimer); window.removeEventListener('online', this.wake); window.removeEventListener('offline', this.wake); window.removeEventListener('storage', this.changed); document.removeEventListener('visibilitychange', this.wake); }
 }

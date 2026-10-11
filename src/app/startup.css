@@ -1,0 +1,4 @@
+.first-workspace-notice { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp15); padding: var(--sp18); margin-bottom: var(--sp24); border: 1px solid var(--accent-border); border-radius: 10px; background: var(--accent-soft); color: var(--accent-text); }
+.first-workspace-notice strong { font-size: var(--font-14); }
+.first-workspace-notice p { margin: var(--sp6) 0 0; font-size: var(--font-12); line-height: 1.6; }
+.modal[data-modal='intro'] { width: 680px; }

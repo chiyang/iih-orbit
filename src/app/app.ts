@@ -1,7 +1,7 @@
 import { A11yModule } from '@angular/cdk/a11y';
 import { CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup } from '@angular/cdk/drag-drop';
 import { CdkScrollable } from '@angular/cdk/scrolling';
-import { Component, computed, DestroyRef, effect, HostListener, inject, Injector, signal, untracked } from '@angular/core';
+import { afterRenderEffect, Component, computed, DestroyRef, effect, ElementRef, HostListener, inject, Injector, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BoardStore, StoreResult, TaskEditContext } from './board-store';
 import { Calendar } from './calendar';
@@ -42,15 +42,16 @@ import { ScheduleTime } from './schedule-time';
 import { DatePickerTrigger, adjacentHour } from './schedule-controls';
 import { RichContent } from './rich-content';
 import { loadBrowseState, readBrowseState, saveBrowseState, type BrowseState } from './browse-state';
+import { StartupGuide } from './startup-guide';
 
-type Modal = 'task' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | null;
+type Modal = 'intro' | 'task' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger],
+  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide],
   templateUrl: './app.html',
-  styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css']
+  styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css', './startup.css']
 })
 export class App {
   readonly store = inject(BoardStore);
@@ -211,6 +212,10 @@ export class App {
   workspaceDraft = '';
   readonly workspaceTemplateId = signal<WorkspaceTemplateId>('blank');
   readonly workspaceSaving = signal(false);
+  readonly introSaving = signal(false);
+  readonly introFirstUse = signal(false);
+  readonly firstWorkspaceDialog = signal(false);
+  readonly workspaceNameInput = viewChild<ElementRef<HTMLInputElement>>('workspaceNameInput');
   workspaceExamples = true;
   private workspaceTemplateName = '';
   workspaceDeleteName = '';
@@ -253,6 +258,18 @@ export class App {
   readonly deadlinePresets = computed(() => DUE_DAY_PRESETS.map(days => ({days, count: this.store.tasks().filter(task => deadlineState(task, this.now(), days, this.statuses()) === 'due-soon').length})));
 
   constructor() {
+    if (this.store.onboarding()) afterRenderEffect(() => {
+      const field = this.firstWorkspaceDialog() && this.modal() === 'workspaces' ? this.workspaceNameInput()?.nativeElement : undefined;
+      field?.focus();
+    });
+    effect(() => {
+      const phase = this.store.onboarding();
+      untracked(() => {
+        if (phase === 'guide' && this.modal() !== 'intro') { this.introFirstUse.set(true); this.closePanel(); this.modal.set('intro'); }
+        else if (phase === 'workspace' && this.modal() !== 'workspaces') this.openWorkspaces();
+        else if (!phase && (this.modal() === 'intro' && this.introFirstUse() || this.modal() === 'workspaces' && this.firstWorkspaceDialog())) this.closeModal();
+      });
+    });
     effect(() => {
       const generation = this.store.generation(), workspace = this.store.currentWorkspace().id;
       const context = JSON.stringify([generation, workspace]);
@@ -791,11 +808,29 @@ export class App {
     this.workspaceDraft = '';
     this.workspaceTemplateId.set('blank');
     this.workspaceTemplateName = '';
-    this.workspaceExamples = true;
+    this.firstWorkspaceDialog.set(this.store.onboarding() === 'workspace');
+    this.workspaceExamples = !this.firstWorkspaceDialog();
     this.workspaceEditingId.set('');
     this.workspaceToDelete.set(null);
     this.formError.set('');
     this.modal.set('workspaces');
+  }
+
+  openIntroduction(): void {
+    if (this.modal() || this.introSaving() || this.workspaceSaving()) return;
+    this.introFirstUse.set(false); this.formError.set(''); this.modal.set('intro');
+  }
+
+  async finishIntroduction(): Promise<void> {
+    if (this.modal() !== 'intro') return;
+    if (!this.introFirstUse()) { this.closeModal(); return; }
+    if (this.introSaving() || this.store.pendingWrites()) return;
+    this.introSaving.set(true); this.formError.set('');
+    try {
+      const result = await this.store.finishIntroduction();
+      if (!this.handleResult(result)) { this.store.refreshFromStorage(); return; }
+      this.openWorkspaces();
+    } finally { this.introSaving.set(false); }
   }
 
   selectWorkspace(id: string): void {
@@ -834,20 +869,22 @@ export class App {
     if (this.store.pendingWrites() || this.workspaceSaving() || !this.formContextValid(false)) return;
     const name = this.workspaceDraft.trim();
     if (!name) { this.formError.set('請輸入工作空間名稱。'); return; }
-    if (this.store.workspaces().some(workspace => workspace.id !== this.workspaceEditingId() && workspace.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    const first = this.firstWorkspaceDialog();
+    if (!first && this.store.workspaces().some(workspace => workspace.id !== this.workspaceEditingId() && workspace.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
       this.formError.set('此工作空間名稱已存在。');
       return;
     }
     const editing = !!this.workspaceEditingId();
     this.workspaceSaving.set(true);
     let saved: StoreResult;
-    try { saved = await this.store.saveWorkspace(this.workspaceEditingId(), name, {templateId: this.workspaceTemplateId(), includeExamples: this.workspaceExamples}); }
+    const options = {templateId: this.workspaceTemplateId(), includeExamples: this.workspaceExamples};
+    try { saved = await (first ? this.store.createFirstWorkspace(name, options) : this.store.saveWorkspace(this.workspaceEditingId(), name, options)); }
     finally { this.workspaceSaving.set(false); }
     if (!this.handleResult(saved)) return;
     if (!editing) { this.clearFilters(); this.sortKey.set(null); }
     this.sidebarOpen.set(false);
     this.closeModal();
-    this.notifySaved(editing ? '工作空間已改名' : '工作空間已建立，並已加入同名專案');
+    this.notifySaved(editing ? '工作空間已改名' : first ? '第一個工作空間已建立' : '工作空間已建立，並已加入同名專案');
   }
 
   requestDeleteWorkspace(workspace: Workspace): void {
@@ -877,7 +914,7 @@ export class App {
 
   openWorkspaceName(): void {
     this.openWorkspaces();
-    this.editWorkspace(this.store.currentWorkspace());
+    if (!this.firstWorkspaceDialog()) this.editWorkspace(this.store.currentWorkspace());
   }
 
   editProject(project: Project): void {
@@ -925,9 +962,13 @@ export class App {
   }
 
   closeModal(): void {
+    if (this.introSaving() || this.workspaceSaving()) return;
+    if (this.modal() === 'intro' && this.introFirstUse() && this.store.onboarding() === 'guide') { void this.finishIntroduction(); return; }
     if (this.calendarPublishing()) return;
     if (this.modal() === 'settings' && this.store.pendingWrites() > 0) return;
     this.modal.set(null);
+    this.introFirstUse.set(false);
+    this.firstWorkspaceDialog.set(false);
     this.descriptionFocused.set(false);
     this.mailPreview.set(null);
     this.externalEntry.set(null);

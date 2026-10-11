@@ -1,0 +1,11 @@
+<section class="service-connection" [attr.aria-label]="title() + '連線設定'">
+  <div class="service-heading"><div><h3>{{ title() }}</h3><p>{{ description() }}</p></div><span class="service-status" [class.connected]="auth().connected()" role="status"><i aria-hidden="true"></i>{{ auth().authorizing() ? '等待授權' : auth().connected() ? '已連線' : clientId() ? '尚未連線' : '尚未設定' }}</span></div>
+  <div class="service-account"><span class="google-mark" aria-hidden="true">G</span><div><span>Google 帳號</span><strong>{{ email() || '尚未選擇帳號' }}</strong></div></div>
+  <div class="service-actions">
+    @if (clientId()) {
+      <button type="button" class="primary" [disabled]="busy() || offline() || !auth().ready()" (click)="connect.emit()">{{ auth().authorizing() ? '等待授權…' : auth().preparing() ? '準備連線…' : auth().connected() ? '切換帳號／重新授權' : '連線 ' + serviceName() }}</button>
+      @if (canDisconnect()) {<button type="button" [disabled]="busy()" (click)="disconnect.emit()">解除連線</button>}
+      @if (!auth().ready() && !auth().preparing()) {<button type="button" [disabled]="busy() || offline()" (click)="prepare.emit()">重新準備連線</button>}
+    } @else {<button type="button" [disabled]="busy()" (click)="configure.emit()">前往 Google 連線設定</button>}
+  </div>
+</section>

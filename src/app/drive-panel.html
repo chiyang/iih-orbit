@@ -1,9 +1,6 @@
-<section aria-labelledby="drive-title">
-  <div class="heading drive-heading">
-    <div><h3 id="drive-title">Google Drive 備份</h3><p>先找回雲端已有的資料，再決定要使用哪一份。</p></div>
-    <span class="state" role="status">{{ drive.status() }}</span>
-  </div>
-  <div class="connection-bar"><span class="account">{{ drive.auth.connected() ? store.drive().email : '尚未連線 Google Drive' }}</span><button class="quiet" [disabled]="drive.busy() || importing() || saving() || removing()" (click)="configure.emit()">{{ drive.auth.connected() ? '管理 Google 連線' : '前往 Google 連線' }}</button></div>
+<section aria-label="遠端同步備份設定">
+  <app-google-service-header title="遠端同步備份" serviceName="Google Drive" description="透過 Google Drive 保存資料。先找回雲端已有的資料，再決定要使用哪一份。" [auth]="drive.auth" [clientId]="store.google().clientId" [email]="store.drive().email" [busy]="drive.busy() || importing() || saving() || removing() || store.pendingWrites() > 0" [offline]="!drive.online()" [canDisconnect]="drive.auth.connected()" (connect)="drive.connect()" (disconnect)="drive.disconnect()" (prepare)="drive.prepare()" (configure)="configure.emit()" />
+  <p class="note" role="status">{{ drive.status() }}</p>
   @if (!drive.online()) {<p class="warning" role="status">目前離線。本機修改仍保留，恢復網路後再讀取或保存。</p>}
   @if (drive.auth.sessionWarning()) {<p class="warning">{{ drive.auth.sessionWarning() }}</p>}
   @if (drive.runtime().pending && !drive.unavailable()) {<div class="notice"><strong>還有一份資料等待上傳</strong><p>本機修改已保留。先完成這次上傳，再改用其他資料。</p><button [disabled]="drive.busy() || !drive.auth.connected() || !drive.online()" (click)="drive.retry()">重試上傳</button></div>}

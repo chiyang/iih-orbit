@@ -12,8 +12,8 @@ import { COLUMNS } from '../src/app/models.ts';
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/gmail-test-')), output = resolve(directory, 'gmail.mjs');
-await build({stdin: {contents: "export {GoogleHttpError, readGoogleHttpError} from './src/app/google-api.ts'; export {GmailReadQueue} from './src/app/gmail-requests.ts'; export * from './src/app/gmail-data.ts'; export * from './src/app/schedule-controls.ts'; export * from './src/app/schedule-time.ts'; export * from './src/app/gmail-api.ts'; export * from './src/app/gmail-content.ts'; export {MailReader} from './src/app/mail-reader.ts'; export {GmailPanel} from './src/app/gmail-panel.ts'; export {GmailSettings} from './src/app/gmail-settings.ts'; export {Settings} from './src/app/settings.ts'; export {MailPreview as MailPreviewDialog} from './src/app/mail-preview.ts'; export {GmailAuth} from './src/app/gmail-auth.ts'; export {GmailService} from './src/app/gmail-service.ts'; export {MailTasks} from './src/app/mail-tasks.ts'; export {BoardStore} from './src/app/board-store.ts'; export {Calendar} from './src/app/calendar.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {UiPreferences} from './src/app/ui-preferences.ts'; export {App} from './src/app/app.ts'; export {GoogleConnection} from './src/app/google-connection.ts'; export {CalendarWriteAuth} from './src/app/calendar-write-auth.ts'; export {DriveService} from './src/app/drive-service.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const {GoogleHttpError, readGoogleHttpError, GmailReadQueue, mapMailRequests, GoogleConnection, CalendarWriteAuth, DriveService, GmailPanel, GmailSettings, Settings, ScheduleTime, DatePickerTrigger, adjacentHour, readMailLabels, fetchMailContent, readMailContent, MailReader, MailPreviewDialog, GmailApi, GmailAuth, GmailService, MailTasks, BoardStore, Calendar, GoogleCalendarService, UiPreferences, App, readMailPreview, decodeMailHeader, gmailMessageLink, mailTask, newMailCursor, mailHasMore, GMAIL_SCOPE, GMAIL_MIME} = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {GoogleHttpError, readGoogleHttpError} from './src/app/google-api.ts'; export {GmailReadQueue} from './src/app/gmail-requests.ts'; export * from './src/app/gmail-data.ts'; export * from './src/app/schedule-controls.ts'; export * from './src/app/schedule-time.ts'; export * from './src/app/gmail-api.ts'; export * from './src/app/gmail-content.ts'; export {MailReader} from './src/app/mail-reader.ts'; export {GmailPanel} from './src/app/gmail-panel.ts'; export {GmailSettings} from './src/app/gmail-settings.ts'; export {Settings} from './src/app/settings.ts'; export {MailPreview as MailPreviewDialog} from './src/app/mail-preview.ts'; export {GmailAuth} from './src/app/gmail-auth.ts'; export {GmailService} from './src/app/gmail-service.ts'; export {MailTasks} from './src/app/mail-tasks.ts'; export {BoardStore} from './src/app/board-store.ts'; export {Calendar} from './src/app/calendar.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {UiPreferences} from './src/app/ui-preferences.ts'; export {App} from './src/app/app.ts'; export {GoogleConnection} from './src/app/google-connection.ts'; export {GoogleCombinedAuth} from './src/app/google-combined-auth.ts'; export {CalendarWriteAuth} from './src/app/calendar-write-auth.ts'; export {DriveService} from './src/app/drive-service.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const {GoogleHttpError, readGoogleHttpError, GmailReadQueue, mapMailRequests, GoogleConnection, GoogleCombinedAuth, CalendarWriteAuth, DriveService, GmailPanel, GmailSettings, Settings, ScheduleTime, DatePickerTrigger, adjacentHour, readMailLabels, fetchMailContent, readMailContent, MailReader, MailPreviewDialog, GmailApi, GmailAuth, GmailService, MailTasks, BoardStore, Calendar, GoogleCalendarService, UiPreferences, App, readMailPreview, decodeMailHeader, gmailMessageLink, mailTask, newMailCursor, mailHasMore, GMAIL_SCOPE, GMAIL_MIME} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 const base = {id: 'new', title: '', description: '', categoryId: '', projectId: 'project', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: []};
 const raw = (id, date = 1000, labels = ['INBOX']) => ({id, threadId: 'thread-' + id, internalDate: String(date), labelIds: labels, snippet: '會議預覽 10/15 14:00', payload: {headers: [{name: 'From', value: '王小明 <sender@example.test>'}, {name: 'Subject', value: '會議邀請'}, {name: 'Message-ID', value: '<' + id + '@example.test>'}], body: {data: 'DO-NOT-COPY'}, parts: [{filename: 'private.pdf'}]}});
@@ -29,8 +29,9 @@ function browserStorage() {
   globalThis.document = {visibilityState: 'visible', addEventListener() {}, removeEventListener() {}};
   return {values, storage};
 }
-function fixture() {
+function fixture(saved = []) {
   const {values} = browserStorage();
+  for (const [key, value] of saved) values.set(key, value);
   const state = {version: 1, activeWorkspaceId: 'workspace', workspaces: [{version: 4, id: 'workspace', name: '工作', projects: [{id: 'project', name: '工作'}], categories: [], statuses: COLUMNS, tasks: []}, {version: 4, id: 'other', name: '其他', projects: [], categories: [], statuses: COLUMNS, tasks: []}]};
   values.set('orbit-workspaces-v1', JSON.stringify(state)); const store = new BoardStore(), effects = new Set();
   const scheduler = {add(effect) {effects.add(effect);}, schedule() {}, remove(effect) {effects.delete(effect);}};
@@ -114,6 +115,31 @@ test('取消 Gmail 排隊或退避讀取立即離開，不發送遲到重試，�
   assert.deepEqual(paths, ['0', '1', '2', '3']);
   const next = queued.read('next'); releases.at(-1)({ok: true}); assert.deepEqual(await next, {ok: true});
 });
+test('Google 長期 Retry-After 與重試耗盡會暫停所有 Gmail 讀取，冷卻期間不再送請求', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: 100000});
+  let calls = 0, limited = true;
+  const error = new GoogleHttpError(429, 'Gmail 郵件', {retryAfterMs: 120000});
+  const queue = new GmailReadQueue(async () => {calls++; if (limited) throw error; return {ok: true};});
+  queue.useContext('account'); await assert.rejects(queue.read('messages'), value => value === error);
+  limited = false;
+  await assert.rejects(queue.read('threads/thread'), value => value === error);
+  queue.useContext('account'); t.mock.timers.tick(119999);
+  await assert.rejects(queue.read('body'), value => value === error); assert.equal(calls, 1);
+  t.mock.timers.tick(1); assert.deepEqual(await queue.read('messages'), {ok: true}); assert.equal(calls, 2);
+  limited = true; await assert.rejects(queue.read('messages'), value => value === error);
+  limited = false; queue.useContext('another-account'); await queue.read('messages'); assert.equal(calls, 4);
+  let attempts = 0;
+  const exhausted = new GmailReadQueue(async () => {attempts++; throw new GoogleHttpError(403, 'Gmail 郵件', {reason: 'userRateLimitExceeded'});});
+  const reading = assert.rejects(exhausted.read('labels'), /限制讀取次數/);
+  await new Promise(resolve => setImmediate(resolve)); t.mock.timers.tick(1250);
+  await new Promise(resolve => setImmediate(resolve)); t.mock.timers.tick(2250); await reading;
+  await assert.rejects(exhausted.read('messages'), /限制讀取次數/); assert.equal(attempts, 3);
+  let rejectOld;
+  const changing = new GmailReadQueue(async path => path === 'old' ? new Promise((_resolve, reject) => {rejectOld = reject;}) : {ok: true});
+  changing.useContext('old-account'); const old = assert.rejects(changing.read('old'), error => error.name === 'AbortError');
+  changing.useContext('new-account'); rejectOld(error); await old;
+  assert.deepEqual(await changing.read('new'), {ok: true});
+});
 test('郵件批次首個失敗停止其他工作，等已啟動請求結束後保留原始錯誤', async () => {
   const starts = [], error = new GoogleHttpError(403, 'Gmail 郵件'); let fail, active = 0;
   const batch = mapMailRequests(Array.from({length: 20}, (_, i) => i), (id, signal) => {
@@ -190,8 +216,8 @@ test('標籤與快捷選擇只修改草稿，套用才讀取最終聯集；取�
     assert.deepEqual(JSON.parse(f.values.get('iih-orbit-gmail-preferences-v1')).selected, ['Work', 'Home']);
     panel.labelDraft.set(['INBOX']); await panel.refresh(); f.flush();
     assert.deepEqual(pages.slice(-2), ['Work', 'Home']); assert.deepEqual(panel.labelDraft(), ['INBOX']); assert.equal(panel.labelsChanged(), true); assert.deepEqual(f.gmail.selected(), ['Work', 'Home']);
-    f.gmail.online.set(false); const before = calls; panel.applyLabels(); assert.equal(calls, before); assert.deepEqual(f.gmail.selected(), ['Work', 'Home']);
-    f.gmail.online.set(true); panel.labelDraft.set([]); panel.applyLabels(); f.flush(); t.mock.timers.tick(400); await new Promise(resolve => setImmediate(resolve));
+    f.gmail.online.set(false); navigator.onLine = false; const before = calls; panel.applyLabels(); f.flush(); assert.equal(calls, before); assert.deepEqual(f.gmail.selected(), ['INBOX']); assert.equal(f.gmail.messages()[0].id, 'INBOX');
+    f.gmail.online.set(true); navigator.onLine = true; panel.labelDraft.set([]); panel.applyLabels(); f.flush(); t.mock.timers.tick(400); await new Promise(resolve => setImmediate(resolve));
     assert.equal(pages.at(-1), undefined); assert.deepEqual(f.gmail.selected(), []); assert.equal(panel.labelsChanged(), false);
   } finally {panel?.ngOnDestroy(); f.close();}
 });
@@ -280,6 +306,103 @@ test('郵件快取只在本機：再次開啟沿用新鮮快取；舊標籤回�
     await f.store.resetData(true, f.store.revision()); f.flush(); assert.equal(f.gmail.preferences().accountId, ''); assert.equal(f.gmail.messages().length, 0); assert.equal(f.values.has('iih-orbit-gmail-cache-v1'), false);
   } finally {f.close();}
 });
+test('各標籤與搜尋先顯示對應快取，五分鐘內不下載；過期更新失敗不覆蓋成功時間與原郵件', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: Date.now()});
+  const f = fixture(), pages = []; let fail = false;
+  try {
+    f.auth.api = async (path, params) => {
+      if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}, {id: 'Work', name: '工作', type: 'user'}]};
+      if (path === 'messages') {pages.push(params.labelIds + ':' + (params.q ?? '')); if (fail) throw new Error('network'); return {messages: [{id: params.q ? 'search' : params.labelIds}]};}
+      const id = path.startsWith('threads/') ? path.slice('threads/thread-'.length) : path.split('/')[1];
+      return path.startsWith('threads/') ? {id: 'thread-' + id, messages: [raw(id)]} : raw(id);
+    };
+    await f.gmail.load(); const inboxTime = f.gmail.updatedAt();
+    f.gmail.applyLabels(['Work']); f.flush(); assert.equal(f.gmail.showingPrevious(), true); await f.gmail.load();
+    f.gmail.search('subject:meeting'); f.flush(); await f.gmail.load();
+    f.gmail.search(''); f.flush(); assert.equal(f.gmail.messages()[0].id, 'Work'); assert.equal(f.gmail.showingPrevious(), false); await f.gmail.load();
+    f.gmail.applyLabels(['INBOX']); f.flush(); assert.equal(f.gmail.messages()[0].id, 'INBOX'); assert.equal(f.gmail.updatedAt(), inboxTime); await f.gmail.load();
+    assert.deepEqual(pages, ['INBOX:', 'Work:', 'Work:subject:meeting']);
+    const persisted = f.values.get('iih-orbit-gmail-cache-v1');
+    fail = true; t.mock.timers.tick(5 * 60000 + 1); await f.gmail.load();
+    assert.equal(f.gmail.messages()[0].id, 'INBOX'); assert.equal(f.gmail.updatedAt(), inboxTime); assert.match(f.gmail.error(), /network/); assert.equal(f.gmail.busy(), false);
+    assert.equal(f.values.get('iih-orbit-gmail-cache-v1'), persisted);
+    await f.gmail.load(); f.gmail.active.set(true); f.flush(); t.mock.timers.tick(400); await new Promise(resolve => setImmediate(resolve)); assert.equal(pages.length, 4);
+    fail = false; await f.gmail.load(true); assert.ok(f.gmail.updatedAt() > inboxTime); assert.equal(f.gmail.error(), '');
+    assert.equal(JSON.parse(f.values.get('iih-orbit-gmail-cache-v1')).entries.length, 3);
+  } finally {f.close();}
+});
+test('沒有快取的新篩選失敗保留上次清單並標示，成功後才換成新結果，失敗不建立空快取', async () => {
+  const f = fixture(); let fail = false;
+  try {
+    f.auth.api = async (path, params) => {
+      if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}, {id: 'Work', name: '工作', type: 'user'}]};
+      if (path === 'messages') {if (fail) throw new GoogleHttpError(429, 'Gmail 郵件'); return {messages: [{id: params.labelIds}]};}
+      const id = path.startsWith('threads/') ? path.slice('threads/thread-'.length) : path.split('/')[1];
+      return path.startsWith('threads/') ? {id: 'thread-' + id, messages: [raw(id)]} : raw(id);
+    };
+    await f.gmail.load(); const original = f.values.get('iih-orbit-gmail-cache-v1');
+    fail = true; f.gmail.applyLabels(['Work']); f.flush(); await f.gmail.load();
+    assert.equal(f.gmail.messages()[0].id, 'INBOX'); assert.equal(f.gmail.showingPrevious(), true); assert.equal(f.gmail.hasMore(), false);
+    assert.equal(f.values.get('iih-orbit-gmail-cache-v1'), original);
+    f.gmail.applyLabels(['INBOX']); f.flush(); await f.gmail.load(); assert.equal(f.gmail.error(), ''); assert.equal(f.gmail.showingPrevious(), false);
+    f.gmail.applyLabels(['Work']); f.flush(); assert.match(f.gmail.error(), /限制/);
+    fail = false; await f.gmail.load(true); assert.equal(f.gmail.messages()[0].id, 'Work'); assert.equal(f.gmail.showingPrevious(), false);
+    assert.equal(JSON.parse(f.values.get('iih-orbit-gmail-cache-v1')).entries.length, 2);
+  } finally {f.close();}
+});
+test('重新整理保留快取時間，五分鐘內不讀取；載入更多重建游標後接續下一頁，失敗不破壞原清單', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: Date.now()});
+  const f = fixture(); let reopened, saved, stamp;
+  const handler = pages => async (path, params) => {
+    if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]};
+    if (path === 'messages') {pages.push(params.pageToken ?? 'first'); const start = params.pageToken ? 25 : 0; return {messages: Array.from({length: 25}, (_, i) => ({id: 'mail' + (start + i)})), ...(start ? {} : {nextPageToken: 'next'})};}
+    const id = path.startsWith('threads/') ? path.slice('threads/thread-'.length) : path.split('/')[1];
+    return path.startsWith('threads/') ? {id: 'thread-' + id, messages: [raw(id, 1000 - Number(id.slice(4)))]} : raw(id, 1000 - Number(id.slice(4)));
+  };
+  try {
+    f.auth.api = handler([]); await f.gmail.load(); stamp = f.gmail.updatedAt();
+    f.values.set('iih-orbit-gmail-preferences-v1', JSON.stringify(f.gmail.preferences())); saved = [...f.values];
+  } finally {f.close();}
+  try {
+    reopened = fixture(saved); const pages = []; reopened.auth.api = handler(pages);
+    assert.equal(reopened.gmail.messages().length, 25); assert.equal(reopened.gmail.updatedAt(), stamp); assert.equal(reopened.gmail.hasMore(), true);
+    reopened.gmail.active.set(true); reopened.flush(); t.mock.timers.tick(400); await new Promise(resolve => setImmediate(resolve)); await reopened.gmail.load(); assert.deepEqual(pages, []);
+    await reopened.gmail.load(false, true); assert.deepEqual(pages, ['first', 'next']);
+    assert.equal(reopened.gmail.messages().length, 50); assert.equal(new Set(reopened.gmail.messages().map(mail => mail.id)).size, 50); assert.equal(reopened.gmail.hasMore(), false);
+    const original = reopened.values.get('iih-orbit-gmail-cache-v1'), mails = structuredClone(reopened.gmail.messages()), time = reopened.gmail.updatedAt();
+    reopened.auth.api = async () => {throw new Error('network');}; await reopened.gmail.load(true);
+    assert.deepEqual(reopened.gmail.messages(), mails); assert.equal(reopened.gmail.updatedAt(), time); assert.equal(reopened.values.get('iih-orbit-gmail-cache-v1'), original);
+  } finally {reopened?.close();}
+});
+test('空郵箱的成功快取重新整理後仍有效，不因沒有郵件反覆下載', async () => {
+  const f = fixture(); let saved, reopened;
+  try {
+    f.auth.api = async path => path === 'labels' ? {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]} : {};
+    await f.gmail.load(); f.values.set('iih-orbit-gmail-preferences-v1', JSON.stringify(f.gmail.preferences())); saved = [...f.values];
+  } finally {f.close();}
+  try {
+    reopened = fixture(saved); let calls = 0; reopened.auth.api = async () => {calls++; throw new Error('不應下載');}; await reopened.gmail.load();
+    assert.equal(calls, 0); assert.equal(reopened.gmail.messages().length, 0); assert.ok(reopened.gmail.updatedAt()); assert.equal(reopened.gmail.hasMore(), false);
+  } finally {reopened?.close();}
+});
+test('不同篩選共用短期郵件與首封索引，手動更新、過期或切換帳號重新取得，不重用另一帳號', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: Date.now()});
+  const f = fixture(), paths = [];
+  try {
+    f.auth.api = async path => {
+      paths.push(path);
+      if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]};
+      if (path === 'messages') return {messages: [{id: 'mail'}]};
+      return path.startsWith('threads/') ? {id: 'thread-mail', messages: [raw('mail')]} : raw('mail');
+    };
+    await f.gmail.load(); f.gmail.search('subject:meeting'); f.flush(); await f.gmail.load();
+    assert.equal(paths.filter(path => path === 'messages').length, 2); assert.equal(paths.filter(path => path === 'messages/mail').length, 1); assert.equal(paths.filter(path => path === 'threads/thread-mail').length, 1);
+    await f.gmail.load(true); assert.equal(paths.filter(path => path === 'messages/mail').length, 2); assert.equal(paths.filter(path => path === 'threads/thread-mail').length, 2);
+    t.mock.timers.tick(5 * 60000 + 1); await f.gmail.load(); assert.equal(paths.filter(path => path === 'messages/mail').length, 3);
+    f.gmail.preferences.set({...f.gmail.preferences(), accountId: 'another', email: 'another@example.test'}); f.auth.account.set({id: 'another', email: 'another@example.test'}); f.flush(); await f.gmail.load();
+    assert.equal(paths.filter(path => path === 'messages/mail').length, 4); assert.equal(paths.filter(path => path === 'threads/thread-mail').length, 4);
+  } finally {f.close();}
+});
 test('郵件拖放只接受此分頁的拖曳來源，工作空間更換取消；一次放下只建立一次，可撤銷且不刪已修改任務', async () => {
   const f = fixture();
   try {
@@ -297,7 +420,7 @@ test('已刪除的標籤不擴大成所有郵件；切換帳號不顯示另一�
     let labelReads = 0;
     f.auth.api = async (path) => { if (path === 'labels') {labelReads++; return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]};} return path === 'messages' ? {messages: [{id: 'inbox'}]} : path === 'threads/thread-inbox' ? {id: 'thread-inbox', messages: [raw('inbox')]} : raw('inbox'); };
     await f.gmail.load(); const cache = f.values.get('iih-orbit-gmail-cache-v1');
-    f.gmail.preferences.set({...f.gmail.preferences(), selected: ['deleted']}); f.flush(); await f.gmail.load(); assert.match(f.gmail.error(), /標籤已不存在/); assert.equal(f.gmail.messages().length, 0);
+    f.gmail.preferences.set({...f.gmail.preferences(), selected: ['deleted']}); f.flush(); await f.gmail.load(); assert.match(f.gmail.error(), /標籤已不存在/); assert.equal(f.gmail.messages()[0].id, 'inbox'); assert.equal(f.gmail.showingPrevious(), true);
     await f.gmail.load(true); assert.equal(labelReads, 2); assert.equal(f.gmail.busy(), false);
     f.values.set('iih-orbit-gmail-cache-v1', cache); f.gmail.preferences.set({...f.gmail.preferences(), accountId: 'another', email: 'other@example.test', selected: ['INBOX']}); f.auth.account.set({id: 'another', email: 'other@example.test'}); f.flush(); assert.equal(f.gmail.messages().length, 0);
     f.values.set('iih-orbit-gmail-cache-v1', '{bad'); f.gmail.preferences.set({...f.gmail.preferences(), accountId: 'account', email: 'me@example.test'}); f.auth.account.set({id: 'account', email: 'me@example.test'}); f.flush(); await f.gmail.load(); assert.equal(f.gmail.messages()[0].id, 'inbox');
@@ -307,8 +430,8 @@ test('授權到期仍可瀏覽已保存預覽與複製草稿；解除本機連�
   const f = fixture();
   try {
     f.auth.api = async path => path === 'labels' ? {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]} : path === 'messages' ? {messages: [{id: 'mail'}]} : path === 'threads/thread-mail' ? {id: 'thread-mail', messages: [raw('mail')]} : raw('mail');
-    f.gmail.applyLabels(['INBOX']); await f.gmail.load(); f.auth.disconnect(); f.flush();
-    assert.equal(f.gmail.messages()[0].senderEmail, 'sender@example.test'); assert.equal(f.gmail.updatedAt(), 0); assert.equal(f.auth.connected(), false);
+    f.gmail.applyLabels(['INBOX']); await f.gmail.load(); const updatedAt = f.gmail.updatedAt(); f.auth.disconnect(); f.flush();
+    assert.equal(f.gmail.messages()[0].senderEmail, 'sender@example.test'); assert.equal(f.gmail.updatedAt(), updatedAt); assert.equal(f.auth.connected(), false);
     const draft = f.tasks.draft(f.gmail.messages()[0], base); assert.equal(draft.title, '會議邀請');
     f.gmail.disconnect(); f.flush(); assert.equal(f.gmail.messages().length, 0); assert.equal(f.values.has('iih-orbit-gmail-cache-v1'), false);
   } finally {f.close();}
@@ -442,7 +565,7 @@ test('自訂標籤按名稱優先呈現，系統標籤依收件匣、未讀、�
   const labels = readMailLabels({labels: [{id: 'CATEGORY_PROMOTIONS', name: 'CATEGORY_PROMOTIONS', type: 'system'}, {id: 'Work10', name: '工作10', type: 'user'}, {id: 'TRASH', name: 'TRASH', type: 'system'}, {id: 'Work2', name: '工作2', type: 'user'}, {id: 'UNREAD', name: 'UNREAD', type: 'system'}, {id: 'INBOX', name: 'INBOX', type: 'system'}]});
   assert.deepEqual(labels.map(label => label.id), ['Work2', 'Work10', 'INBOX', 'UNREAD', 'CATEGORY_PROMOTIONS', 'TRASH']);
 });
-test('Gmail 搜尋語法隨所有標籤游標及後續分頁送往 API，搜尋切換不使用舊篩選快取', async () => {
+test('Gmail 搜尋語法隨所有標籤游標及後續分頁送往 API，沒有搜尋快取時標示保留上次郵件', async () => {
   const requests = [];
   const api = new GmailApi(async (path, params) => {requests.push({path, params}); return path === 'messages' ? {messages: [{id: 'search-result'}]} : raw('search-result');});
   await api.page(newMailCursor(['INBOX', 'Work'], 'from:sender@example.test is:unread'));
@@ -450,7 +573,7 @@ test('Gmail 搜尋語法隨所有標籤游標及後續分頁送往 API，搜尋�
   const f = fixture();
   try {
     f.gmail.messages.set([preview]); f.gmail.updatedAt.set(Date.now()); f.gmail.search('subject:活動'); f.flush();
-    assert.equal(f.gmail.messages().length, 0); assert.equal(f.gmail.updatedAt(), 0);
+    assert.equal(f.gmail.messages()[0].id, preview.id); assert.equal(f.gmail.showingPrevious(), true); assert.equal(f.gmail.updatedAt(), 0); assert.equal(f.gmail.hasMore(), false);
     f.gmail.search(' '); f.flush(); assert.equal(f.gmail.query(), '');
     const version = f.auth.connectionVersion(); await f.store.updateGoogle({clientId: f.gmail.clientId()}); f.flush(); assert.equal(f.auth.connectionVersion(), version);
   } finally {f.close();}
@@ -509,7 +632,7 @@ test('篩選只命中回覆時仍以真正首封呈現討論串，分頁不更�
     assert.equal(calls.filter(call => call.path === 'threads/conversation').length, 1);
     assert.ok(calls.filter(call => call.path.startsWith('threads/')).every(call => !call.params.fields.includes('body') && !call.params.fields.includes('parts')));
     const cache = JSON.parse(f.values.get('iih-orbit-gmail-cache-v1'));
-    assert.equal(cache.summaries[0].mail.id, 'original'); assert.equal(JSON.stringify(cache).includes('DO-NOT-COPY'), false);
+    assert.equal(cache.entries[0].summaries[0].mail.id, 'original'); assert.equal(JSON.stringify(cache).includes('DO-NOT-COPY'), false);
     f.auth.disconnect(); f.flush(); assert.equal(f.gmail.threads()[0].mail.id, 'original'); assert.equal(f.tasks.draft(f.gmail.threads()[0].mail, base).title, '原始活動邀請');
     const child = createEnvironmentInjector([{provide: UiPreferences, useValue: {textSize: () => 'standard'}}], f.child);
     try {const app = runInInjectionContext(child, () => new App()); app.openMailPreview(f.gmail.threads()[0].mail); assert.equal(app.modal(), 'mail-preview'); app.closeModal();} finally {child.destroy();}
@@ -579,7 +702,8 @@ test('清單只讀討論串索引與首封預覽，不預先下載其他信件�
   assert.equal(summary.mail.id, 'first'); assert.equal(summary.count, 2); assert.equal(summary.unread, true);
   assert.equal(calls[0].params.fields.includes('snippet'), false); assert.equal(calls[0].params.fields.includes('payload'), false);
   assert.deepEqual(calls.map(call => call.path), ['threads/thread', 'messages/first']);
-  calls.length = 0; await api.summary('thread', [readMailPreview(first)]); assert.deepEqual(calls.map(call => call.path), ['threads/thread']);
+  calls.length = 0; await api.summary('thread', [readMailPreview(first)]); assert.deepEqual(calls.map(call => call.path), []);
+  await api.summary('thread', [readMailPreview(first)], undefined, true); assert.deepEqual(calls.map(call => call.path), ['threads/thread']);
   await assert.rejects(new GmailApi(async () => ({id: 'thread', messages: [{threadId: 'thread', internalDate: '10', labelIds: []}]})).summary('thread', []), /來源不一致/);
 });
 test('封數按鈕按需展開回覆，每封可拖曳及複製；收合、預覽共用快取，切換篩選清除展開來源', async () => {
@@ -665,9 +789,10 @@ test('Google 連線頁集中保存 ID 與各服務入口，待上傳的 Drive �
   const f = fixture(), original = f.gmail.clientId();
   const makeAuth = () => ({ready: signal(false), authorizing: signal(false), connected: signal(false), async prepare() {this.ready.set(true);}, disconnect() {this.connected.set(false);}});
   const calendarAuth = makeAuth(), driveAuth = makeAuth(); f.auth.prepare = async () => f.auth.ready.set(true);
-  const pending = signal({}), write = {useSession() {}, disconnect() {}};
+  const pending = signal({}), write = {authorizing: signal(false), useSession() {}, disconnect() {}};
   const child = createEnvironmentInjector([
     {provide: GoogleCalendarService, useValue: {auth: calendarAuth}}, {provide: CalendarWriteAuth, useValue: write},
+    {provide: GoogleCombinedAuth, useValue: makeAuth()},
     {provide: DriveService, useValue: {auth: driveAuth, busy: signal(false), runtime: pending}},
     {provide: DOCUMENT, useValue: {defaultView: {location: {origin: 'https://chiyang.github.io'}}}}
   ], f.child);
