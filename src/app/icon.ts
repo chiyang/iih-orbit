@@ -33,6 +33,7 @@ const PATHS: Record<string, string> = {
   panel: 'M3 4h18v16H3zM9 4v16',
   panelRight: 'M3 4h18v16H3zM15 4v16',
   pin: 'M8 3h8v2h-1v5l4 4v3h-6v5h-2v-5H5v-3l4-4V5H8z',
+  pinFilled: 'M8 3h8v2h-1v5l4 4v3h-6v5h-2v-5H5v-3l4-4V5H8z',
   save: 'M7 12l3 3 7-7M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
   menu: 'M4 6h16M4 12h16M4 18h16',
   export: 'M12 3v12m-4-4 4 4 4-4M5 15v6h14v-6',
@@ -49,7 +50,7 @@ const PATHS: Record<string, string> = {
 
 @Component({
   selector: 'app-icon',
-  template: '<svg viewBox="0 0 24 24" [attr.fill]="name() === \'pin\' ? \'currentColor\' : \'none\'" [attr.stroke]="name() === \'pin\' ? \'none\' : \'currentColor\'" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path()" /></svg>',
+  template: '<svg viewBox="0 0 24 24" [attr.fill]="name() === \'pinFilled\' ? \'currentColor\' : \'none\'" [attr.stroke]="name() === \'pinFilled\' ? \'none\' : \'currentColor\'" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path()" /></svg>',
   styles: ':host {display: inline-flex; width: 20px; height: 20px; flex-shrink: 0; vertical-align: middle} svg {width: 100%; height: 100%}'
 })
 export class Icon {

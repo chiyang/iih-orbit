@@ -18,7 +18,7 @@
       <span class="task-shortcut-meta"><span>{{ projectName(task) }}</span><span class="task-shortcut-status">{{ statusLabel(task) }}</span></span>
       @if (recent) {<time [attr.datetime]="task.updatedAt" [title]="task.updatedAt | date:'yyyy/M/d HH:mm:ss'">編輯於 {{ task.updatedAt | date:'M/d HH:mm' }}</time>}
     </button>
-    @if (task.pinned) {<span class="shortcut-pinned" aria-label="已釘選" title="已釘選；可在任務表單取消釘選"><app-icon name="pin" /></span>}
+    @if (task.pinned) {<span class="shortcut-pinned" aria-label="已釘選" title="已釘選；可在任務表單取消釘選"><app-icon name="pinFilled" /></span>}
     @else {<button type="button" class="shortcut-pin" [attr.aria-label]="'釘選 ' + task.title" title="釘選任務" [disabled]="store.pendingWrites() > 0" (click)="pinTask.emit(task)"><app-icon name="pin" /></button>}
   </article>
 </ng-template>
