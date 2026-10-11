@@ -1,5 +1,5 @@
 import { DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
-import { Component, computed, effect, ElementRef, inject, output, signal, untracked, viewChild } from '@angular/core';
+import { Component, computed, effect, ElementRef, inject, linkedSignal, output, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BackupKind, readBackup } from './backup-data';
 import { downloadBackup } from './backup-file';
@@ -42,6 +42,11 @@ export class DrivePanel {
   readonly hasFiles = computed(() => this.drive.files().some(file => !file.trashed));
   readonly catalog = computed(() => driveCatalog(this.drive.files(), this.drive.runtime().link?.datasetId, this.drive.removals().map(file => file.cloud.datasetId)));
   readonly currentCollection = computed(() => this.catalog().collections.find(group => group.current));
+  readonly selectingCloud = linkedSignal<string, boolean>({
+    source: () => JSON.stringify([this.store.google().clientId, this.store.generation(), this.store.drive().accountId, this.drive.auth.connectionVersion(), this.drive.runtime().link?.datasetId, this.drive.runtime().conflict]),
+    computation: (context, previous) => previous?.source === context ? previous.value : false
+  });
+  readonly canChooseCloud = computed(() => !!this.drive.runtime().conflict?.length && !!this.currentCollection()?.heads.length && !this.currentCollection()?.deleting && this.drive.catalogFresh() && this.drive.auth.connected() && this.drive.online() && !this.drive.busy() && !this.saving() && !this.importing() && !this.removing() && !this.drive.runtime().pending && !this.store.pendingWrites());
   readonly cloudCount = computed(() => this.catalog().collections.length + this.catalog().manual.length);
   readonly canCreate = computed(() => this.drive.runtimeReady() && this.drive.catalogFresh() && !this.drive.runtime().link && !this.drive.unavailable());
   readonly showCreateForm = computed(() => this.editing() && !!this.drive.runtime().link || this.canCreate() && (!this.hasFiles() || this.creating()));
@@ -107,6 +112,7 @@ export class DrivePanel {
   private readonly removalPanel = viewChild<ElementRef<HTMLElement>>('removalPanel');
   private readonly previewPanel = viewChild<ElementRef<HTMLElement>>('previewPanel');
   private readonly cloudList = viewChild<ElementRef<HTMLElement>>('cloudList');
+  private readonly cloudChoicesPanel = viewChild<ElementRef<HTMLElement>>('cloudChoicesPanel');
   constructor() {
     effect(() => { const clientId = this.store.google().clientId; untracked(() => { if (clientId) void this.drive.prepare(); }); });
     effect(() => {
@@ -141,6 +147,13 @@ export class DrivePanel {
         panel.nativeElement.focus({preventScroll: true});
       }
     });
+    effect(() => {
+      const panel = this.cloudChoicesPanel();
+      if (this.selectingCloud() && panel) {
+        panel.nativeElement.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+        panel.nativeElement.focus({preventScroll: true});
+      }
+    });
   }
   scopeLabel(file: DriveFile): string {
     return file.kind === 'full' ? `所有工作空間${file.summary ? `（${file.summary.workspaces} 個）` : ''}` : file.summary?.label || '選定的工作空間（預覽可查看名稱）';
@@ -149,10 +162,34 @@ export class DrivePanel {
     const link = this.drive.runtime().link;
     return !file.trashed && link?.datasetId === file.cloud.datasetId && link.baseVersionId === file.cloud.versionId;
   }
-  selectCloudContent(card: HTMLElement): void {
-    const choices = card.querySelector<HTMLElement>('.cloud-choices, .cloud-choice-entry');
-    choices?.scrollIntoView({block: 'nearest', behavior: 'smooth'});
-    choices?.focus({preventScroll: true});
+  async selectCloudContent(): Promise<void> {
+    const collection = this.currentCollection();
+    if (!this.canChooseCloud() || !collection) return;
+    if (collection.heads.length === 1) {
+      await this.useCloudContent(collection.heads[0]);
+    } else {
+      this.clearPreview();
+      this.selectingCloud.update(open => !open);
+    }
+  }
+  async useCloudContent(file: DriveFile): Promise<void> {
+    if (!this.canChooseCloud()) return;
+    this.store.refreshFromStorage();
+    if (!this.canChooseCloud()) return;
+    const heads = [...this.drive.runtime().conflict!], generation = this.store.generation(), connection = this.drive.auth.connectionVersion();
+    if (file.trashed || !file.size || !heads.includes(file.cloud.versionId) || !this.currentCollection()?.heads.some(head => head.id === file.id && head.cloud.versionId === file.cloud.versionId && head.cloud.datasetId === file.cloud.datasetId)) {
+      this.error.set('這份雲端內容已變更，請重新載入後選擇。'); return;
+    }
+    const revision = this.store.revision();
+    this.importing.set(true); this.error.set(''); this.clearPreview();
+    try {
+      await this.drive.resolve(heads, file, revision);
+      if (!this.drive.error() && !this.drive.runtime().conflict && this.drive.runtime().link?.datasetId === file.cloud.datasetId && this.store.generation() === generation && this.drive.auth.connectionVersion() === connection) {
+        this.selectingCloud.set(false);
+        this.drive.message.set('已套用雲端內容，其他副本仍保留為過去備份。');
+      }
+    } catch (error) {this.error.set(error instanceof Error ? error.message : '無法套用雲端內容，請重試。');}
+    finally {this.importing.set(false);}
   }
   canRemoveBranch(file: DriveFile): boolean {
     const group = this.catalog().collections.find(collection => collection.id === file.cloud.datasetId);

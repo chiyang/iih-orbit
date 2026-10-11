@@ -193,6 +193,84 @@ test('Drive 面板顯示目前資料與摘要，避免重新套用目前內容�
   } finally {f.close();}
 });
 
+test('多份雲端內容先展開選擇，選定副本立即套用且不需預覽確認；連按不重複執行', async () => {
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync'); const root = [...f.documents.values()][0];
+    const backup = structuredClone(root); backup.data.workspaces[0].tasks[0].title = '要選擇的雲端內容';
+    const remote = await createDriveDocument(backup, root.cloud.datasetId, [root.cloud.versionId], 'sync'); f.documents.set('remote_choice', remote);
+    await f.store.saveTask({...f.store.tasks()[0], title: '選擇之前的本機內容'}); await f.service.sync();
+    const panel = f.panel(); await settle();
+    assert.equal(panel.currentCollection().heads.length, 2); assert.equal(panel.selectingCloud(), false);
+    const local = structuredClone(f.store.workspaces()), count = f.documents.size, read = f.api.read; let reads = 0;
+    f.api.read = async file => {reads++; return read(file);};
+    f.navigator.onLine = false; await f.event('offline'); await panel.selectCloudContent(); assert.equal(panel.selectingCloud(), false);
+    f.navigator.onLine = true; await f.event('online'); await settle();
+    await panel.selectCloudContent(); assert.equal(panel.selectingCloud(), true);
+    assert.equal(reads, 0); assert.equal(panel.preview(), null); assert.equal(f.documents.size, count); assert.deepEqual(f.store.workspaces(), local);
+    await panel.selectCloudContent(); assert.equal(panel.selectingCloud(), false);
+    await panel.selectCloudContent(); assert.equal(panel.selectingCloud(), true);
+    const file = panel.currentCollection().heads.find(file => file.id === 'remote_choice');
+    await Promise.all([panel.useCloudContent(file), panel.useCloudContent(file)]); await settle();
+    assert.equal(reads, 1); assert.equal(panel.preview(), null); assert.equal(panel.action(), null); assert.equal(f.documents.size, count + 1);
+    assert.equal(f.store.tasks()[0].title, '要選擇的雲端內容'); assert.equal(f.service.runtime().conflict, undefined); assert.equal(panel.selectingCloud(), false);
+    assert.equal(panel.currentCollection().heads.length, 1); assert.equal(panel.currentCollection().history.length, count);
+    assert.match(f.service.message(), /已套用雲端內容/);
+    await panel.selectCloudContent(); assert.equal(panel.selectingCloud(), false); assert.equal(panel.preview(), null);
+  } finally {f.close();}
+});
+
+test('雲端選擇在帳號連線改變時關閉，未連線不展開舊副本', async () => {
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync'); const root = [...f.documents.values()][0];
+    const backup = structuredClone(root); backup.data.workspaces[0].tasks[0].title = '不同的遠端內容';
+    const remote = await createDriveDocument(backup, root.cloud.datasetId, [root.cloud.versionId], 'sync'); f.documents.set('remote_choice', remote);
+    await f.store.saveTask({...f.store.tasks()[0], title: '本機修改'}); await f.service.sync();
+    const panel = f.panel(); await settle(); await panel.selectCloudContent(); assert.equal(panel.selectingCloud(), true);
+    f.auth.connected.set(false); f.auth.connectionVersion.update(version => version + 1);
+    assert.equal(panel.selectingCloud(), false); await panel.selectCloudContent(); assert.equal(panel.selectingCloud(), false); assert.equal(panel.preview(), null);
+  } finally {f.close();}
+});
+
+test('直接套用雲端內容遇到下載失敗或本機、雲端、連線變更時保留本機資料，可重新選擇', async () => {
+  for (const change of ['network', 'local', 'remote', 'connection']) {
+    const f = await fixture();
+    try {
+      await f.service.start('full', [], 'sync'); const root = [...f.documents.values()][0];
+      const backup = structuredClone(root); backup.data.workspaces[0].tasks[0].title = '原先選定的雲端內容';
+      const remote = await createDriveDocument(backup, root.cloud.datasetId, [root.cloud.versionId], 'sync'); f.documents.set('remote_choice', remote);
+      await f.store.saveTask({...f.store.tasks()[0], title: '保留的本機內容'}); await f.service.sync();
+      const panel = f.panel(); await settle(); await panel.selectCloudContent();
+      const file = panel.currentCollection().heads.find(file => file.id === 'remote_choice'), read = f.api.read;
+      let reads = 0;
+      f.api.read = async selected => {
+        reads++;
+        if (change === 'network') throw new Error('下載暫時失敗');
+        const document = await read(selected);
+        if (change === 'local') await f.store.saveTask({...f.store.tasks()[0], title: '下載期間的本機新修改'});
+        if (change === 'connection') {f.auth.connected.set(false); f.auth.connectionVersion.update(version => version + 1);}
+        return document;
+      };
+      if (change === 'remote') {
+        const update = await createDriveDocument(backup, root.cloud.datasetId, [remote.cloud.versionId], 'sync'); f.documents.set('new_remote_choice', update);
+      }
+      const local = structuredClone(f.store.workspaces());
+      await panel.useCloudContent(file); await settle();
+      assert.equal(panel.importing(), false); assert.equal(panel.preview(), null); assert.equal(panel.action(), null);
+      assert.equal(f.store.tasks()[0].title, change === 'local' ? '下載期間的本機新修改' : '保留的本機內容');
+      if (change !== 'local') assert.deepEqual(f.store.workspaces(), local);
+      assert.equal(f.service.message().includes('已套用雲端內容'), false); assert.ok(f.service.error());
+      assert.equal(reads, change === 'remote' ? 0 : 1);
+      if (change === 'network') {
+        assert.equal(panel.selectingCloud(), true); assert.equal(panel.canChooseCloud(), true);
+        f.api.read = read; await panel.useCloudContent(file); await settle();
+        assert.equal(f.store.tasks()[0].title, '原先選定的雲端內容'); assert.equal(f.service.runtime().conflict, undefined);
+      }
+    } finally {f.close();}
+  }
+});
+
 test('刪除目前集合先停止自動處理、取消其待上傳版本，共用分頁更新列表，本機修改與其他集合保留', async () => {
   const f = await fixture(); let peer;
   try {
@@ -618,7 +696,7 @@ test('刪除目前集合的另一份內容會解除分歧，保留本機修改�
   } finally {f.close();}
 });
 
-test('刪除本機正在使用的分支後仍保留本機內容，剩餘雲端內容經明確確認才套用', async () => {
+test('刪除本機正在使用的分支後保留本機內容，按使用雲端內容直接套用剩餘副本並保留模式', async () => {
   for (const mode of ['sync', 'backup']) {
     const f = await fixture();
     try {
@@ -632,14 +710,12 @@ test('刪除本機正在使用的分支後仍保留本機內容，剩餘雲端�
       assert.deepEqual(f.service.runtime().conflict, [remote.cloud.versionId]); assert.deepEqual(f.service.runtime().link, link);
       assert.equal(f.store.tasks()[0].title, '刪除雲端副本後仍在本機'); assert.equal(panel.heads().length, 1);
       const count = f.documents.size; await f.service.sync(); assert.equal(f.documents.size, count);
-      await panel.inspect(panel.heads()[0]); assert.equal(panel.useAction(), 'cloud');
-      assert.match(panel.useDescription(), mode === 'backup' ? /自動備份/ : /跨裝置同步/); panel.prepare('cloud');
-      await panel.execute(); assert.equal(f.store.tasks()[0].title, '刪除雲端副本後仍在本機');
-      panel.confirmation = panel.confirmationPhrase(); await panel.execute(); await settle();
+      await panel.selectCloudContent(); await settle();
+      assert.equal(panel.preview(), null); assert.equal(panel.action(), null); assert.equal(panel.selectingCloud(), false);
       assert.equal(f.store.tasks()[0].title, '保留的雲端修改'); assert.equal(f.service.runtime().conflict, undefined);
       assert.equal(f.retired.get(localBranch.id).trashed, true); assert.equal(versionGraph(await f.api.list()).heads.length, 1);
       assert.equal(versionGraph(await f.api.list()).heads[0].cloud.purpose, mode);
-      assert.equal(f.store.drive().mode, mode); assert.match(f.service.message(), mode === 'backup' ? /自動備份已繼續/ : /跨裝置同步已繼續/);
+      assert.equal(f.store.drive().mode, mode); assert.match(f.service.message(), /已套用雲端內容/);
     } finally {f.close();}
   }
 });
