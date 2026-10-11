@@ -145,6 +145,15 @@ export class DrivePanel {
   scopeLabel(file: DriveFile): string {
     return file.kind === 'full' ? `所有工作空間${file.summary ? `（${file.summary.workspaces} 個）` : ''}` : file.summary?.label || '選定的工作空間（預覽可查看名稱）';
   }
+  isCurrentCopy(file: DriveFile): boolean {
+    const link = this.drive.runtime().link;
+    return !file.trashed && link?.datasetId === file.cloud.datasetId && link.baseVersionId === file.cloud.versionId;
+  }
+  selectCloudContent(card: HTMLElement): void {
+    const choices = card.querySelector<HTMLElement>('.cloud-choices, .cloud-choice-entry');
+    choices?.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+    choices?.focus({preventScroll: true});
+  }
   canRemoveBranch(file: DriveFile): boolean {
     const group = this.catalog().collections.find(collection => collection.id === file.cloud.datasetId);
     return !!group && !group.warning && !group.deleting && group.heads.length > 1 && group.heads.some(head => head.id === file.id);

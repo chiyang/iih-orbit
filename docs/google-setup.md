@@ -14,6 +14,8 @@ Orbit 不需要 Google 帳號即可管理本機任務。要使用 Gmail、Google
 
 「首次設定」說明位於 Google 連線分頁最上方，可展開查看。尚未設定 ID 時也可從頁首 G 按鈕進入；保存 ID 後，此按鈕隱藏，仍可由設定管理連線。
 
+Client ID 欄位旁的「複製」按鈕可複製目前填寫的 ID，方便在其他裝置設定；欄位空白時按鈕停用，成功後顯示確認訊息。
+
 Orbit 使用 Google Identity Services Token Model，直接由瀏覽器呼叫 REST API，無須 API Key 或 Client Secret。Client ID 是公開設定，不是授權憑證；不要將 Client Secret 填入 Orbit。參考 [建立 Client ID](https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid) 與 [Token Model](https://developers.google.com/identity/oauth2/web/guides/use-token-model)。
 
 ## 各服務的權限與入口

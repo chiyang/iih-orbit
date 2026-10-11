@@ -4,6 +4,7 @@ const PATHS: Record<string, string> = {
   plus: 'M12 5v14M5 12h14',
   help: 'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01',
   mail: 'M3 5h18v14H3zM3 5l9 7 9-7',
+  copy: 'M9 9h12v12H9zM15 9V3H3v12h6',
   search: 'M21 21l-4.5-4.5M19 10.5a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0',
   board: 'M3 4h18v16H3zM9 4v16M15 4v16M5.5 8h1M11.5 8h1M17.5 8h1M5.5 11h1M11.5 11h1',
   grid: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',

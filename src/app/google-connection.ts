@@ -1,5 +1,7 @@
 import { Component, computed, effect, inject, linkedSignal, OnDestroy, output, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { DOCUMENT } from '@angular/common';
+import { Icon } from './icon';
 import { BoardStore } from './board-store';
 import { GoogleCalendarService } from './google-calendar';
 import { CalendarWriteAuth, CALENDAR_WRITE_SCOPE } from './calendar-write-auth';
@@ -11,8 +13,9 @@ import { DRIVE_SCOPE } from './drive-data';
 import { GoogleCombinedAuth } from './google-combined-auth';
 import type { GoogleAuth } from './google-auth';
 
-@Component({selector: 'app-google-connection', imports: [FormsModule], templateUrl: './google-connection.html', styleUrls: ['./google-settings.css', './google-connection.css']})
+@Component({selector: 'app-google-connection', imports: [FormsModule, Icon], templateUrl: './google-connection.html', styleUrls: ['./google-settings.css', './google-connection.css']})
 export class GoogleConnection implements OnDestroy {
+  private readonly document = inject(DOCUMENT);
   readonly store = inject(BoardStore);
   readonly calendar = inject(GoogleCalendarService);
   readonly writeAuth = inject(CalendarWriteAuth);
@@ -21,6 +24,8 @@ export class GoogleConnection implements OnDestroy {
   readonly combined = inject(GoogleCombinedAuth);
   readonly configure = output<'calendar' | 'gmail' | 'drive'>();
   readonly draft = linkedSignal(() => this.store.google().clientId || this.gmail.preferences().clientId);
+  readonly copying = signal(false);
+  readonly copyStatus = linkedSignal({source: this.draft, computation: (): 'idle' | 'success' | 'error' => 'idle'});
   readonly saving = signal(false);
   readonly preparing = signal(false);
   readonly connectingAll = signal(false);
@@ -31,6 +36,19 @@ export class GoogleConnection implements OnDestroy {
   readonly unsaved = computed(() => this.draft().trim() !== this.store.google().clientId);
   constructor() {
     effect(() => { const id = this.store.google().clientId; untracked(() => { if (id) void this.prepare(); }); });
+  }
+  async copyClientId(): Promise<void> {
+    const clientId = this.draft().trim();
+    if (!clientId || this.copying()) return;
+    this.copying.set(true); this.copyStatus.set('idle');
+    try {
+      const clipboard = this.document.defaultView?.navigator.clipboard;
+      if (!clipboard) throw new Error('Clipboard unavailable');
+      await clipboard.writeText(clientId);
+      if (!this.destroyed && this.draft().trim() === clientId) this.copyStatus.set('success');
+    } catch {
+      if (!this.destroyed && this.draft().trim() === clientId) this.copyStatus.set('error');
+    } finally { this.copying.set(false); }
   }
   async prepare(): Promise<void> {
     if (this.preparing()) return;

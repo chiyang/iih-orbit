@@ -177,12 +177,17 @@ test('Drive 面板顯示目前資料與摘要，避免重新套用目前內容�
   try {
     await f.service.start('full', [], 'sync'); const panel = f.panel(); await settle();
     const rootFile = f.service.files()[0]; await panel.inspect(rootFile); assert.equal(panel.canJoin(), true); assert.equal(panel.useAction(), null); assert.ok(panel.savedAppearance());
+    assert.equal(panel.isCurrentCopy(rootFile), true);
     await f.store.saveTask({...f.store.tasks()[0], title: '新的集合版本'}); await f.service.sync();
     assert.equal(panel.currentCollection().heads.length, 1); assert.equal(panel.currentCollection().history.length, 1); assert.equal(panel.canJoin(), false);
     const latest = panel.currentCollection().heads[0]; await panel.inspect(latest); assert.equal(panel.canJoin(), true); assert.equal(panel.useAction(), null);
+    assert.equal(panel.isCurrentCopy(latest), true); assert.equal(panel.isCurrentCopy(rootFile), false);
+    assert.equal(panel.isCurrentCopy({...latest, trashed: true}), false);
+    assert.equal(panel.isCurrentCopy({...latest, cloud: {...latest.cloud, datasetId: crypto.randomUUID()}}), false);
     const document = [...f.documents.values()].find(value => value.cloud.versionId === rootFile.cloud.versionId);
     const branch = await createDriveDocument(document, document.cloud.datasetId, [document.cloud.versionId], 'sync');
     f.documents.set('branch_' + branch.cloud.versionId, branch); await f.service.list(); assert.equal(panel.currentCollection().heads.length, 2); assert.equal(panel.canJoin(), true);
+    assert.equal(panel.isCurrentCopy(latest), true); assert.equal(panel.isCurrentCopy(panel.currentCollection().heads.find(file => file.cloud.versionId === branch.cloud.versionId)), false);
     await f.service.manual('workspaces', [f.store.currentWorkspace().id]); const manual = panel.catalog().manual[0]; await panel.inspect(manual);
     assert.equal(panel.canJoin(), false); assert.equal(panel.useAction(), null); assert.equal(panel.fileScope(manual), f.store.currentWorkspace().name); assert.equal(panel.savedAppearance(), null);
   } finally {f.close();}

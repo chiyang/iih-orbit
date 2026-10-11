@@ -1,5 +1,11 @@
 .google-guide {margin-bottom: var(--sp18);}
 .google-origin {white-space: nowrap;}
+.google-client-id-input {display: flex; gap: var(--sp8);}
+.google-client-id-input input {flex: 1;}
+.google-copy {display: inline-flex; align-items: center; justify-content: center; gap: var(--sp6); flex-shrink: 0; white-space: nowrap;}
+.google-copy app-icon {width: 16px; height: 16px;}
+.copy-feedback {font-size: var(--font-10);}
+.copy-feedback:not(.google-error) {color: var(--accent-text);}
 .google-connect-all {margin-top: var(--sp22); padding: var(--sp16); border: 1px solid var(--accent-border); border-radius: 9px; background: var(--accent-soft);}
 .google-connect-all p {margin-bottom: 0;}
 .google-services {display: grid; gap: var(--sp14); margin: var(--sp22) 0;}

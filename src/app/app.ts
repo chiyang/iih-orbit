@@ -79,10 +79,39 @@ export class App {
   finishPanelResize(): void { if (!this.resizingPanel) return; this.resizingPanel = false; this.persistPanelWidth(); }
   panelResizeKey(event: KeyboardEvent): void { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); this.panelWidth.set(Math.min(520, Math.max(300, this.panelWidth() + (event.key === 'ArrowLeft' ? 20 : -20)))); this.persistPanelWidth(); }
   private persistPanelWidth(): void { try { localStorage.setItem('orbit-side-panel-width-v1', String(this.panelWidth())); } catch { /* Width still applies to the current tab. */ } }
-  async dropMail(event: DragEvent, status?: string, position?: CalendarPosition): Promise<void> {
+  boardMailOver(event: DragEvent, column: BoardColumn): boolean {
+    if (this.modal() || !this.mailTasks.over(event)) { this.mailTasks.boardPosition.set(null); return false; }
+    const element = event.currentTarget as HTMLElement, current = this.mailTasks.boardPosition();
+    const placeholder = element.querySelector<HTMLElement>('.mail-board-placeholder')?.getBoundingClientRect();
+    if (current?.status === column.id && placeholder && event.clientY >= placeholder.top && event.clientY <= placeholder.bottom) return true;
+    const cards = [...element.querySelectorAll<HTMLElement>('.task-card[data-task-id]')];
+    const beforeId = cards.find(card => {
+      const bounds = card.getBoundingClientRect();
+      return event.clientY < bounds.top + bounds.height / 2;
+    })?.dataset['taskId'];
+    if (current?.status !== column.id || current.beforeId !== beforeId) this.mailTasks.boardPosition.set({status: column.id, beforeId});
+    return true;
+  }
+  boardMailLeave(event: DragEvent, status: string): void {
+    if (this.mailTasks.boardPosition()?.status !== status) return;
+    const next = event.relatedTarget;
+    if (!next || !('nodeType' in next) || !(event.currentTarget as HTMLElement).contains(next as Node)) this.mailTasks.boardPosition.set(null);
+  }
+  async dropBoardMail(event: DragEvent, column: BoardColumn): Promise<void> {
+    if (!this.boardMailOver(event, column)) return;
+    const beforeId = this.mailTasks.boardPosition()?.beforeId;
+    await this.dropMail(event, column.id, undefined, beforeId);
+  }
+  async dropMail(event: DragEvent, status?: string, position?: CalendarPosition, beforeId?: string): Promise<void> {
     if (this.modal()) return;
-    const initialStatus = status ?? this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id;
-    await this.mailTasks.drop(event, this.emptyTask(initialStatus), position ? {date: position.day, ...(position.kind === 'time' ? {time: minuteLabel(position.minute ?? 0)} : {})} : {});
+    const initialStatus = status ?? this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id, base = this.emptyTask(initialStatus);
+    await this.mailTasks.drop(event, base, position ? {date: position.day, ...(position.kind === 'time' ? {time: minuteLabel(position.minute ?? 0)} : {})} : {}, beforeId);
+    const context = this.mailTasks.undoContext();
+    if (context?.original?.id !== base.id || context.generation !== this.store.generation() || context.workspaceId !== this.store.currentWorkspace().id || !this.hasFilters()) return;
+    const reminder = this.visibleTasks().some(task => task.id === base.id)
+      ? '目前有篩選條件，原篩選條件已保留。'
+      : '此任務不符合目前篩選，暫時不會顯示。原篩選條件已保留。';
+    this.mailTasks.notice.update(message => `${message} ${reminder}`);
   }
   openMailTask(mail: MailPreview): void {
     if (this.modal()) return;

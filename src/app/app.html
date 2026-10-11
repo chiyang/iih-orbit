@@ -96,11 +96,12 @@
         <div class="kanban-scroll" cdkScrollable>
           <div class="kanban" [style.--column-count]="columns().length || 1" cdkDropListGroup>
             @for (column of columns(); track column.id) {
-              <section class="kanban-column" [class.mail-drop-zone]="mailTasks.dragging()" (dragover)="mailTasks.over($event)" (drop)="dropMail($event, column.id)" [attr.data-status]="column.id" [orbitColor]="column.color" [attr.aria-label]="column.label">
+              <section class="kanban-column" [class.mail-drop-active]="mailTasks.dragging() && mailTasks.boardPosition()?.status === column.id" (dragover)="boardMailOver($event, column)" (dragleave)="boardMailLeave($event, column.id)" (drop)="dropBoardMail($event, column)" [attr.data-status]="column.id" [orbitColor]="column.color" [attr.aria-label]="column.label">
                 <div class="column-header"><div><span class="column-dot"></span><h2>{{ column.label }}</h2><span class="column-count">{{ column.tasks.length }}</span></div><button class="tiny-icon" [attr.aria-label]="'在' + column.label + '新增任務'" (click)="openTask(column.id)"><app-icon name="plus" /></button></div>
                 <p class="column-subtitle">{{ column.subtitle }}</p>
                 <div class="task-list" cdkDropList [id]="column.id" [cdkDropListData]="column" (cdkDropListDropped)="drop($event)">
                   @for (task of column.tasks; track task.id) {
+                    @if (mailTasks.dragging() && mailTasks.boardPosition()?.status === column.id && mailTasks.boardPosition()?.beforeId === task.id) {<div class="mail-board-placeholder" aria-hidden="true"><app-icon name="mail" /><span>放開以建立任務</span></div>}
                     <article class="task-card" cdkDrag [cdkDragData]="task" [cdkDragStartDelay]="{mouse: 0, touch: 180}" (cdkDragEnded)="dragEnded()" [attr.data-task-id]="task.id" [class.completed-card]="store.isDone(task)">
                       <div class="card-top"><span class="category-badge" [orbitColor]="category(task.categoryId).color"><i></i>{{ category(task.categoryId).name }}</span><span class="priority" [attr.data-priority]="task.priority" [title]="priorityLabel(task.priority)"><app-icon name="flag" /><span>{{ priorityLabel(task.priority) }}</span></span></div>
                       <button class="task-open-area" [attr.aria-label]="'開啟任務 ' + task.title" (click)="openTask(task.status, task)">
@@ -113,7 +114,8 @@
                       <button class="card-edit" [attr.aria-label]="'編輯 ' + task.title" title="編輯任務" (click)="openTask(task.status, task)"><app-icon name="edit" /></button>
                     </article>
                   }
-                  @if (!column.tasks.length) {<div class="empty-column"><app-icon [name]="column.kind === 'done' ? 'circleCheck' : 'board'" /><span>{{ hasFilters() ? '沒有符合篩選的任務' : '把任務拖曳到這裡' }}</span></div>}
+                  @if (mailTasks.dragging() && mailTasks.boardPosition()?.status === column.id && !mailTasks.boardPosition()?.beforeId) {<div class="mail-board-placeholder" aria-hidden="true"><app-icon name="mail" /><span>放開以建立任務</span></div>}
+                  @else if (!column.tasks.length) {<div class="empty-column"><app-icon [name]="column.kind === 'done' ? 'circleCheck' : 'board'" /><span>{{ hasFilters() ? '沒有符合篩選的任務' : '把任務拖曳到這裡' }}</span></div>}
                 </div>
                 <button class="add-column-task" (click)="openTask(column.id)"><app-icon name="plus" />新增任務</button>
               </section>

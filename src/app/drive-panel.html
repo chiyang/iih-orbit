@@ -24,18 +24,18 @@
 
   <div class="cloud-items">
     @for (collection of catalog().collections; track collection.id) {
-      <article class="cloud-card" [class.current]="collection.current" [attr.aria-label]="collection.current ? '目前使用的雲端資料' : '可使用的雲端資料'">
+      <article #cloudCard class="cloud-card" [class.current]="collection.current" [attr.aria-label]="collection.current ? '目前使用的雲端資料' : '可使用的雲端資料'">
         <div class="heading"><div><div class="item-title">@if (collection.current) {<span class="badge current-badge"><app-icon name="check" />{{ drive.catalogFresh() ? '目前使用' : '上次使用・尚未確認' }}</span>}<span class="badge">{{ collection.current ? store.drive().mode === 'off' ? '已暫停' : store.drive().mode === 'backup' ? '自動備份' : '自動儲存' : collection.purposeLabel === '自動同步' ? '自動儲存' : '自動備份' }}</span>@if (collection.deleting) {<span class="badge warning-badge">刪除尚未完成</span>}@else if (collection.heads.length > 1) {<span class="badge warning-badge">有 {{ collection.heads.length }} 份內容待選擇</span>}</div><h4>{{ collection.heads[0] ? scopeLabel(collection.heads[0]) : collection.label }}</h4><p class="save-time">最近保存 {{ collection.updatedAt | date:'yyyy/MM/dd HH:mm:ss' }}@if (collection.heads[0]?.summary; as counts) { · {{ counts.tasks }} 個任務}</p></div></div>
         @if (collection.warning) {<p class="warning" role="alert">{{ collection.warning }}</p>}
-        @if (collection.current && drive.runtime().conflict) {<div class="notice"><strong>先選擇要保留使用的內容</strong><p>本機內容仍保留，自動儲存先暫停。可查看下方雲端內容後使用，或繼續使用這台電腦的內容。</p><button [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="drive.resolve(drive.runtime().conflict!)">使用這台電腦的內容</button></div>}
+        @if (collection.current && drive.runtime().conflict) {<div class="notice"><strong>選擇接下來使用的內容</strong><p>自動同步備份已暫停。可以繼續使用這台電腦的內容，或選一份雲端內容，預覽後再確認使用。</p><div class="actions" role="group" aria-label="選擇本機或雲端內容"><button [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="drive.resolve(drive.runtime().conflict!)"><app-icon name="monitor" />使用這台電腦的內容</button><button [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online() || !drive.catalogFresh() || collection.deleting || !collection.heads.length" (click)="selectCloudContent(cloudCard)"><app-icon name="export" />選擇雲端內容</button></div></div>}
         <div class="actions">
           @if (collection.current && !collection.deleting) {
             @if (store.drive().mode === 'off') {<button class="primary" [disabled]="!canSave() || editing() || drive.unavailable()" (click)="resume()">恢復自動儲存</button>}
             @else {<button class="primary" [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online() || !!drive.runtime().conflict || drive.unavailable()" (click)="drive.sync()"><app-icon name="sync" />立即儲存</button><button [disabled]="drive.busy() || saving() || importing() || removing()" (click)="options({mode: 'off'})">暫停</button>}
           }
-          @if (collection.heads.length === 1) {<button [class.primary]="!collection.current" [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !collection.heads[0].size || collection.deleting || !collection.current && !drive.catalogFresh()" (click)="inspect(collection.heads[0], !collection.current || !!drive.runtime().conflict)">{{ collection.current && !drive.runtime().conflict ? '查看內容' : '查看並使用' }}<app-icon name="arrow" /></button>}
+          @if (collection.heads.length === 1) {<button class="cloud-choice-entry" [class.primary]="!collection.current" [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !collection.heads[0].size || collection.deleting || !collection.current && !drive.catalogFresh()" (click)="inspect(collection.heads[0], !collection.current || !!drive.runtime().conflict)">{{ collection.current && !drive.runtime().conflict ? '查看內容' : '查看並使用' }}<app-icon name="arrow" /></button>}
         </div>
-        @if (collection.heads.length > 1) {<p class="note">選一份查看並使用，或用右側垃圾桶刪除不需要的內容。其他版本仍保留。</p><ng-container *ngTemplateOutlet="versionRows; context: {$implicit: collection.heads, branches: true, use: true}" />}
+        @if (collection.heads.length > 1) {<div class="cloud-choices" tabindex="-1" role="group" aria-label="選擇一份雲端內容"><h4>選擇雲端內容（{{ collection.heads.length }} 份）</h4><p class="note">按「查看並使用」預覽，確認後才會更換本機內容。</p><ng-container *ngTemplateOutlet="versionRows; context: {$implicit: collection.heads, branches: true, use: true}" /></div>}
         @if (collection.history.length) {<details class="history"><summary>過去備份（{{ collection.history.length }} 份）</summary><p class="note">保留最近內容，方便回復誤改。不需要的備份也可逐份刪除。尚有不同內容待選擇、未完成上傳或仍在使用的舊內容，會等處理完成再自動清理。</p><ng-container *ngTemplateOutlet="versionRows; context: {$implicit: collection.history}" /></details>}
         <details class="secondary-option card-options"><summary>{{ collection.current ? '儲存設定與更多操作' : '更多操作' }}</summary>
           @if (collection.current) {
@@ -91,6 +91,25 @@
 @if (error() || drive.error()) {<p class="warning" role="alert">{{ error() || drive.error() }}</p>}
 @if (drive.message()) {<p class="success" role="status">{{ drive.message() }}</p>}
 
-<ng-template #versionRows let-files let-branches="branches" let-use="use" let-scope="scope"><div class="versions">
-  @for (file of files; track file.id) {<div class="version"><button class="version-open" [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !file.size || (use && !drive.catalogFresh())" (click)="inspect(file, !!use)"><strong>{{ file.createdTime | date:'yyyy/MM/dd HH:mm:ss' }}@if (scope) { · {{ scopeLabel(file) }}}</strong><small>@if (file.summary; as counts) { {{ counts.workspaces }} 個工作空間 · {{ counts.tasks }} 個任務 · }{{ file.size ? use ? '查看並使用這份內容' : '查看內容' : '上傳未完成' }}</small></button><button class="icon-button danger" [attr.aria-label]="(branches ? '刪除內容：' : '刪除備份：') + (file.createdTime | date:'yyyy/MM/dd HH:mm:ss')" [title]="branches ? '刪除這份內容' : '刪除這份備份'" [disabled]="!canRemoveFile(file) || drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="requestRemoval(file)"><app-icon name="trash" /></button></div>}
-</div></ng-template>
+<ng-template #versionRows let-files let-branches="branches" let-use="use" let-scope="scope">
+  <div class="versions">
+    @for (file of files; track file.id) {
+      <div class="version">
+        <button class="version-open" [class.choose-version]="branches && use" [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !file.size || (use && !drive.catalogFresh())" (click)="inspect(file, !!use)">
+          <span class="version-info">
+            <span class="version-heading">@if (isCurrentCopy(file)) {<span class="badge current-badge" title="這台電腦最近接續或保存的雲端副本；尚未上傳的本機修改不包含在其中。"><app-icon name="check" />目前副本</span>}<strong>{{ file.createdTime | date:'yyyy/MM/dd HH:mm:ss' }}@if (scope) { · {{ scopeLabel(file) }}}</strong></span>
+            <small>
+              @if (file.summary; as counts) { {{ counts.workspaces }} 個工作空間 · {{ counts.tasks }} 個任務 }
+              @if (!branches || !use || !file.size) {
+                @if (file.summary) { · }
+                {{ file.size ? use ? '查看並使用這份內容' : '查看內容' : '上傳未完成' }}
+              }
+            </small>
+          </span>
+          @if (branches && use && file.size) {<span class="version-use">查看並使用<app-icon name="arrow" /></span>}
+        </button>
+        <button class="icon-button danger" [attr.aria-label]="(branches ? '刪除內容：' : '刪除備份：') + (file.createdTime | date:'yyyy/MM/dd HH:mm:ss')" [title]="branches ? '刪除這份內容' : '刪除這份備份'" [disabled]="!canRemoveFile(file) || drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="requestRemoval(file)"><app-icon name="trash" /></button>
+      </div>
+    }
+  </div>
+</ng-template>

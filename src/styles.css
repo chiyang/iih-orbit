@@ -1,6 +1,7 @@
 @import './backup.css';
 @import './projects.css';
 @import './theme.css';
+@import './mail-drag-preview.css';
 @import '@angular/cdk/overlay-prebuilt.css';
 
 :root {

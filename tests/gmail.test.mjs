@@ -8,6 +8,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { COLUMNS } from '../src/app/models.ts';
+import { JSDOM } from 'jsdom';
 
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
 await mkdir('.angular', {recursive: true});
@@ -413,6 +414,172 @@ test('郵件拖放只接受此分頁的拖曳來源，工作空間更換取消�
     const next = event(); f.tasks.start(next, preview); f.store.switchWorkspace('other'); assert.equal(f.tasks.accepts(next), false); await f.tasks.drop(next, {...base, id: 'wrong', projectId: ''}); assert.equal(f.store.tasks().length, 0);
     const foreign = event(); foreign.dataTransfer.setData(GMAIL_MIME, 'fake-token'); assert.equal(f.tasks.accepts(foreign), false);
   } finally {f.close();}
+});
+test('郵件拖入看板按游標選擇欄位及插入位置，placeholder 內維持落點，保存順序與預示一致', async () => {
+  const cases = [
+    {status: 'todo', y: 50, beforeId: 'a', order: ['created', 'a', 'b', 'c']},
+    {status: 'todo', y: 200, beforeId: 'b', order: ['a', 'created', 'b', 'c']},
+    {status: 'todo', y: 400, beforeId: undefined, order: ['a', 'b', 'c', 'created']},
+    {status: 'progress', y: 200, beforeId: undefined, order: ['a', 'b', 'c', 'created']}
+  ];
+  for (const placement of cases) {
+    const f = fixture(), dom = new JSDOM('<article id="mail"></article><section id="todo"><article class="task-card" data-task-id="a"></article><article class="task-card" data-task-id="b"></article></section><section id="progress"></section>');
+    const child = createEnvironmentInjector([{provide: UiPreferences, useValue: {scale: () => 1, textSize: () => 'standard'}}], f.child);
+    const previousServerMode = globalThis.ngServerMode; globalThis.ngServerMode = true;
+    try {
+      for (const id of ['a', 'b', 'c']) await f.store.saveTask({...base, id, title: id, status: id === 'c' ? 'done' : 'todo'});
+      const app = runInInjectionContext(child, () => new App()); app.view.set('board'); app.priorityFilter.set('medium');
+      f.gmail.messages.set([preview]);
+      const element = dom.window.document.getElementById(placement.status), column = app.columns().find(column => column.id === placement.status);
+      for (const [index, card] of [...dom.window.document.querySelectorAll('.task-card')].entries()) card.getBoundingClientRect = () => ({top: 100 + index * 120, height: 80});
+      const drag = Object.assign(event(), {currentTarget: dom.window.document.getElementById('mail'), clientX: 100, clientY: 100}); f.tasks.start(drag, preview);
+      const over = Object.assign(event(), {dataTransfer: drag.dataTransfer, currentTarget: element, clientY: placement.y});
+      assert.equal(app.boardMailOver(over, column), true); assert.equal(over.prevented, true);
+      assert.deepEqual(f.tasks.boardPosition(), {status: placement.status, beforeId: placement.beforeId});
+      assert.equal(f.store.tasks().length, 3);
+      if (placement.beforeId === 'b') {
+        const placeholder = dom.window.document.createElement('div'); placeholder.className = 'mail-board-placeholder';
+        placeholder.getBoundingClientRect = () => ({top: 180, bottom: 310}); element.append(placeholder);
+        app.boardMailOver({...over, clientY: 280}, column); assert.equal(f.tasks.boardPosition().beforeId, 'b');
+        app.boardMailLeave({...over, relatedTarget: element.firstElementChild}, column.id); assert.equal(f.tasks.boardPosition().status, 'todo');
+        const other = app.columns().find(column => column.id === 'progress');
+        app.boardMailOver({...over, currentTarget: dom.window.document.getElementById('progress')}, other);
+        app.boardMailLeave({...over, relatedTarget: null}, column.id); assert.equal(f.tasks.boardPosition().status, 'progress');
+        app.boardMailOver(over, column); placeholder.remove();
+      }
+      await app.dropBoardMail(over, column);
+      const created = f.tasks.undoContext().original;
+      assert.equal(created.status, placement.status); assert.equal(created.startDate, ''); assert.equal(created.dueDate, '');
+      assert.deepEqual(f.store.tasks().map(task => task.id === created.id ? 'created' : task.id), placement.order);
+      assert.equal(f.tasks.boardPosition(), null); assert.equal(f.tasks.dragging(), false);
+      assert.equal(app.priorityFilter(), 'medium'); assert.equal(app.toast(), '');
+      await app.dropBoardMail(over, column); assert.equal(f.store.tasks().length, 4);
+      await f.tasks.undo(); assert.deepEqual(f.store.tasks().map(task => task.id), ['a', 'b', 'c']);
+    } finally {child.destroy(); f.close(); dom.window.close(); globalThis.ngServerMode = previousServerMode;}
+  }
+});
+test('看板郵件落點離開、取消及切換工作空間後清除；插入前的參照任務消失仍可安全建立', async () => {
+  const f = fixture(), dom = new JSDOM('<article id="mail"></article><section id="todo"><article class="task-card" data-task-id="anchor"></article></section><aside></aside>');
+  const child = createEnvironmentInjector([{provide: UiPreferences, useValue: {scale: () => 1, textSize: () => 'standard'}}], f.child);
+  const previousServerMode = globalThis.ngServerMode; globalThis.ngServerMode = true;
+  try {
+    await f.store.saveTask({...base, id: 'anchor', title: '既有任務'});
+    const app = runInInjectionContext(child, () => new App()), column = app.columns().find(column => column.id === 'todo');
+    const element = dom.window.document.getElementById('todo'); element.firstElementChild.getBoundingClientRect = () => ({top: 100, height: 100});
+    f.gmail.messages.set([preview]);
+    const start = () => {const dragging = Object.assign(event(), {currentTarget: dom.window.document.getElementById('mail'), clientX: 100, clientY: 100}); f.tasks.start(dragging, preview); return {...dragging, currentTarget: element, clientY: 100};};
+    let dragging = start(); app.boardMailOver(dragging, column);
+    app.boardMailLeave({...dragging, relatedTarget: dom.window.document.querySelector('aside')}, column.id); assert.equal(f.tasks.boardPosition(), null);
+    app.boardMailOver(dragging, column); f.tasks.end(); assert.equal(f.tasks.boardPosition(), null); assert.equal(f.store.tasks().length, 1);
+    dragging = start(); app.boardMailOver(dragging, column); app.boardMailOver({...dragging, dataTransfer: event().dataTransfer}, column); assert.equal(f.tasks.boardPosition(), null);
+    app.boardMailOver(dragging, column); f.store.switchWorkspace('other'); f.flush();
+    assert.equal(f.tasks.boardPosition(), null); await app.dropBoardMail(dragging, column); assert.equal(f.store.tasks().length, 0);
+    f.store.switchWorkspace('workspace'); f.flush(); dragging = start(); app.boardMailOver(dragging, column);
+    assert.equal(f.tasks.boardPosition().beforeId, 'anchor');
+    await f.store.deleteTask('anchor'); await app.dropBoardMail(dragging, column);
+    assert.equal(f.store.tasks().length, 1); assert.equal(f.store.tasks()[0].title, preview.subject);
+    assert.equal(f.store.tasks().some(task => task.id === 'anchor'), false); assert.equal(f.tasks.boardPosition(), null);
+  } finally {child.destroy(); f.close(); dom.window.close(); globalThis.ngServerMode = previousServerMode;}
+});
+test('郵件拖曳卡片在重新拖曳、建立任務、工作空間切換及服務銷毀後清理', async () => {
+  const f = fixture(), dom = new JSDOM('<article id="source">郵件</article>');
+  const nextDrag = () => Object.assign(event(), {currentTarget: dom.window.document.querySelector('#source'), clientX: 100, clientY: 120});
+  const card = () => dom.window.document.querySelector('.mail-drag-preview');
+  try {
+    f.gmail.messages.set([preview]); f.tasks.start(nextDrag(), preview);
+    const first = card(); assert.ok(first); assert.equal(f.tasks.dragging(), true);
+    const second = nextDrag(); f.tasks.start(second, preview);
+    assert.equal(first.isConnected, false); assert.equal(dom.window.document.querySelectorAll('.mail-drag-preview').length, 1);
+    let saving, accepted;
+    dom.window.document.body.addEventListener('drop', event => {accepted = f.tasks.accepts(event); saving = f.tasks.drop(event, base, {date: '2026-10-10'});}, {once: true});
+    const dropped = new dom.window.MouseEvent('drop', {bubbles: true, cancelable: true}); Object.defineProperty(dropped, 'dataTransfer', {value: second.dataTransfer});
+    dom.window.document.body.dispatchEvent(dropped); await saving; assert.equal(accepted, true);
+    assert.equal(card(), null); assert.equal(f.tasks.dragging(), false); assert.equal(f.store.tasks().length, 1);
+    f.tasks.start(nextDrag(), preview); assert.ok(card());
+    f.store.switchWorkspace('other'); f.flush(); assert.equal(card(), null); assert.equal(f.tasks.dragging(), false);
+    f.gmail.messages.set([preview]); f.tasks.start(nextDrag(), preview); assert.ok(card());
+    dom.window.dispatchEvent(new dom.window.Event('pagehide')); assert.equal(card(), null); assert.equal(f.tasks.dragging(), false);
+    f.tasks.start(nextDrag(), preview); assert.ok(card());
+    f.tasks.ngOnDestroy(); assert.equal(card(), null); assert.equal(f.tasks.dragging(), false);
+  } finally {f.close(); dom.window.close();}
+});
+test('月／週放下郵件先讀取來源再清理預覽；拖曳影像移除觸發 dragend 時仍建立一次任務', async () => {
+  const f = fixture(), dom = new JSDOM('<article id="source">郵件</article><div id="destination"></div>');
+  const google = {store: f.store, events: signal([]), visibleSources: signal([]), setMonthRange() {}};
+  const child = createEnvironmentInjector([{provide: GoogleCalendarService, useValue: google}, {provide: UiPreferences, useValue: {scale: () => 1, textSize: () => 'standard'}}], f.child);
+  const previousServerMode = globalThis.ngServerMode; globalThis.ngServerMode = true;
+  let calendar;
+  try {
+    const app = runInInjectionContext(child, () => new App());
+    calendar = runInInjectionContext(child, () => new Calendar()); calendar.mailDragging = f.tasks.dragging;
+    const source = dom.window.document.querySelector('#source'), destination = dom.window.document.querySelector('#destination');
+    source.addEventListener('dragend', () => f.tasks.end());
+    const tasks = [
+      {kind: 'month', day: '2026-10-10'},
+      {kind: 'all-day', day: '2026-10-11'},
+      {kind: 'time', day: '2026-10-12', minute: 540}
+    ];
+    f.gmail.messages.set([preview]);
+    for (const position of tasks) {
+      const dragging = Object.assign(event(), {currentTarget: source, clientX: 100, clientY: 120});
+      let sourceReadBeforeCleanup = false;
+      const readData = dragging.dataTransfer.getData;
+      dragging.dataTransfer.getData = type => {sourceReadBeforeCleanup = !!dom.window.document.querySelector('.mail-drag-preview'); return readData(type);};
+      f.tasks.start(dragging, preview);
+      const mask = dom.window.document.querySelector('.mail-drag-native-image'), remove = mask.remove.bind(mask);
+      let ended = false;
+      mask.remove = () => {remove(); if (!ended) {ended = true; source.dispatchEvent(new dom.window.Event('dragend', {bubbles: true}));}};
+      let saving;
+      const subscription = calendar.mailDrop.subscribe(value => {saving = app.dropMail(value.event, undefined, value.position);});
+      destination.addEventListener('drop', event => {void calendar.drop(event, position);}, {once: true});
+      const dropped = new dom.window.MouseEvent('drop', {bubbles: true, cancelable: true}); Object.defineProperty(dropped, 'dataTransfer', {value: dragging.dataTransfer});
+      destination.dispatchEvent(dropped); await saving; subscription.unsubscribe();
+      assert.equal(sourceReadBeforeCleanup, true); assert.equal(dropped.defaultPrevented, true);
+      assert.equal(dom.window.document.querySelector('.mail-drag-preview, .mail-drag-native-image'), null);
+      assert.equal(f.tasks.dragging(), false);
+    }
+    assert.equal(f.store.tasks().length, 3);
+    assert.deepEqual(f.store.tasks().map(task => [task.startDate, task.startTime, task.dueDate, task.dueTime]), [
+      ['2026-10-10', '', '2026-10-10', ''],
+      ['2026-10-11', '', '2026-10-11', ''],
+      ['2026-10-12', '09:00', '2026-10-12', '10:00']
+    ]);
+  } finally {child.destroy(); f.close(); dom.window.close(); globalThis.ngServerMode = previousServerMode;}
+});
+test('郵件拖放建立後提醒目前篩選，保留瀏覽條件；被排除、仍可見與未篩選的提示不同', async () => {
+  const f = fixture(), child = createEnvironmentInjector([{provide: UiPreferences, useValue: {scale: () => 1, textSize: () => 'standard'}}], f.child);
+  const previousServerMode = globalThis.ngServerMode; globalThis.ngServerMode = true;
+  try {
+    const app = runInInjectionContext(child, () => new App());
+    await f.store.saveCategory({id: 'custom', name: '自訂分類', color: 'violet'});
+    f.gmail.messages.set([preview]);
+    const filters = [
+      {query: '其他主旨', project: 'project', category: 'custom', priority: 'high', scope: 'done', deadline: 'unset', deadlineDays: 3, visible: false},
+      {query: '會議', project: 'project', category: 'all', priority: 'medium', scope: 'active', deadline: 'all', deadlineDays: null, visible: true},
+      {query: '', project: 'all', category: 'all', priority: 'all', scope: 'all', deadline: 'all', deadlineDays: null, visible: true}
+    ];
+    const snapshot = () => [app.query(), app.projectFilter(), app.categoryFilter(), app.priorityFilter(), app.scope(), app.deadlineFilter(), app.deadlineDays(), app.view(), app.calendarDate(), app.calendarShowOrbit()];
+    for (const [index, filter] of filters.entries()) {
+      app.query.set(filter.query); app.projectFilter.set(filter.project); app.categoryFilter.set(filter.category);
+      app.priorityFilter.set(filter.priority); app.scope.set(filter.scope); app.deadlineFilter.set(filter.deadline); app.deadlineDays.set(filter.deadlineDays);
+      app.view.set(index === 0 ? 'week' : 'month'); app.calendarDate.set('2026-10-10');
+      const before = snapshot(), filtered = app.hasFilters(), dragging = event(); f.tasks.start(dragging, preview);
+      await app.dropMail(dragging, undefined, {kind: 'time', day: '2026-10-10', minute: 540});
+      const task = f.tasks.undoContext().original;
+      assert.equal(f.store.tasks().length, index + 1);
+      assert.deepEqual([task.startDate, task.startTime, task.dueDate, task.dueTime], ['2026-10-10', '09:00', '2026-10-10', '10:00']);
+      assert.equal(app.visibleTasks().some(item => item.id === task.id), filter.visible);
+      assert.deepEqual(snapshot(), before); assert.equal(app.toast(), '');
+      assert.match(f.tasks.notice(), /已建立/);
+      if (filtered) {
+        assert.match(f.tasks.notice(), /篩選條件已保留/);
+        assert.equal(f.tasks.notice().includes('暫時不會顯示'), !filter.visible);
+      } else assert.equal(f.tasks.notice().includes('篩選'), false);
+      const notice = f.tasks.notice();
+      await app.dropMail(event(), undefined, {kind: 'month', day: '2026-10-11'});
+      assert.equal(f.tasks.notice(), notice); assert.equal(f.store.tasks().length, index + 1);
+    }
+  } finally {child.destroy(); f.close(); globalThis.ngServerMode = previousServerMode;}
 });
 test('已刪除的標籤不擴大成所有郵件；切換帳號不顯示另一帳號的快取，快取損壞可重建', async () => {
   const f = fixture();

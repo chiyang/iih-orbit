@@ -81,14 +81,18 @@ export class BoardStore implements OnDestroy {
     return {workspaceId: this.currentWorkspace().id, generation: this.generation(), original: structuredClone(this.tasks().find(task => task.id === id) ?? null)};
   }
 
-  saveTask(task: Task, context: TaskEditContext = this.taskContext(task.id)): Promise<StoreResult> {
+  saveTask(task: Task, context: TaskEditContext = this.taskContext(task.id), beforeId?: string): Promise<StoreResult> {
     const saved = structuredClone(task);
     return this.mutateBoard(board => {
       const current = board.tasks.find(item => item.id === saved.id) ?? null;
       if (JSON.stringify(current) !== JSON.stringify(context.original)) throw new Error('這個任務已在另一個分頁更新或刪除。草稿已保留，請載入最新版本或另存為新任務。');
       if (!board.statuses.some(status => status.id === saved.status) || (saved.categoryId && !board.categories.some(category => category.id === saved.categoryId))) throw new Error('任務的分類或狀態已變更，請重新選擇後儲存。');
       if (saved.projectId && !board.projects.some(project => project.id === saved.projectId)) throw new Error('所屬專案已被刪除，請重新選擇或改為未指定專案。');
-      const tasks = current ? board.tasks.map(item => item.id === saved.id ? saved : item) : [...board.tasks, saved];
+      const tasks = current ? board.tasks.map(item => item.id === saved.id ? saved : item) : [...board.tasks];
+      if (!current) {
+        const beforeIndex = beforeId ? tasks.findIndex(item => item.id === beforeId && item.status === saved.status) : -1;
+        tasks.splice(beforeIndex < 0 ? tasks.length : beforeIndex, 0, saved);
+      }
       return {...board, tasks};
     }, context.workspaceId, context.generation);
   }

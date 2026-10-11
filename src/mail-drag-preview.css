@@ -1,0 +1,7 @@
+.mail-drag-preview {position: fixed; top: 0; left: 0; z-index: 2147483647; width: 300px; max-width: calc(100vw - 16px); padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); box-shadow: 0 6px 18px rgb(var(--shadow-rgb) / .18); opacity: .8; pointer-events: none; user-select: none; line-height: 1.45;}
+.mail-drag-heading {display: flex; align-items: center; gap: 8px;}
+.mail-drag-heading svg {width: 16px; height: 16px; flex-shrink: 0; color: var(--accent-text);}
+.mail-drag-heading strong {min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .95em;}
+.mail-drag-email {margin-top: 3px; font-size: .85em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+.mail-drag-subject {display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; max-height: 2.9em; margin-top: 8px; font-weight: 600;}
+.mail-drag-native-image {position: fixed; top: 0; left: 0; width: 1px; height: 1px; pointer-events: none;}

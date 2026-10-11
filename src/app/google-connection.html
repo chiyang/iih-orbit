@@ -5,7 +5,11 @@
   <a href="https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid" target="_blank" rel="noopener noreferrer">Google 官方設定說明 ↗</a>
 </details>
 <p>三個服務共用一個 Client ID，各自選擇帳號與授權。</p>
-<label class="google-field">OAuth Client ID<input type="text" autocomplete="off" spellcheck="false" aria-label="共用 Google OAuth Client ID" [ngModel]="draft()" (ngModelChange)="draft.set($event)" placeholder="…apps.googleusercontent.com"></label>
+<div class="google-field">
+  <label for="google-client-id">OAuth Client ID</label>
+  <div class="google-client-id-input"><input id="google-client-id" type="text" autocomplete="off" spellcheck="false" aria-label="共用 Google OAuth Client ID" [ngModel]="draft()" (ngModelChange)="draft.set($event)" placeholder="…apps.googleusercontent.com"><button type="button" class="google-copy" aria-label="複製 OAuth Client ID" title="複製 Client ID" [disabled]="!draft().trim() || copying()" [attr.aria-busy]="copying()" (click)="copyClientId()"><app-icon [name]="copyStatus() === 'success' ? 'check' : 'copy'" />複製</button></div>
+  @if (copyStatus() !== 'idle') {<small class="copy-feedback" [class.google-error]="copyStatus() === 'error'" role="status">{{ copyStatus() === 'success' ? '已複製 Client ID。' : '無法複製，請選取 Client ID 後手動複製。' }}</small>}
+</div>
 <div class="google-actions"><button type="button" [disabled]="busy()" (click)="save()">保存 Client ID</button>@if (store.google().clientId && unsaved()) {<button type="button" [disabled]="busy()" (click)="draft.set(store.google().clientId); error.set('')">取消變更</button>}@if (store.google().clientId && (!calendar.auth.ready() || !gmail.auth.ready() || !drive.auth.ready())) {<button type="button" [disabled]="preparing()" (click)="prepare()">{{ preparing() ? '準備連線…' : '重新準備連線' }}</button>}</div>
 @if (store.google().clientId && unsaved()) {<p class="google-note">更換 Client ID 需重新授權，月曆綁定會清除，Drive 自動儲存會暫停。請先確認沒有待上傳的資料。</p>}
 @if (message()) {<p class="google-status" role="status">{{ message() }}</p>}
