@@ -48,3 +48,22 @@ test('最近編輯列最新 20 筆且不修改來源，七天篩選使用本機�
   }
   assert.equal(recentlyEdited(task, now), false); assert.equal(validTaskEditTime('invalid'), false);
 });
+
+test('內容編輯保存裝置來源，備份與衝突副本保留；未修改儲存不改寫來源', () => {
+  const first = new Date('2026-10-10T02:00:00.000Z'), second = new Date('2026-10-11T03:00:00.000Z');
+  const deviceA = {id: 'A', name: '工作電腦'}, deviceB = {id: 'B', name: '我的手機'};
+  const created = recordTaskEdits([], [task], first, deviceA)[0];
+  assert.deepEqual(created.editSource, deviceA);
+  const unchanged = recordTaskEdits([created], [{...created, editSource: deviceB}], second, deviceB)[0];
+  assert.deepEqual(unchanged, created);
+  const edited = recordTaskEdits([created], [{...created, description: '新內容'}], second, deviceB)[0];
+  assert.deepEqual(edited.editSource, deviceB); assert.equal(edited.updatedAt, second.toISOString());
+  const source = {...deviceA, updatedAt: first.toISOString()}, sourceB = {...deviceB, updatedAt: second.toISOString()};
+  const workspace = {...board, id: 'workspace', name: '工作', tasks: [created], taskConflicts: [{id: task.id, versions: [{key: 'a', task: created, source}, {key: 'b', task: edited, source: sourceB}]}]};
+  const backup = createBackup({version: 1, activeWorkspaceId: workspace.id, workspaces: [workspace]}, 'full');
+  assert.deepEqual(readBackup(backup).data.workspaces[0].taskConflicts, workspace.taskConflicts);
+  assert.deepEqual(copyWorkspaces([workspace])[0].taskConflicts[0].versions[0].source, source);
+  for (const invalid of [{id: '', name: '手機'}, {id: 'A', name: ''}, {id: 'A', name: 'a'.repeat(61)}]) assert.equal(readBoardState({...board, tasks: [{...task, editSource: invalid}]}), null);
+  const invalid = structuredClone(workspace); invalid.taskConflicts[0].versions[0].source.updatedAt = 'invalid';
+  assert.equal(readBoardState(invalid), null);
+});

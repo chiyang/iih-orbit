@@ -1,5 +1,14 @@
 <div class="task-panel-intro"><strong>{{ store.currentWorkspace().name }}</strong><p>目前工作空間的所有專案 · 點選任務即可編輯</p></div>
 <div class="task-panel-lists">
+  @if (conflicts().length) {
+  <section aria-labelledby="conflict-tasks-heading">
+    <div class="task-section-heading"><h2 id="conflict-tasks-heading"><app-icon name="warning" />衝突任務</h2><span>{{ conflicts().length }}</span></div>
+    <p class="conflict-help">所有工作空間的衝突都列在這裡。開啟完整任務版本，修改後選擇要留下的內容。</p>
+    @for (entry of conflicts(); track entry.workspace.id + ':' + entry.conflict.id) {
+      <article class="task-conflict"><strong>{{ conflictTitle(entry.conflict) }}</strong><small>{{ entry.workspace.name }} · {{ entry.conflict.versions.length }} 個版本</small><button type="button" class="conflict-open" [attr.aria-label]="'比較與編輯衝突任務 ' + conflictTitle(entry.conflict)" (click)="openConflict.emit(entry)">比較與編輯</button></article>
+    }
+  </section>
+  }
   <section aria-labelledby="pinned-tasks-heading">
     <div class="task-section-heading"><h2 id="pinned-tasks-heading"><app-icon name="pin" />釘選任務</h2><span>{{ pinned().length }}</span></div>
     @for (task of pinned(); track task.id) {<ng-container [ngTemplateOutlet]="taskRow" [ngTemplateOutletContext]="{task, recent: false}" />}

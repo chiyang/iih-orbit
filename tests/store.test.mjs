@@ -22,6 +22,23 @@ const task = {id: 'task', title: '既有任務', description: '保留內容', ca
 const legacy = {version: 2, projectName: '原專案', categories: [], tasks: [task, {...task, id: 'done', status: 'done'}]};
 const migratedTasks = legacy.tasks.map(item => ({...item, projectId: 'project-legacy'}));
 
+test('裝置名稱在本機保存，跨分頁沿用身份，匯入及遠端資料不取代本機名稱', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const first = new BoardStore(), revision = first.revision(), identity = first.device().id;
+  assert.equal(first.setDeviceName('  我的手機  ').ok, true);
+  assert.equal(first.revision(), revision); assert.deepEqual(new BoardStore().device(), {id: identity, name: '我的手機'});
+  await first.saveTask({...first.tasks()[0], description: '手機修改'});
+  const exported = await first.backupForExport('full');
+  assert.deepEqual(exported.data.workspaces[0].tasks[0].editSource, first.device());
+  assert.equal(Object.hasOwn(exported, 'device'), false);
+  assert.equal(first.setDeviceName('').ok, false); assert.equal(first.setDeviceName('a'.repeat(61)).ok, false);
+  const write = localStorage.setItem; localStorage.setItem = () => {throw new Error('full');};
+  assert.equal(first.setDeviceName('無法保存').ok, false); assert.equal(first.device().name, '我的手機'); localStorage.setItem = write;
+  first.setDeviceName('改名的手機');
+  assert.equal((await first.importBackup(exported, first.revision())).ok, true);
+  assert.equal(first.device().name, '改名的手機'); assert.equal(first.tasks()[0].editSource.name, '我的手機');
+});
+
 test('刪除保存垃圾桶內容、原順序與備份，還原保留釘選、子任務及時間', async () => {
   storage({'orbit-board-v1': JSON.stringify(legacy)});
   const store = new BoardStore();
@@ -842,6 +859,30 @@ test('全部備份原子還原外觀與自訂顏色，工作空間副本保留�
   assert.equal(store.categories()[0].color, '#123456');
 });
 
+test('字級保存在本機及同來源分頁，新舊完整備份與同步都保留目前字級', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const first = new BoardStore(), second = new BoardStore();
+  await first.updateAppearance({textSize: 'extra-large'});
+  second.refreshFromStorage();
+  assert.equal(second.appearance().textSize, 'extra-large');
+  assert.equal(new BoardStore().appearance().textSize, 'extra-large');
+  const exported = await first.backupForExport('full');
+  assert.equal(Object.hasOwn(exported.preferences, 'textSize'), false);
+  for (const formatVersion of [1, 2, 3, 4, 5]) {
+    const old = {...structuredClone(exported), formatVersion, preferences: {textSize: 'compact', theme: 'dark', accent: '#3264ad'}};
+    assert.equal((await first.importBackup(old, first.revision())).ok, true);
+    assert.deepEqual(first.appearance(), {textSize: 'extra-large', theme: 'dark', accent: '#3264ad'});
+    const snapshot = await first.driveSnapshot('full', []);
+    assert.equal(Object.hasOwn(snapshot.backup.preferences, 'textSize'), false);
+    assert.equal((await first.applyDriveBackup(old, snapshot.revision, [])).ok, true);
+    assert.equal(first.appearance().textSize, 'extra-large');
+  }
+  const withoutPreferences = structuredClone(exported); delete withoutPreferences.preferences;
+  assert.equal((await first.importBackup(withoutPreferences, first.revision())).ok, true);
+  assert.equal(first.appearance().textSize, 'extra-large');
+  assert.equal(new BoardStore().appearance().textSize, 'extra-large');
+});
+
 test('非法自訂顏色與外觀設定拒絕儲存，不更動任務或外觀', async () => {
   storage({'orbit-board-v1': JSON.stringify(legacy)});
   const store = new BoardStore();
@@ -863,7 +904,7 @@ test('Drive 全部同步套用外觀、提醒與月曆設定，保留 Google 連
   remote.data.workspaces[0].tasks[0].title = '雲端更新'; remote.data.workspaces[0].headerCompact = true; remote.preferences = {theme: 'light', accent: '#7951b0', textSize: 'extra-small'}; remote.reminders.leadMinutes = 15;
   remote.google = {...remote.google, clientId: '456-remote.apps.googleusercontent.com', accountId: 'remote', email: 'remote@example.com', refreshMinutes: 1, sources: [{id: 'remote-source', accountId: 'remote', calendarId: 'calendar', name: '研究行事曆', color: '#31584b', visible: true, workspaceIds: [id]}]};
   assert.equal((await store.applyDriveBackup(remote, snapshot.revision, [])).ok, true);
-  assert.equal(store.tasks()[0].title, '雲端更新'); assert.deepEqual(store.appearance(), remote.preferences); assert.deepEqual(store.reminders(), remote.reminders);
+  assert.equal(store.tasks()[0].title, '雲端更新'); assert.deepEqual(store.appearance(), {...remote.preferences, textSize: 'compact'}); assert.deepEqual(store.reminders(), remote.reminders);
   assert.equal(store.currentWorkspace().headerCompact, true);
   assert.equal(store.google().clientId, '123-local.apps.googleusercontent.com'); assert.equal(store.google().accountId, 'local'); assert.equal(store.google().refreshMinutes, 1);
   assert.equal(store.google().email, 'local@example.com'); assert.deepEqual(store.drive(), snapshot.backup.drive);
@@ -881,14 +922,14 @@ test('Drive 全部資料備份包含各項設定，全部還原套用主題色�
   await store.saveCalendarSource({id: 'source', accountId: 'calendar-account', calendarId: 'calendar', name: '學程月曆', color: '#7951b0', visible: false, workspaceIds: [id]});
   await store.updateDrive({accountId: 'drive-account', email: 'drive@example.com', mode: 'backup', debounceSeconds: 30, pollMinutes: 15});
   const {backup} = await store.driveSnapshot('full', []);
-  assert.deepEqual(backup.preferences, appearance); assert.deepEqual(backup.reminders, reminders);
+  assert.deepEqual(backup.preferences, {theme: appearance.theme, accent: appearance.accent}); assert.deepEqual(backup.reminders, reminders);
   assert.deepEqual(backup.google, store.google()); assert.deepEqual(backup.drive, store.drive());
   await store.updateAppearance({accent: '#31584b', theme: 'light', textSize: 'standard'}); await store.updateReminders(DEFAULT_REMINDERS);
   assert.equal((await store.importBackup(backup, store.revision())).ok, true);
-  assert.deepEqual(store.appearance(), appearance); assert.deepEqual(store.reminders(), reminders);
+  assert.deepEqual(store.appearance(), {...appearance, textSize: 'standard'}); assert.deepEqual(store.reminders(), reminders);
   assert.deepEqual(store.google(), {...backup.google, refreshMinutes: 0});
   assert.deepEqual(store.drive(), {...backup.drive, mode: 'off'});
-  assert.deepEqual(new BoardStore().appearance(), appearance);
+  assert.deepEqual(new BoardStore().appearance(), {...appearance, textSize: 'standard'});
   const selected = (await store.driveSnapshot('workspaces', [id])).backup;
   assert.equal(selected.preferences, undefined); assert.equal(selected.reminders, undefined); assert.equal(selected.drive, undefined);
   assert.deepEqual(selected.calendarSources, backup.google.sources);

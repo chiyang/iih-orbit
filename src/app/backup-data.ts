@@ -1,7 +1,7 @@
 import type { Task, Workspace, WorkspaceState } from './models';
 import { readWorkspaceState } from './workspace-data.ts';
-import type { AppearancePreferences, TextSize } from './appearance-data.ts';
-import { DEFAULT_APPEARANCE, readAppearance } from './appearance-data.ts';
+import type { BackupAppearancePreferences, SharedAppearancePreferences, TextSize } from './appearance-data.ts';
+import { DEFAULT_APPEARANCE, readBackupAppearance, sharedAppearance } from './appearance-data.ts';
 import type { CalendarSource, GoogleSettings } from './google-data.ts';
 import { DEFAULT_GOOGLE, readGoogleSettings, readSources } from './google-data.ts';
 import { DEFAULT_REMINDERS, type ReminderPreferences, readReminders } from './reminder-data.ts';
@@ -19,14 +19,14 @@ export interface OrbitBackup {
   kind: BackupKind;
   exportedAt: string;
   data: WorkspaceState;
-  preferences?: AppearancePreferences;
+  preferences?: BackupAppearancePreferences;
   google?: GoogleSettings;
   calendarSources?: CalendarSource[];
   reminders?: ReminderPreferences;
   drive?: DriveSettings;
 }
 
-export function createBackup(state: WorkspaceState, kind: BackupKind, selectedIds: string[], appearance: TextSize | AppearancePreferences, google: GoogleSettings = DEFAULT_GOOGLE, includeGoogle = false, reminders: ReminderPreferences = DEFAULT_REMINDERS, drive: DriveSettings = DEFAULT_DRIVE): OrbitBackup {
+export function createBackup(state: WorkspaceState, kind: BackupKind, selectedIds: string[] = [], appearance: TextSize | SharedAppearancePreferences = DEFAULT_APPEARANCE, google: GoogleSettings = DEFAULT_GOOGLE, includeGoogle = false, reminders: ReminderPreferences = DEFAULT_REMINDERS, drive: DriveSettings = DEFAULT_DRIVE): OrbitBackup {
   const workspaces = kind === 'full' ? state.workspaces : state.workspaces.filter(workspace => selectedIds.includes(workspace.id));
   if (!workspaces.length || (kind === 'workspaces' && selectedIds.some(id => !workspaces.some(workspace => workspace.id === id)))) {
     throw new Error('請選擇至少一個仍存在的工作空間。');
@@ -34,7 +34,7 @@ export function createBackup(state: WorkspaceState, kind: BackupKind, selectedId
   return {
     application: 'iih-orbit', formatVersion: 5, appVersion: '1.7.0', kind, exportedAt: new Date().toISOString(),
     data: structuredClone({version: 1, activeWorkspaceId: workspaces.some(workspace => workspace.id === state.activeWorkspaceId) ? state.activeWorkspaceId : workspaces[0].id, workspaces}),
-    ...(kind === 'full' ? {preferences: typeof appearance === 'string' ? {...DEFAULT_APPEARANCE, textSize: appearance} : structuredClone(appearance), google: structuredClone(google), reminders: {...reminders}, drive: structuredClone(drive)}
+    ...(kind === 'full' ? {preferences: sharedAppearance(typeof appearance === 'string' ? DEFAULT_APPEARANCE : appearance), google: structuredClone(google), reminders: {...reminders}, drive: structuredClone(drive)}
       : {calendarSources: google.sources.filter(source => source.workspaceIds.some(id => selectedIds.includes(id))).map(source => ({...structuredClone(source), workspaceIds: source.workspaceIds.filter(id => selectedIds.includes(id))})),
         ...(includeGoogle ? {google: {...structuredClone(google), sources: []}} : {})})
   };
@@ -54,7 +54,7 @@ export function readBackup(value: unknown): OrbitBackup {
   if (!data || data.workspaces.some(workspace => workspace.tasks.some(task => !validSubtaskIds(task)))) {
     throw new Error('備份資料不完整：請檢查任務日期、分類、狀態與識別碼。原有資料未變更。');
   }
-  const preferences = source.preferences === undefined ? undefined : readAppearance(source.preferences);
+  const preferences = source.preferences === undefined ? undefined : readBackupAppearance(source.preferences);
   if (preferences === null) {
     throw new Error('備份的外觀設定不合法。原有資料未變更。');
   }
@@ -84,7 +84,9 @@ export function copyWorkspaces(workspaces: Workspace[], newId: () => string = ()
     const projects = new Map(workspace.projects.map(project => [project.id, newId()]));
     const statuses = new Map(workspace.statuses.map(status => [status.id, newId()]));
     const tasks = new Map(workspace.tasks.map(task => [task.id, newId()]));
+    for (const conflict of workspace.taskConflicts ?? []) if (!tasks.has(conflict.id)) tasks.set(conflict.id, newId());
     const subtasks = new Map(workspace.tasks.flatMap(task => task.subtasks.map(subtask => [JSON.stringify([task.id, subtask.id]), newId()])));
+    for (const conflict of workspace.taskConflicts ?? []) for (const version of conflict.versions) for (const item of version.task?.subtasks ?? []) if (!subtasks.has(JSON.stringify([conflict.id, item.id]))) subtasks.set(JSON.stringify([conflict.id, item.id]), newId());
     const copyTask = (task: Task): Task => ({...structuredClone(task), id: tasks.get(task.id) ?? task.id, categoryId: categories.get(task.categoryId) ?? '', projectId: projects.get(task.projectId) ?? '', status: statuses.get(task.status) ?? task.status, subtasks: task.subtasks.map(subtask => ({...subtask, id: subtasks.get(JSON.stringify([task.id, subtask.id])) ?? subtask.id}))});
     return {
       ...structuredClone(workspace), id: newId(),
@@ -92,6 +94,10 @@ export function copyWorkspaces(workspaces: Workspace[], newId: () => string = ()
       projects: workspace.projects.map(project => ({...project, id: projects.get(project.id)!})),
       statuses: workspace.statuses.map(status => ({...status, id: statuses.get(status.id)!})),
       tasks: workspace.tasks.map(copyTask),
+      ...(workspace.taskConflicts ? {taskConflicts: workspace.taskConflicts.map(conflict => {
+        const versions = conflict.versions.map(version => ({...version, key: version.key === 'null' ? 'null' : JSON.stringify([tasks.get(conflict.id), version.key]), task: version.task ? copyTask(version.task) : null}));
+        return {id: tasks.get(conflict.id)!, versions, ...(conflict.resolved ? {resolved: versions[conflict.versions.findIndex(version => version.key === conflict.resolved)].key} : {})};
+      })} : {}),
       ...(workspace.calendarTransfers ? {calendarTransfers: workspace.calendarTransfers.map(item => ({...structuredClone(item), taskId: tasks.get(item.taskId) ?? item.taskId, original: taskFingerprint(copyTask(JSON.parse(item.original)))}))} : {})
     };
   });

@@ -1,0 +1,45 @@
+:host {display: block; min-width: 0; color: var(--text); padding: var(--sp20) var(--sp24) var(--sp24);}
+.comparison-intro strong {font-size: var(--font-13);}
+.comparison-intro p, .comparison-error {font-size: var(--font-11); line-height: 1.8; margin: var(--sp8) 0 var(--sp20);}
+.comparison-intro p {color: var(--text-muted);}
+.comparison-error {padding: var(--sp12); border: 1px solid var(--danger-border); border-radius: 7px; background: var(--danger-bg); color: var(--danger-text);}
+.comparison-grid {display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp20); align-items: start;}
+.version-card {min-width: 0; border: 1px solid var(--accent-border); border-radius: 9px; overflow-wrap: anywhere; background: var(--surface);}
+.version-card > header {padding: var(--sp16); background: var(--surface-soft); border-bottom: 1px solid var(--border);}
+h3 {font-size: var(--font-14); margin: 0 0 var(--sp8);}
+.version-source {font-size: var(--font-11); margin: 0 0 var(--sp5); color: var(--accent-text);}
+header time, header small {font-size: var(--font-10); color: var(--text-muted);}
+form {padding: var(--sp16);}
+fieldset {min-width: 0; border: 0; padding: 0; margin: 0;}
+.version-field {display: block; font-size: var(--font-11); color: var(--text-muted); margin-bottom: var(--sp16);}
+.version-field input, .version-field textarea, .version-field select {display: block; width: 100%; min-width: 0; margin-top: var(--sp8); padding: var(--sp10); border: 1px solid var(--border); border-radius: 6px; background: var(--surface-soft); color: var(--text); font: inherit; font-size: var(--font-12);}
+.version-field textarea {resize: vertical;}
+.version-fields {display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--sp12); margin-top: var(--sp16);}
+.version-checkbox {display: flex; align-items: center; gap: var(--sp8); font-size: var(--font-11);}
+.version-checkbox app-icon {width: 14px; height: 14px;}
+.schedule-fields {padding: var(--sp12); border: 1px solid var(--border); border-radius: 7px; background: var(--surface-soft); margin-bottom: var(--sp20);}
+.schedule-fields .version-field {margin-bottom: 0;}
+h4 {font-size: var(--font-12); font-weight: 600; margin: var(--sp16) 0 var(--sp10);}
+.version-subtask {display: flex; align-items: center; gap: var(--sp8); margin-bottom: var(--sp8);}
+.version-subtask input:not([type='checkbox']) {flex: 1; min-width: 0; padding: var(--sp9); border: 1px solid var(--border); border-radius: 5px; background: var(--surface-soft); color: var(--text); font: inherit; font-size: var(--font-11);}
+.version-subtask button, .text-button {border: 0; background: transparent; color: var(--accent-text); font: inherit; font-size: var(--font-10); cursor: pointer; padding: var(--sp6);}
+.version-subtask app-icon {width: 15px; height: 15px;}
+.text-button {margin-top: var(--sp5);}
+.adopt-button {display: block; width: 100%; margin-top: var(--sp20); border: 1px solid var(--accent-border); border-radius: 6px; padding: var(--sp12); background: var(--accent-strong); color: var(--on-accent); font: inherit; font-size: var(--font-12); cursor: pointer;}
+.adopt-button.danger {background: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-border);}
+button:disabled {opacity: .55; cursor: default;}
+.version-note, .deleted-version p {font-size: var(--font-10); line-height: 1.8; color: var(--text-muted);}
+.trash-choice {margin-top: var(--sp20);}
+.deleted-version {padding: var(--sp24) var(--sp16);}
+.deleted-version app-icon {width: 24px; height: 24px; display: block; color: var(--danger-text); margin-bottom: var(--sp12);}
+.deleted-version strong {font-size: var(--font-12);}
+.deleted-version ~ button, .deleted-version ~ p {max-width: calc(100% - var(--sp32)); margin: var(--sp12) var(--sp16) var(--sp16);}
+.version-card.description-focused {grid-column: 1 / -1;}
+.version-card.other-focused {display: none;}
+[hidden] {display: none !important;}
+@media (max-width: 760px) {
+  :host {padding: var(--sp16);}
+  .comparison-grid {grid-template-columns: minmax(0, 1fr); gap: var(--sp16);}
+  .version-card > header, form {padding: var(--sp12);}
+  .version-field input, .version-field textarea, .version-field select {font-size: max(16px, var(--font-12));}
+}

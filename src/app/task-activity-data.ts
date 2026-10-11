@@ -1,4 +1,4 @@
-import type { Task } from './models.ts';
+import type { DeviceIdentity, Task } from './models.ts';
 
 export const RECENT_TASK_LIMIT = 20;
 export const RECENT_EDIT_DAYS = 7;
@@ -14,14 +14,13 @@ function content(task: Task): string {
 }
 
 /** Pinning and rearranging cards do not change the last content edit. */
-export function recordTaskEdits(previous: readonly Task[], tasks: Task[], now = new Date()): Task[] {
+export function recordTaskEdits(previous: readonly Task[], tasks: Task[], now = new Date(), source?: DeviceIdentity): Task[] {
   const originals = new Map(previous.map(task => [task.id, task]));
   return tasks.map(task => {
     const original = originals.get(task.id);
-    if (!original || content(original) !== content(task)) return {...task, updatedAt: now.toISOString()};
-    if (task.updatedAt === original.updatedAt) return task;
-    const {updatedAt, ...unchanged} = task;
-    return original.updatedAt === undefined ? unchanged : {...unchanged, updatedAt: original.updatedAt};
+    if (!original || content(original) !== content(task)) return {...task, updatedAt: now.toISOString(), ...(source ? {editSource: {...source}} : {})};
+    const {updatedAt, editSource, ...unchanged} = task;
+    return {...unchanged, ...(original.updatedAt === undefined ? {} : {updatedAt: original.updatedAt}), ...(original.editSource ? {editSource: {...original.editSource}} : {})};
   });
 }
 

@@ -28,3 +28,8 @@ button:disabled {opacity: .5; cursor: default;}
 .task-panel-empty {padding: var(--sp16); border: 1px dashed var(--border); border-radius: 8px; color: var(--text-muted);}
 .task-panel-empty p {margin: 0 0 var(--sp6); color: var(--text); font-size: var(--font-11);}
 .task-panel-empty small {font-size: var(--font-10); line-height: 1.8;}
+.conflict-help {font-size: var(--font-10); line-height: 1.7; color: var(--text-muted);}
+.task-conflict {margin-bottom: var(--sp10); padding: var(--sp12); border: 1px solid var(--accent-border); border-radius: 8px; background: var(--surface); overflow-wrap: anywhere;}
+.task-conflict > strong {display: block; font-size: var(--font-12); line-height: 1.6;}
+.task-conflict > small {display: block; margin: var(--sp6) 0 var(--sp10); font-size: var(--font-9); color: var(--text-muted);}
+.conflict-open {width: 100%; padding: var(--sp9); border: 1px solid var(--accent-border); border-radius: 5px; background: var(--accent-soft); color: var(--accent-text); cursor: pointer; font: inherit; font-size: var(--font-11);}

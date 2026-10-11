@@ -1,6 +1,7 @@
 <section aria-label="遠端同步備份設定">
   <app-google-service-header title="遠端同步備份" serviceName="Google Drive" description="透過 Google Drive 保存資料。先找回雲端已有的資料，再決定要使用哪一份。" [auth]="drive.auth" [clientId]="store.google().clientId" [email]="store.drive().email" [busy]="drive.busy() || importing() || saving() || removing() || store.pendingWrites() > 0" [offline]="!drive.online()" [canDisconnect]="drive.auth.connected()" (connect)="drive.connect()" (disconnect)="drive.disconnect()" (prepare)="drive.prepare()" (configure)="configure.emit()" />
   <p class="note" role="status">{{ drive.status() }}</p>
+  <p class="note">不同任務或欄位的修改會自動整併。任務的衝突版本會放在右側欄「衝突任務」，等待選擇時其他任務仍可同步。設定或無法安全整併的資料會在下方請你選擇。</p>
   @if (!drive.online()) {<p class="warning" role="status">目前離線。本機修改仍保留，恢復網路後再讀取或保存。</p>}
   @if (drive.auth.sessionWarning()) {<p class="warning">{{ drive.auth.sessionWarning() }}</p>}
   @if (drive.runtime().pending && !drive.unavailable()) {<div class="notice"><strong>還有一份資料等待上傳</strong><p>本機修改已保留。先完成這次上傳，再改用其他資料。</p><button [disabled]="drive.busy() || !drive.auth.connected() || !drive.online()" (click)="drive.retry()">重試上傳</button></div>}
@@ -29,20 +30,20 @@
         @if (collection.warning) {<p class="warning" role="alert">{{ collection.warning }}</p>}
         @if (collection.current && drive.runtime().conflict) {
           <div class="notice">
-            <strong>選擇接下來使用的內容</strong><p>自動同步備份已暫停。可以繼續使用這台電腦的內容，或直接套用雲端內容；其他副本仍會保留。</p>
+            <strong>選擇衝突時要保留的內容</strong><p>自動同步備份已暫停，雙方內容已保留為衝突副本。選擇這台電腦或一份雲端內容，會同時保留能安全整併的修改；無法安全判斷時會使用選定的完整內容。</p>
             <div class="actions" role="group" aria-label="選擇本機或雲端內容">
               <button [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="drive.resolve(drive.runtime().conflict!)"><app-icon name="monitor" />使用這台電腦的內容</button>
               <button class="primary" [attr.aria-expanded]="collection.heads.length > 1 ? selectingCloud() : null" [attr.aria-controls]="collection.heads.length > 1 ? 'drive-cloud-choices' : null" [attr.aria-busy]="importing()" [disabled]="!canChooseCloud()" (click)="selectCloudContent()"><app-icon name="export" />{{ importing() ? '套用中…' : selectingCloud() ? '收起雲端內容' : collection.heads.length === 1 ? '使用雲端內容' : '選擇雲端內容' }}</button>
             </div>
             @if (selectingCloud() && collection.heads.length > 1) {
-              <div #cloudChoicesPanel id="drive-cloud-choices" class="cloud-choices" tabindex="-1" role="group" aria-label="選擇一份雲端內容"><h4>選擇雲端內容（{{ collection.heads.length }} 份）</h4><p class="note">選定後直接套用到這台電腦，其他副本保留為過去備份。</p><ng-container *ngTemplateOutlet="versionRows; context: {$implicit: collection.heads, branches: true, use: true, direct: true}" /></div>
+              <div #cloudChoicesPanel id="drive-cloud-choices" class="cloud-choices" tabindex="-1" role="group" aria-label="選擇一份雲端內容"><h4>選擇雲端內容（{{ collection.heads.length }} 份）</h4><p class="note">選定內容用來決定衝突的部分，其餘安全修改一起整併。其他副本保留為過去備份，可查看、下載或加入工作空間。</p><ng-container *ngTemplateOutlet="versionRows; context: {$implicit: collection.heads, branches: true, use: true, direct: true}" /></div>
             }
           </div>
         }
         <div class="actions">
           @if (collection.current && !collection.deleting) {
             @if (store.drive().mode === 'off') {<button class="primary" [disabled]="!canSave() || editing() || drive.unavailable()" (click)="resume()">恢復自動儲存</button>}
-            @else {<button class="primary" [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online() || !!drive.runtime().conflict || drive.unavailable()" (click)="drive.sync()"><app-icon name="sync" />立即同步</button><button [disabled]="drive.busy() || saving() || importing() || removing()" (click)="options({mode: 'off'})">暫停</button>}
+            @else {<button class="primary" [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online() || !!drive.runtime().conflict && store.drive().mode === 'backup' || drive.unavailable()" (click)="drive.sync()"><app-icon name="sync" />{{ drive.runtime().conflict ? '再次嘗試整併' : '立即同步' }}</button><button [disabled]="drive.busy() || saving() || importing() || removing()" (click)="options({mode: 'off'})">暫停</button>}
           }
           @if (collection.heads.length === 1 && !(collection.current && drive.runtime().conflict)) {<button [class.primary]="!collection.current" [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !collection.heads[0].size || collection.deleting || !collection.current && !drive.catalogFresh()" (click)="inspect(collection.heads[0], !collection.current)">{{ collection.current ? '查看內容' : '查看並使用' }}<app-icon name="arrow" /></button>}
         </div>
@@ -68,9 +69,9 @@
     <div #previewPanel tabindex="-1" class="preview" aria-labelledby="drive-preview-title">
       <div class="heading"><div><span class="eyebrow">{{ action() ? '確認後才會更換本機內容' : '雲端內容預覽' }}</span><h3 id="drive-preview-title">{{ previewFile() ? scopeLabel(previewFile()!) : '雲端備份' }}</h3></div><button [disabled]="importing()" (click)="clearPreview()">關閉</button></div>
       <p>{{ document.exportedAt | date:'yyyy/MM/dd HH:mm:ss' }} · {{ document.data.workspaces.length }} 個工作空間 · {{ pendingTasks() }} 個任務</p><ul>@for (workspace of document.data.workspaces; track workspace.id) {<li>{{ workspace.name }} · {{ workspace.tasks.length }} 個任務</li>}</ul>
-      @if (savedAppearance(); as saved) {<p class="saved-appearance"><i [style.background-color]="saved.accent" aria-hidden="true"></i><span>{{ saved.themeLabel }} · {{ saved.fontLabel }} · 主題色 {{ saved.accent }}</span></p>}
+      @if (savedAppearance(); as saved) {<p class="saved-appearance"><i [style.background-color]="saved.accent" aria-hidden="true"></i><span>{{ saved.themeLabel }} · 主題色 {{ saved.accent }}</span></p>}
       @if (action()) {
-        <div class="use-confirmation"><strong>{{ useLabel }}</strong><p>{{ document.kind === 'full' ? '將取代目前全部 ' + store.workspaces().length + ' 個工作空間，並套用這份資料的外觀與提醒設定。' : '將使用這些工作空間的雲端內容，其他工作空間、外觀與提醒設定保留。' }}{{ action() === 'restore' ? '自動儲存會暫停，Google 需要重新連線。' : '確認後會繼續自動儲存。' }}{{ reviewedBranchCount() > 1 ? '其他雲端版本會保留為過去備份。' : '' }}</p>@if (useStale()) {<p class="warning">資料或連線已更新，請重新確認後再使用。</p>}<div class="actions"><button [disabled]="importing() || drive.busy()" (click)="clearPreview()">取消</button>@if (useStale() && useAction(); as use) {<button [disabled]="importing() || drive.busy()" (click)="prepare(useAction()!)">重新確認</button>}<button class="primary" [disabled]="useStale() || importing() || saving() || drive.busy() || !!drive.runtime().pending || store.pendingWrites() > 0 || !drive.auth.connected() || !drive.online()" (click)="confirmUse()">{{ importing() ? '使用中…' : useLabel }}</button></div>
+        <div class="use-confirmation"><strong>{{ useLabel }}</strong><p>{{ action() === 'cloud' ? useDescription() : document.kind === 'full' ? '將取代目前全部 ' + store.workspaces().length + ' 個工作空間，並套用這份資料的主題、主題色與提醒設定，字體大小保留本機選擇。' : '將使用這些工作空間的雲端內容，其他工作空間、外觀與提醒設定保留。' }}{{ action() === 'restore' ? '自動儲存會暫停，Google 需要重新連線。' : '確認後會繼續自動儲存。' }}{{ reviewedBranchCount() > 1 ? '其他雲端版本會保留為過去備份。' : '' }}</p>@if (useStale()) {<p class="warning">資料或連線已更新，請重新確認後再使用。</p>}<div class="actions"><button [disabled]="importing() || drive.busy()" (click)="clearPreview()">取消</button>@if (useStale() && useAction(); as use) {<button [disabled]="importing() || drive.busy()" (click)="prepare(useAction()!)">重新確認</button>}<button class="primary" [disabled]="useStale() || importing() || saving() || drive.busy() || !!drive.runtime().pending || store.pendingWrites() > 0 || !drive.auth.connected() || !drive.online()" (click)="confirmUse()">{{ importing() ? '使用中…' : useLabel }}</button></div>
         </div>
       } @else if (useAction(); as use) {<div class="actions"><button class="primary" [disabled]="drive.busy() || saving() || importing() || !!drive.runtime().pending || store.pendingWrites() > 0" (click)="prepare(use)">{{ useLabel }}</button></div><p class="note">{{ useDescription() }}</p>}
       @else if (previewCurrent()) {<p class="note">這份資料目前已在使用。可回到上方按「立即同步」同步最新內容。</p>}
@@ -90,7 +91,7 @@
     <details class="secondary-option" [open]="editing()"><summary>調整保存範圍與方式</summary>
       <fieldset><legend>要保存哪些資料？</legend><label class="choice"><input type="radio" name="drive-range" value="full" [ngModel]="kind()" (ngModelChange)="kind.set($event)" [disabled]="saving() || drive.busy()">所有工作空間與設定</label><label class="choice"><input type="radio" name="drive-range" value="workspaces" [ngModel]="kind()" (ngModelChange)="kind.set($event)" [disabled]="saving() || drive.busy()">只選幾個工作空間</label></fieldset>
       @if (kind() === 'workspaces') {<div class="workspace-choices">@for (workspace of store.workspaces(); track workspace.id) {<label class="choice"><input type="checkbox" [checked]="ids().includes(workspace.id)" [disabled]="saving() || drive.busy()" (change)="toggle(workspace.id, $any($event.target).checked)">{{ workspace.name }}</label>}</div>}
-      <p class="note">所有工作空間包含任務、專案、分類、狀態、外觀與提醒。只選部分空間時，外觀與提醒保留在這台電腦。</p>
+      <p class="note">所有工作空間包含任務、專案、分類、狀態、主題、主題色與提醒。字體大小只保存在目前瀏覽器；只選部分空間時，主題、主題色與提醒也保留在這台電腦。</p>
       <fieldset><legend>如何保存？</legend><label class="choice"><input type="radio" name="drive-mode" value="sync" [ngModel]="mode()" (ngModelChange)="mode.set($event)" [disabled]="saving() || drive.busy()">自動儲存並接收其他電腦的更新</label><label class="choice"><input type="radio" name="drive-mode" value="backup" [ngModel]="mode()" (ngModelChange)="mode.set($event)" [disabled]="saving() || drive.busy()">自動備份，只保存這台電腦的修改</label></fieldset>
     </details>
     @if (drive.runtime().link && !sameScope()) {<p class="notice">更換工作空間範圍會另建一份，原本的雲端資料與過去備份仍保留。</p>}
@@ -108,7 +109,7 @@
       <div class="version">
         <button class="version-open" [class.choose-version]="branches && use" [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !file.size || (use && !drive.catalogFresh()) || (direct && !canChooseCloud())" (click)="direct ? useCloudContent(file) : inspect(file, !!use)">
           <span class="version-info">
-            <span class="version-heading">@if (isCurrentCopy(file)) {<span class="badge current-badge" title="這台電腦最近接續或保存的雲端副本；尚未上傳的本機修改不包含在其中。"><app-icon name="check" />目前副本</span>}<strong>{{ file.createdTime | date:'yyyy/MM/dd HH:mm:ss' }}@if (scope) { · {{ scopeLabel(file) }}}</strong></span>
+            <span class="version-heading">@if (isCurrentCopy(file)) {<span class="badge current-badge" title="這台電腦最近接續或保存的雲端副本；尚未上傳的本機修改不包含在其中。"><app-icon name="check" />目前副本</span>}@if (branches) {<span class="badge warning-badge">衝突副本</span>}<strong>{{ file.createdTime | date:'yyyy/MM/dd HH:mm:ss' }}@if (scope) { · {{ scopeLabel(file) }}}</strong></span>
             <small>
               @if (file.summary; as counts) { {{ counts.workspaces }} 個工作空間 · {{ counts.tasks }} 個任務 }
               @if (!branches || !use || !file.size) {

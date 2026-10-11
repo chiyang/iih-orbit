@@ -7,12 +7,13 @@ const task = {id: 'task', title: '跨日任務', description: '內容', category
 const first = {...emptyWorkspace('first', '研究計畫'), projects: [{id: 'project', name: '研究專案'}], categories: [{id: 'category', name: '研究', color: 'green'}], tasks: [task]};
 const state = {version: 1, activeWorkspaceId: 'first', workspaces: [first, emptyWorkspace('second', '課程安排')]};
 
-test('全部備份往返保留所有工作空間、日期時間、子任務、排序與六種字體偏好', () => {
+test('全部備份往返保留工作資料與主題設定，六種本機字級都不匯出', () => {
   for (const textSize of ['extra-small', 'compact', 'small', 'standard', 'large', 'extra-large']) {
-    const backup = createBackup(state, 'full', [], textSize);
+    const backup = createBackup(state, 'full', [], {textSize, theme: 'dark', accent: '#3264ad'});
     const restored = readBackup(JSON.parse(JSON.stringify(backup)));
     assert.deepEqual(restored.data, state);
-    assert.equal(restored.preferences.textSize, textSize);
+    assert.deepEqual(restored.preferences, {theme: 'dark', accent: '#3264ad'});
+    assert.equal(Object.hasOwn(backup.preferences, 'textSize'), false);
     assert.equal(backupFilename(restored), `IIH-Orbit-全部資料-${backup.exportedAt.slice(0, 10)}.json`);
     assert.notEqual(backup.data, state);
   }

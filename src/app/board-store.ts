@@ -1,11 +1,11 @@
 import { computed, Injectable, OnDestroy, signal } from '@angular/core';
-import { BoardState, BoardStatus, CalendarTransfer, Category, Project, Task, TaskStatus, WorkspaceState } from './models';
+import { BoardState, BoardStatus, CalendarTransfer, Category, Project, Task, TaskConflict, TaskStatus, WorkspaceState } from './models';
 import { originKey, taskFingerprint } from './calendar-transfer-data';
 import { readBoardState } from './board-data';
 import { createInitialState, isInitialWorkspace } from './seed';
 import { createWorkspaceState, emptyWorkspace, readWorkspaceState, removeBoardStatus, statusKind } from './workspace-data';
 import { BackupKind, copyWorkspaces, createBackup, OrbitBackup, readBackup } from './backup-data';
-import { AppearancePreferences, DEFAULT_APPEARANCE, readAppearance } from './appearance-data';
+import { AppearancePreferences, DEFAULT_APPEARANCE, readAppearance, sharedAppearance } from './appearance-data';
 import { OnboardingPhase, readStoredData, StoredWorkspaceData, WORKSPACE_SELECTION_KEY, WORKSPACE_STORAGE_KEY } from './stored-data';
 import { withStorageLock } from './storage-coordinator';
 import { CalendarSource, DEFAULT_GOOGLE, GoogleSettings, readGoogleSettings } from './google-data';
@@ -15,6 +15,8 @@ import { projectProgress } from './project-data';
 import { recordTaskEdits } from './task-activity-data';
 import { BoardHistoryEntry, boardChangeLabel, HISTORY_LIMIT, sameBoard } from './board-history';
 import type { WorkspaceCreationOptions } from './workspace-templates';
+import { unresolvedTaskConflicts } from './task-conflict-data';
+import { DEVICE_NAME_LIMIT, DEVICE_STORAGE_KEY, loadDeviceIdentity } from './device-data';
 
 export type StoreResult = {ok: true; persisted: boolean} | {ok: false; message: string};
 export interface TaskEditContext {
@@ -30,6 +32,7 @@ export class BoardStore implements OnDestroy {
   readonly syncNotice = signal('');
   readonly pendingWrites = signal(0);
   readonly hasUnsavedChanges = signal(false);
+  readonly device = signal(loadDeviceIdentity());
   private readonly selectionStorage = this.sessionStorage();
   private snapshot = this.load();
   private lastSavedRevision = this.snapshot.revision;
@@ -46,6 +49,7 @@ export class BoardStore implements OnDestroy {
   readonly state = computed<BoardState>(() => this.currentWorkspace());
   readonly tasks = computed(() => this.state().tasks.filter(task => !task.deletedAt));
   readonly trashedTasks = computed(() => this.state().tasks.filter(task => !!task.deletedAt));
+  readonly taskConflicts = computed(() => this.workspaces().flatMap(workspace => unresolvedTaskConflicts(workspace.taskConflicts).map(conflict => ({workspace, conflict}))));
   private readonly history = signal<BoardHistoryEntry[]>([]);
   private readonly lastUndo = computed(() => this.history().findLast(entry => !entry.undone && entry.workspaceId === this.currentWorkspace().id && entry.generation === this.generation()));
   private readonly nextRedo = computed(() => this.history().find(entry => entry.undone && entry.workspaceId === this.currentWorkspace().id && entry.generation === this.generation()));
@@ -61,9 +65,10 @@ export class BoardStore implements OnDestroy {
   readonly progress = computed(() => projectProgress(this.tasks(), this.statuses(), 'all', '所有專案', this.projects()).percent);
   private channel?: BroadcastChannel;
   private readonly storageListener = (event: StorageEvent) => {
+    if (event.key === DEVICE_STORAGE_KEY || event.key === null) this.device.set(loadDeviceIdentity(this.device()));
     if (event.key === WORKSPACE_STORAGE_KEY || event.key === null) this.refreshFromStorage();
   };
-  private readonly focusListener = () => this.refreshFromStorage();
+  private readonly focusListener = () => {this.device.set(loadDeviceIdentity(this.device())); this.refreshFromStorage();};
 
   constructor() {
     if (typeof window === 'undefined') return;
@@ -87,6 +92,16 @@ export class BoardStore implements OnDestroy {
 
   isDone(task: Task): boolean { return statusKind(this.statuses(), task.status) === 'done'; }
   isArchived(task: Task): boolean { return statusKind(this.statuses(), task.status) === 'archived'; }
+
+  setDeviceName(value: string): StoreResult {
+    const name = value.trim();
+    if (!name || name.length > DEVICE_NAME_LIMIT) return {ok: false, message: '請填寫 1–60 字的裝置名稱。'};
+    const identity = {...loadDeviceIdentity(this.device()), name};
+    try {localStorage.setItem(DEVICE_STORAGE_KEY, JSON.stringify(identity));}
+    catch {return {ok: false, message: '瀏覽器無法保存裝置名稱，原名稱保留。'};}
+    this.device.set(identity);
+    return {ok: true, persisted: true};
+  }
 
   taskContext(id: string): TaskEditContext {
     return {workspaceId: this.currentWorkspace().id, generation: this.generation(), original: structuredClone(this.state().tasks.find(task => task.id === id) ?? null)};
@@ -139,6 +154,7 @@ export class BoardStore implements OnDestroy {
       const workspace = data.state.workspaces.find(item => item.id === context.workspaceId);
       if (!workspace || JSON.stringify(workspace.tasks.filter(task => !!task.deletedAt)) !== JSON.stringify(context.tasks)) throw new Error('垃圾桶內容已更新，請重新查看後再確認清空。');
       const ids = new Set(context.tasks.map(task => task.id));
+      if (unresolvedTaskConflicts(workspace.taskConflicts).some(conflict => ids.has(conflict.id))) throw new Error('垃圾桶含有待選擇版本的任務，請先在右側欄處理衝突。');
       return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspace.id ? {...item, tasks: item.tasks.filter(task => !ids.has(task.id))} : item)}};
     }, {generation: context.generation, requirePersistence: true, persistenceMessage: '無法保存清空垃圾桶的變更，垃圾桶內容仍保留。', afterApply: () => this.history.update(entries => entries.filter(entry => entry.workspaceId !== context.workspaceId))});
   }
@@ -175,6 +191,21 @@ export class BoardStore implements OnDestroy {
     }, context.workspaceId, context.generation);
   }
 
+  resolveTaskConflict(workspaceId: string, expected: TaskConflict, key: string, generation = this.generation(), edited?: Task): Promise<StoreResult> {
+    const draft = edited ? structuredClone(edited) : undefined;
+    return this.mutateBoard(board => {
+      const conflict = board.taskConflicts?.find(value => value.id === expected.id);
+      if (!conflict || conflict.resolved || JSON.stringify(conflict) !== JSON.stringify(expected)) throw new Error('這個衝突已在其他裝置或分頁更新，請重新查看版本。');
+      const version = conflict.versions.find(value => value.key === key);
+      if (!version) throw new Error('選定的任務版本已不存在，請重新查看。');
+      if (draft && (!version.task || draft.id !== conflict.id)) throw new Error('草稿不屬於選定的任務版本，原有內容保留。');
+      const task = draft ?? (version.task ? structuredClone(version.task) : null);
+      if (task && (!task.title.trim() || task.title.length > 100 || task.description.length > 20000 || task.subtasks.some(item => !item.title.trim() || item.title.length > 200) || !readBoardState({...board, tasks: [task]}))) throw new Error('請確認名稱、描述、子任務、分類及時程，原有版本尚未變更。');
+      const tasks = task ? board.tasks.some(value => value.id === task.id) ? board.tasks.map(value => value.id === task.id ? task : value) : [...board.tasks, task] : board.tasks.filter(value => value.id !== conflict.id);
+      return {...board, tasks, taskConflicts: board.taskConflicts!.map(value => value.id === conflict.id ? {...value, resolved: key} : value)};
+    }, workspaceId, generation, true);
+  }
+
   prepareCalendarTransfer(transfer: CalendarTransfer, context: TaskEditContext, clientId: string): Promise<StoreResult> {
     return this.calendarTransaction(context, clientId, transfer.accountId, board => {
       const current = board.tasks.find(task => task.id === transfer.taskId);
@@ -206,9 +237,10 @@ export class BoardStore implements OnDestroy {
     return this.transact(data => {
       if (data.google?.clientId !== clientId || data.google.accountId !== accountId) throw new Error('Google 帳號或連線設定已變更，原有 Orbit 任務保留。');
       const workspace = data.state.workspaces.find(item => item.id === context.workspaceId);
+      if (workspace && unresolvedTaskConflicts(workspace.taskConflicts).some(conflict => conflict.id === context.original?.id)) throw new Error('這個任務有同步衝突，請先在右側欄選擇版本後再移轉。');
       if (!workspace) throw new Error('原工作空間已不存在，Google 活動與本機資料未再修改。');
       const board = change(workspace);
-      return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspace.id ? {...workspace, ...board, tasks: recordTaskEdits(workspace.tasks, board.tasks)} : item)}};
+      return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspace.id ? {...workspace, ...board, tasks: recordTaskEdits(workspace.tasks, board.tasks, new Date(), this.device())} : item)}};
     }, {generation: context.generation, requirePersistence: true});
   }
 
@@ -431,7 +463,7 @@ export class BoardStore implements OnDestroy {
     }, {requirePersistence: true});
   }
 
-  /** Full synchronization includes app preferences; authentication and Drive controls stay local. */
+  /** Full synchronization includes theme settings; font size, authentication and Drive controls stay local. */
   applyDriveBackup(input: OrbitBackup, expectedRevision: string, targetIds: string[]): Promise<StoreResult> {
     const backup = readBackup(input);
     return this.transact(data => {
@@ -447,7 +479,7 @@ export class BoardStore implements OnDestroy {
         else oldSources.push({...structuredClone(source), id: crypto.randomUUID()});
       }
       return {...data, onboarding: undefined, state: {...data.state, workspaces, activeWorkspaceId: incomingIds.has(data.state.activeWorkspaceId) ? data.state.activeWorkspaceId : workspaces[0].id},
-        ...(backup.kind === 'full' && backup.preferences ? {preferences: structuredClone(backup.preferences)} : {}),
+        ...(backup.kind === 'full' && backup.preferences ? {preferences: {...data.preferences!, ...sharedAppearance(backup.preferences)}} : {}),
         ...(backup.kind === 'full' && backup.reminders ? {reminders: {...backup.reminders}} : {}),
         google: {...data.google!, ...(backup.kind === 'full' && backup.google ? {refreshMinutes: backup.google.refreshMinutes} : {}), sources: oldSources.filter(s => s.workspaceIds.length)}};
     }, {requirePersistence: true});
@@ -508,7 +540,7 @@ export class BoardStore implements OnDestroy {
     return this.transact(data => {
       if (backup.kind === 'full') {
         if (!expectedRevision || data.revision !== expectedRevision) throw new Error('確認期間資料已更新，請重新檢查覆蓋範圍後再匯入。');
-        return {...data, generation: crypto.randomUUID(), state: structuredClone(backup.data), preferences: backup.preferences ?? {...DEFAULT_APPEARANCE}, reminders: backup.reminders ?? {...DEFAULT_REMINDERS}, drive: {...structuredClone(backup.drive ?? DEFAULT_DRIVE), mode: 'off'}, google: {...structuredClone(backup.google ?? DEFAULT_GOOGLE), refreshMinutes: 0}};
+        return {...data, generation: crypto.randomUUID(), state: structuredClone(backup.data), preferences: {...sharedAppearance(backup.preferences ?? DEFAULT_APPEARANCE), textSize: data.preferences!.textSize}, reminders: backup.reminders ?? {...DEFAULT_REMINDERS}, drive: {...structuredClone(backup.drive ?? DEFAULT_DRIVE), mode: 'off'}, google: {...structuredClone(backup.google ?? DEFAULT_GOOGLE), refreshMinutes: 0}};
       }
       const workspaceIds = new Map(backup.data.workspaces.map((workspace, index) => [workspace.id, added[index].id]));
       const sources = (backup.calendarSources ?? []).map(source => ({...structuredClone(source), id: crypto.randomUUID(), workspaceIds: source.workspaceIds.map(id => workspaceIds.get(id)!)}));
@@ -531,14 +563,15 @@ export class BoardStore implements OnDestroy {
     } catch (error) { this.storageWarning.set(this.message(error)); }
   }
 
-  private mutateBoard(change: (board: BoardState) => BoardState, workspaceId = this.currentWorkspace().id, generation = this.generation()): Promise<StoreResult> {
+  private mutateBoard(change: (board: BoardState) => BoardState, workspaceId = this.currentWorkspace().id, generation = this.generation(), resolvingConflict = false): Promise<StoreResult> {
     let before: BoardState;
     return this.transact(data => {
       const workspace = data.state.workspaces.find(item => item.id === workspaceId);
       if (!workspace) throw new Error('原工作空間已被刪除或取代，草稿仍保留。');
       before = readBoardState(workspace)!;
       const changed = change(workspace);
-      const board = {...changed, tasks: recordTaskEdits(workspace.tasks, changed.tasks)};
+      if (!resolvingConflict && unresolvedTaskConflicts(workspace.taskConflicts).some(conflict => JSON.stringify(workspace.tasks.find(task => task.id === conflict.id)) !== JSON.stringify(changed.tasks.find(task => task.id === conflict.id)))) throw new Error('這個任務有同步衝突，請先在右側欄選擇版本後再編輯。');
+      const board = {...changed, tasks: recordTaskEdits(workspace.tasks, changed.tasks, new Date(), this.device())};
       return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspaceId ? {...workspace, ...board} : item)}};
     }, {generation, afterApply: () => {
       const after = readBoardState(this.workspaces().find(workspace => workspace.id === workspaceId))!;

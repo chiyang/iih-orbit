@@ -2,6 +2,7 @@ import type { BackupKind, OrbitBackup } from './backup-data.ts';
 import { backupHash, createDriveDocument, DriveCollectionDeleted, syncHash, versionGraph } from './drive-data.ts';
 import type { DriveDocument, DriveFile, DriveRuntime } from './drive-data.ts';
 import type { DriveRepository } from './drive-repository.ts';
+import { commonDriveAncestor, mergeDriveBackups } from './drive-merge.ts';
 
 export interface DriveOperations {
   list(): Promise<DriveFile[]>;
@@ -21,6 +22,7 @@ export class DriveEngine {
   private readonly board: DriveBoard;
   private readonly key: string;
   private readonly current: () => boolean;
+  private mergeAttempts = 0;
   constructor(api: DriveOperations, repository: DriveRepository, board: DriveBoard, key: string, current: () => boolean = () => true) {
     this.api = api; this.repository = repository; this.board = board; this.key = key; this.current = current;
   }
@@ -30,6 +32,17 @@ export class DriveEngine {
   private async queue(state: DriveRuntime, document: DriveDocument): Promise<void> {
     if (state.pending) throw new Error('仍有待上傳版本，請先完成重試。');
     state.pending = {fileId: '', document}; await this.persist(state);
+  }
+  private async upgradeBaseline(state: DriveRuntime, files: DriveFile[]): Promise<void> {
+    const link = state.link!;
+    if (link.baseHashVersion === 3) return;
+    const baseline = files.find(file => file.cloud.versionId === link.baseVersionId);
+    if (!baseline) throw new DriveCollectionDeleted(link.datasetId);
+    const document = await this.api.read(baseline); this.check();
+    state.base = document;
+    link.baseHash = await syncHash(document);
+    if (link.baseBackupHash !== undefined) link.baseBackupHash = await backupHash(document);
+    link.baseHashVersion = 3; this.check(); await this.persist(state);
   }
   async flush(): Promise<void> {
     const state = await this.state(), pending = state.pending;
@@ -42,6 +55,7 @@ export class DriveEngine {
       state.link.baseVersionId = pending.document.cloud.versionId; state.link.baseHash = pending.document.cloud.syncHash;
       state.link.baseHashVersion = pending.document.cloud.formatVersion;
       state.link.baseBackupHash = await backupHash(pending.document); this.check();
+      state.base = pending.document;
     }
     state.lastSavedAt = new Date().toISOString(); delete state.pending; await this.persist(state);
   }
@@ -62,6 +76,7 @@ export class DriveEngine {
     const state = await this.state();
     state.link = {datasetId: document.cloud.datasetId, kind, workspaceIds: kind === 'workspaces' ? [...ids] : [], baseVersionId: '', baseHash: ''};
     delete state.conflict;
+    delete state.base; delete state.mergeBase;
     await this.queue(state, document); await this.flush();
   }
   async join(file: DriveFile, expectedRevision: string, reviewedHeads?: string[]): Promise<void> {
@@ -79,7 +94,8 @@ export class DriveEngine {
     if (JSON.stringify(latest.heads.map(head => head.cloud.versionId).sort()) !== JSON.stringify(actualHeads)) throw new Error('確認期間雲端資料已更新，請重新查看後使用。');
     await this.api.assertAvailable(file.cloud.datasetId); this.check();
     await this.board.apply(document, expectedRevision, document.data.workspaces.map(w => w.id)); this.check();
-    state.link = {datasetId: document.cloud.datasetId, kind: document.kind, workspaceIds: document.kind === 'workspaces' ? document.data.workspaces.map(w => w.id) : [], baseVersionId: document.cloud.versionId, baseHash: await syncHash(document), baseHashVersion: 2, baseBackupHash: await backupHash(document)};
+    state.link = {datasetId: document.cloud.datasetId, kind: document.kind, workspaceIds: document.kind === 'workspaces' ? document.data.workspaces.map(w => w.id) : [], baseVersionId: document.cloud.versionId, baseHash: await syncHash(document), baseHashVersion: 3, baseBackupHash: await backupHash(document)};
+    state.base = document; delete state.mergeBase;
     delete state.conflict; await this.persist(state);
     if (graph.heads.length > 1) {
       await this.queue(state, await createDriveDocument(document, document.cloud.datasetId, actualHeads, 'sync'));
@@ -106,7 +122,67 @@ export class DriveEngine {
     if (JSON.stringify(state.conflict) !== previous) await this.persist(state);
     return !!state.conflict;
   }
+  private scope(backup: OrbitBackup, state: DriveRuntime): boolean {
+    const link = state.link!;
+    return backup.kind === link.kind && (link.kind === 'full' || (backup.data.workspaces.length === link.workspaceIds.length && backup.data.workspaces.every(workspace => link.workspaceIds.includes(workspace.id))));
+  }
+  private async mergeBaseline(state: DriveRuntime, files: DriveFile[], tips: string[]): Promise<DriveDocument | undefined> {
+    const cached = [state.base, state.mergeBase].filter((document): document is DriveDocument => !!document);
+    const complete = [...files];
+    for (const document of cached) if (!complete.some(file => file.cloud.versionId === document.cloud.versionId)) complete.push({id: 'cached', name: '', createdTime: document.exportedAt, size: 0, kind: document.kind, cloud: document.cloud, trashed: true});
+    const ancestor = commonDriveAncestor(complete, tips);
+    if (!ancestor) return undefined;
+    const cache = cached.find(document => document.cloud.versionId === ancestor.cloud.versionId);
+    if (cache) {
+      if (cache.cloud.fileHash !== ancestor.cloud.fileHash) throw new Error('雲端版本與本機整併基準不符，原有資料保留。');
+      return cache;
+    }
+    // An old device without a cached base cannot assume deleted history is still readable.
+    if (ancestor.trashed) return undefined;
+    const document = await this.api.read(ancestor); this.check();
+    return document;
+  }
+  private async markAfterMerge(document: DriveDocument): Promise<void> {
+    const state = await this.state();
+    const files = (await this.api.list()).filter(file => file.cloud.datasetId === document.cloud.datasetId); this.check();
+    const graph = versionGraph(files);
+    if (!graph.heads.length) throw new DriveCollectionDeleted(document.cloud.datasetId);
+    if (graph.heads.length === 1 && graph.heads[0].cloud.versionId === document.cloud.versionId) {delete state.conflict; delete state.mergeBase;}
+    else {
+      const local = await this.board.snapshot(state.link!.kind, state.link!.workspaceIds); this.check();
+      if (document.cloud.purpose === 'sync' && await this.autoMerge(state, local, files)) return;
+      state.conflict = graph.heads.map(file => file.cloud.versionId).sort();
+    }
+    await this.persist(state);
+  }
+  private async publishMerge(state: DriveRuntime, backup: OrbitBackup, revision: string, heads: DriveFile[], purpose: 'backup' | 'sync'): Promise<void> {
+    const link = state.link!, parents = heads.map(file => file.cloud.versionId).sort();
+    const document = await createDriveDocument(backup, link.datasetId, parents, purpose); this.check();
+    const latest = versionGraph((await this.api.list()).filter(file => file.cloud.datasetId === link.datasetId)); this.check();
+    if (JSON.stringify(latest.heads.map(file => file.cloud.versionId).sort()) !== JSON.stringify(parents)) throw new Error('整併期間雲端已更新，本機及雲端副本保留，請再同步一次。');
+    await this.api.assertAvailable(link.datasetId); this.check();
+    await this.board.apply(backup, revision, link.workspaceIds); this.check();
+    await this.queue(state, document); await this.flush();
+    await this.markAfterMerge(document);
+  }
+  private async autoMerge(state: DriveRuntime, local: {backup: OrbitBackup; revision: string}, files: DriveFile[]): Promise<boolean> {
+    // A busy cloud cannot cause an unbounded read/merge/upload loop.
+    if (this.mergeAttempts >= 3) return false;
+    this.mergeAttempts++;
+    const link = state.link!, graph = versionGraph(files);
+    if (!graph.heads.length || graph.heads.length > 20) return false;
+    const base = await this.mergeBaseline(state, files, [...graph.heads.map(file => file.cloud.versionId), link.baseVersionId]);
+    if (!base || !this.scope(base, state)) return false;
+    const documents = await Promise.all(graph.heads.map(file => this.api.read(file))); this.check();
+    if (documents.some(document => !this.scope(document, state))) return false;
+    const result = mergeDriveBackups(base, [local.backup, ...documents], undefined, true);
+    state.mergeBase = base;
+    if (result.conflicts.length || !this.scope(result.backup, state)) {await this.persist(state); return false;}
+    await this.publishMerge(state, result.backup, local.revision, graph.heads, 'sync');
+    return true;
+  }
   async synchronize(mode: 'backup' | 'sync'): Promise<void> {
+    this.mergeAttempts = 0;
     await this.flush();
     let state = await this.state();
     if (!state.link) return;
@@ -114,7 +190,7 @@ export class DriveEngine {
     if (state.conflict) {
       await this.refreshConflict(await this.api.list());
       state = await this.state();
-      if (state.conflict) return;
+      if (state.conflict && mode === 'backup') return;
     }
     const link = state.link!;
     const local = await this.board.snapshot(link.kind, link.workspaceIds); this.check();
@@ -122,6 +198,7 @@ export class DriveEngine {
       const versions = (await this.api.list()).filter(file => file.cloud.datasetId === link.datasetId); this.check();
       if (!versions.some(file => file.cloud.versionId === link.baseVersionId)) throw new DriveCollectionDeleted(link.datasetId);
       if (await this.refreshConflict(versions)) return;
+      await this.upgradeBaseline(state, versions);
       const localBackupHash = await backupHash(local.backup); this.check();
       // Old runtime records have no backup baseline. Preserve history and establish it once.
       if (localBackupHash !== link.baseBackupHash) { await this.queue(state, await createDriveDocument(local.backup, link.datasetId, link.baseVersionId ? [link.baseVersionId] : [], 'backup')); await this.flush(); }
@@ -129,52 +206,60 @@ export class DriveEngine {
     }
     const localHash = await syncHash(local.backup); this.check();
     const files = (await this.api.list()).filter(f => f.cloud.datasetId === link.datasetId); this.check();
-    if (await this.refreshConflict(files)) return;
+    await this.refreshConflict(files);
     const graph = versionGraph(files), head = graph.heads[0];
     if (!head) throw new DriveCollectionDeleted(link.datasetId);
+    if (files.some(file => file.trashed && file.cloud.versionId === link.baseVersionId) && !graph.heads.some(file => graph.descendant(file.cloud.versionId, link.baseVersionId))) return;
     // Read a legacy baseline once without rewriting the immutable version or its checksum.
-    if (link.baseHashVersion !== 2) {
-      const baseline = files.find(file => file.cloud.versionId === link.baseVersionId);
-      if (!baseline) throw new DriveCollectionDeleted(link.datasetId);
-      link.baseHash = await syncHash(await this.api.read(baseline)); this.check(); link.baseHashVersion = 2;
-    }
+    await this.upgradeBaseline(state, files);
     const dirty = localHash !== link.baseHash;
-    const legacyHead = head.cloud.formatVersion === 1 && head.cloud.versionId !== link.baseVersionId && graph.heads.length === 1 ? await this.api.read(head) : undefined;
-    const headHash = head.cloud.formatVersion === 2 ? head.cloud.syncHash : head.cloud.versionId === link.baseVersionId ? link.baseHash : legacyHead ? await syncHash(legacyHead) : undefined;
+    const legacyHead = head.cloud.formatVersion !== 3 && head.cloud.versionId !== link.baseVersionId && graph.heads.length === 1 ? await this.api.read(head) : undefined;
+    const headHash = head.cloud.formatVersion === 3 ? head.cloud.syncHash : head.cloud.versionId === link.baseVersionId ? link.baseHash : legacyHead ? await syncHash(legacyHead) : undefined;
     this.check();
     if (graph.heads.length === 1 && head.kind === link.kind && headHash === localHash) {
-      if (head.cloud.versionId !== link.baseVersionId) { const document = legacyHead ?? await this.api.read(head); this.check(); link.baseBackupHash = await backupHash(document); this.check(); }
-      link.baseVersionId = head.cloud.versionId; link.baseHash = localHash; link.baseHashVersion = 2; await this.persist(state); return;
+      if (head.cloud.versionId !== link.baseVersionId) { const document = legacyHead ?? await this.api.read(head); this.check(); state.base = document; link.baseBackupHash = await backupHash(document); this.check(); }
+      link.baseVersionId = head.cloud.versionId; link.baseHash = localHash; link.baseHashVersion = 3; delete state.conflict; delete state.mergeBase; await this.persist(state); return;
     }
     if (graph.heads.length === 1 && head.cloud.versionId !== link.baseVersionId && !dirty && graph.descendant(head.cloud.versionId, link.baseVersionId)) {
       const document = legacyHead ?? await this.api.read(head); this.check();
       await this.api.assertAvailable(link.datasetId); this.check();
       if (document.kind !== link.kind || (link.kind === 'workspaces' && (document.data.workspaces.length !== link.workspaceIds.length || document.data.workspaces.some(w => !link.workspaceIds.includes(w.id))))) throw new Error('雲端集合範圍變更，請重新預覽並接續。');
       await this.board.apply(document, local.revision, link.workspaceIds); this.check();
-      link.baseVersionId = head.cloud.versionId; link.baseHash = await syncHash(document); link.baseHashVersion = 2; link.baseBackupHash = await backupHash(document); await this.persist(state); return;
+      state.base = document;
+      link.baseVersionId = head.cloud.versionId; link.baseHash = await syncHash(document); link.baseHashVersion = 3; link.baseBackupHash = await backupHash(document); delete state.conflict; delete state.mergeBase; await this.persist(state); return;
     }
+    if ((graph.heads.length > 1 || head.cloud.versionId !== link.baseVersionId) && await this.autoMerge(state, local, files)) return;
     if (graph.heads.length === 1 && head.cloud.versionId === link.baseVersionId) {
       if (!dirty) return;
+      state.mergeBase = state.base;
       await this.queue(state, await createDriveDocument(local.backup, link.datasetId, [link.baseVersionId], 'sync')); await this.flush();
-    } else if (dirty && !graph.heads.some(f => f.cloud.formatVersion === 2 && f.cloud.syncHash === localHash)) {
+    } else if (dirty && !graph.heads.some(f => f.cloud.formatVersion === 3 && f.cloud.syncHash === localHash)) {
       // Save a local branch before asking the user to resolve two independently edited copies.
       await this.queue(state, await createDriveDocument(local.backup, link.datasetId, link.baseVersionId ? [link.baseVersionId] : [], 'sync')); await this.flush();
     }
     state = await this.state();
-    const latest = versionGraph((await this.api.list()).filter(f => f.cloud.datasetId === link.datasetId)); this.check();
+    const latestFiles = (await this.api.list()).filter(f => f.cloud.datasetId === link.datasetId); this.check();
+    const latest = versionGraph(latestFiles);
+    if (!latest.heads.length) throw new DriveCollectionDeleted(link.datasetId);
     if (latest.heads.length > 1 || (latest.heads.length === 1 && latest.heads[0].cloud.versionId !== state.link!.baseVersionId)) {
+      const currentLocal = await this.board.snapshot(link.kind, link.workspaceIds); this.check();
+      if (await this.autoMerge(state, currentLocal, latestFiles)) return;
       state.conflict = latest.heads.map(f => f.cloud.versionId).sort(); await this.persist(state);
-    }
+    } else {delete state.conflict; delete state.mergeBase; await this.persist(state);}
   }
   async resolve(reviewedHeads: string[], cloudChoice?: DriveFile, expectedRevision?: string, purpose: 'backup' | 'sync' = 'sync'): Promise<void> {
+    this.mergeAttempts = 0;
     await this.flush();
     let state = await this.state(); const link = state.link;
     if (!link || !state.conflict) throw new Error('目前沒有待確認的同步分歧。');
     await this.api.assertAvailable(link.datasetId); this.check();
-    let graph = versionGraph((await this.api.list()).filter(f => f.cloud.datasetId === link.datasetId)); this.check();
+    let files = (await this.api.list()).filter(f => f.cloud.datasetId === link.datasetId); this.check();
+    let graph = versionGraph(files);
     if (JSON.stringify(graph.heads.map(f => f.cloud.versionId).sort()) !== JSON.stringify([...reviewedHeads].sort())) throw new Error('確認期間雲端版本已變更，請重新載入後選擇。');
     if (graph.heads.length > 20) throw new Error('此集合超過 20 個分支，請先匯入需要的副本，再建立新集合；舊版本會保留。');
     const local = await this.board.snapshot(link.kind, link.workspaceIds); this.check();
+    const base = await this.mergeBaseline(state, files, [...graph.heads.map(file => file.cloud.versionId), link.baseVersionId]);
+    if (base) state.mergeBase = base;
     let selected = local.backup;
     if (cloudChoice) {
       if (!expectedRevision || local.revision !== expectedRevision) throw new Error('確認期間本機資料已更新，請重新檢查後再選擇。');
@@ -182,24 +267,28 @@ export class DriveEngine {
       selected = await this.api.read(cloudChoice); this.check();
       await this.api.assertAvailable(link.datasetId); this.check();
       const hash = await syncHash(local.backup);
-      if (!graph.heads.some(f => f.cloud.formatVersion === 2 && f.cloud.syncHash === hash)) {
+      if (!graph.heads.some(f => f.cloud.formatVersion === 3 && f.cloud.syncHash === hash)) {
         const branch = await createDriveDocument(local.backup, link.datasetId, link.baseVersionId ? [link.baseVersionId] : [], purpose);
         const expected = [...graph.heads.map(f => f.cloud.versionId).filter(id => !branch.cloud.parents.includes(id)), branch.cloud.versionId].sort();
         await this.queue(state, branch); await this.flush();
         state = await this.state();
-        graph = versionGraph((await this.api.list()).filter(f => f.cloud.datasetId === link.datasetId)); this.check();
+        files = (await this.api.list()).filter(f => f.cloud.datasetId === link.datasetId); this.check();
+        graph = versionGraph(files);
         const actual = graph.heads.map(f => f.cloud.versionId).sort();
         if (JSON.stringify(actual) !== JSON.stringify(expected)) {state.conflict = actual; await this.persist(state); throw new Error('保存本機版本期間雲端已更新，請重新預覽後選擇。');}
       }
       if (selected.kind !== link.kind || (link.kind === 'workspaces' && (selected.data.workspaces.length !== link.workspaceIds.length || selected.data.workspaces.some(w => !link.workspaceIds.includes(w.id))))) throw new Error('雲端集合範圍不同，請改用匯入副本。');
-      await this.board.apply(selected, local.revision, link.workspaceIds); this.check();
     }
-    const document = await createDriveDocument(selected, link.datasetId, graph.heads.map(f => f.cloud.versionId), purpose); this.check();
-    await this.queue(state, document); await this.flush();
-    state = await this.state();
-    const after = versionGraph((await this.api.list()).filter(f => f.cloud.datasetId === link.datasetId)); this.check();
-    if (after.heads.length === 1 && after.heads[0].cloud.versionId === document.cloud.versionId) delete state.conflict;
-    else state.conflict = after.heads.map(f => f.cloud.versionId).sort();
-    await this.persist(state);
+    if (base && this.scope(base, state)) {
+      const documents = await Promise.all(graph.heads.map(file => cloudChoice && file.id === cloudChoice.id ? selected as DriveDocument
+        : state.base?.cloud.versionId === file.cloud.versionId && state.base.cloud.fileHash === file.cloud.fileHash ? state.base : this.api.read(file))); this.check();
+      if (documents.every(document => this.scope(document, state))) {
+        const inputs = [local.backup, ...documents];
+        const preferred = cloudChoice ? documents.findIndex(document => document.cloud.versionId === cloudChoice.cloud.versionId) + 1 : 0;
+        selected = mergeDriveBackups(base, inputs, preferred).backup;
+      }
+    }
+    if (!this.scope(selected, state)) throw new Error('整併後的工作空間範圍不同，請改用匯入副本。');
+    await this.publishMerge(state, selected, local.revision, graph.heads, purpose);
   }
 }

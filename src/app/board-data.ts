@@ -1,9 +1,10 @@
-import type { BoardState, BoardStatus, Project, Task } from './models';
+import type { BoardState, BoardStatus, Project, Task, TaskConflict, TaskConflictVersion } from './models';
 import { COLUMNS, PRIORITIES } from './models.ts';
 import { validColor } from './appearance-data.ts';
 import { scheduleError, validDate } from './task-schedule.ts';
 import { readCalendarOrigin, readCalendarTransfers } from './calendar-transfer-data.ts';
 import { validTaskEditTime } from './task-activity-data.ts';
+import { readDeviceIdentity } from './device-data.ts';
 
 /** Read saved schemas without mutating the source or discarding legacy tasks. */
 export function readBoardState(value: unknown): BoardState | null {
@@ -29,6 +30,7 @@ export function readBoardState(value: unknown): BoardState | null {
     && typeof task.dueDate === 'string' && validDate(task.dueDate)
     && (task.pinned === undefined || typeof task.pinned === 'boolean')
     && (task.updatedAt === undefined || validTaskEditTime(task.updatedAt))
+    && (task.editSource === undefined || !!readDeviceIdentity(task.editSource))
     && (task.deletedAt === undefined || validTaskEditTime(task.deletedAt))
     && (legacy || (typeof task.startDate === 'string' && typeof task.startTime === 'string' && typeof task.dueTime === 'string' && !scheduleError(task)))
     && Array.isArray(task.subtasks) && task.subtasks.every(subtask => subtask && typeof subtask.id === 'string'
@@ -52,15 +54,37 @@ export function readBoardState(value: unknown): BoardState | null {
     subtasks: task.subtasks.map(subtask => ({id: subtask.id, title: subtask.title, done: subtask.done})),
     ...(task.pinned === undefined ? {} : {pinned: task.pinned}),
     ...(task.updatedAt === undefined ? {} : {updatedAt: task.updatedAt}),
+    ...(task.editSource === undefined ? {} : {editSource: readDeviceIdentity(task.editSource)!}),
     ...(task.deletedAt === undefined ? {} : {deletedAt: task.deletedAt}),
     ...(task.calendarOrigin ? {calendarOrigin: readCalendarOrigin(task.calendarOrigin)!} : {})
   }));
+  let taskConflicts: TaskConflict[] | undefined;
+  if (source.taskConflicts !== undefined) {
+    if (!Array.isArray(source.taskConflicts) || source.taskConflicts.length > 10000) return null;
+    taskConflicts = [];
+    for (const conflict of source.taskConflicts) {
+      if (!conflict || typeof conflict.id !== 'string' || !conflict.id || !Array.isArray(conflict.versions) || conflict.versions.length < 2 || conflict.versions.length > 100) return null;
+      const versions: TaskConflictVersion[] = [];
+      for (const version of conflict.versions) {
+        if (!version || typeof version.key !== 'string' || !version.key || version.key.length > 1000000) return null;
+        const board = version.task === null ? undefined : readBoardState({...source, taskConflicts: undefined, tasks: [version.task]});
+        const task = board?.tasks[0];
+        if (version.task !== null && (!task || task.id !== conflict.id || task.subtasks.some(item => !item.id) || new Set(task.subtasks.map(item => item.id)).size !== task.subtasks.length)) return null;
+        const origin = version.source;
+        if (origin !== undefined && (!origin || typeof origin !== 'object' || Array.isArray(origin) || ((origin.id !== undefined || origin.name !== undefined) && !readDeviceIdentity(origin)) || (origin.updatedAt !== undefined && !validTaskEditTime(origin.updatedAt)))) return null;
+        versions.push({key: version.key, task: task ?? null, ...(origin === undefined ? {} : {source: {...(origin.id ? readDeviceIdentity(origin)! : {}), ...(origin.updatedAt === undefined ? {} : {updatedAt: origin.updatedAt})}})});
+      }
+      if (new Set(versions.map(version => version.key)).size !== versions.length || (conflict.resolved !== undefined && !versions.some(version => version.key === conflict.resolved))) return null;
+      taskConflicts.push({id: conflict.id, versions, ...(conflict.resolved === undefined ? {} : {resolved: conflict.resolved})});
+    }
+    if (new Set(taskConflicts.map(conflict => conflict.id)).size !== taskConflicts.length) return null;
+  }
   return {
     // Keep an absent archive flag absent so existing cloud backup hashes stay valid.
     version: 4, projects: projects.map(project => ({id: project.id, name: project.name.trim(), ...(project.archived === undefined ? {} : {archived: project.archived})})),
     categories: source.categories.map(category => ({id: category.id, name: category.name, color: category.color})),
     statuses: statuses.map(status => ({id: status.id, label: status.label, subtitle: status.subtitle, color: status.color, kind: status.kind, hidden: status.hidden ?? status.kind === 'archived'})), tasks,
-    ...(calendarTransfers ? {calendarTransfers} : {})
+    ...(calendarTransfers ? {calendarTransfers} : {}), ...(taskConflicts ? {taskConflicts} : {})
   };
 }
 

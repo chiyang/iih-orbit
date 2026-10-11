@@ -15,6 +15,7 @@ export function sameBoard(left: BoardState, right: BoardState): boolean {
 }
 
 export function boardChangeLabel(before: BoardState, after: BoardState): string {
+  if (JSON.stringify(before.taskConflicts) !== JSON.stringify(after.taskConflicts)) return '選擇任務版本';
   for (const [key, label] of [['projects', '專案'], ['categories', '分類'], ['statuses', '狀態']] as const) {
     if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) return `變更${label}`;
   }

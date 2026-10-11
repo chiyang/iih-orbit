@@ -1,0 +1,40 @@
+<div class="comparison-intro"><strong>{{ context().workspace.name }}</strong><p>比較完整版本，修改想保留的那一份後，按「儲存並採用這份」。只會更新這個任務，其他版本保留於備份歷史。</p></div>
+@if (stale()) {<p class="comparison-error" role="alert">衝突或原資料已更新，這次草稿仍保留。請先複製要保留的內容，再關閉並重新開啟最新版本。</p>}
+<div class="comparison-grid" (keydown.escape)="escapeDescription($event)">
+  @for (version of context().conflict.versions; track version.key; let index = $index) {
+    <article class="version-card" [class.description-focused]="focusedDescription() === index" [class.other-focused]="focusedDescription() >= 0 && focusedDescription() !== index" [attr.aria-label]="'版本 ' + (index + 1)">
+      <header><h3>版本 {{ index + 1 }}</h3><p class="version-source">最近內容編輯來源：{{ sourceName(version) }}</p>@if (sourceTime(version); as time) {<time [attr.datetime]="time">修改於 {{ time | date:'yyyy/M/d HH:mm:ss' }}</time>} @else {<small>未記錄修改時間</small>}</header>
+      @if (drafts()[index]; as task) {
+        <form (ngSubmit)="save(index)">
+          <fieldset [disabled]="busy()">
+            <label class="version-field task-name" [hidden]="focusedDescription() === index">任務名稱<input name="title" [(ngModel)]="task.title" required maxlength="100"></label>
+            @defer (on immediate) {<app-markdown-editor [labelId]="'conflict-description-' + index" [value]="task.description" (valueChange)="task.description = $event" initialMode="edit" [expanded]="focusedDescription() === index" (expandedChange)="focusedDescription.set($event ? index : -1)" />} @placeholder {<p role="status">載入完整描述…</p>} @error {<label class="version-field">任務描述<textarea name="description" [(ngModel)]="task.description" maxlength="20000" rows="8"></textarea></label>}
+            <div [hidden]="focusedDescription() === index">
+              <div class="version-fields">
+                <label class="version-field">所屬專案<select name="project" [(ngModel)]="task.projectId"><option value="">未指定專案</option>@for (project of workspace().projects; track project.id) {<option [value]="project.id">{{ project.name }}{{ project.archived ? '（已封存）' : '' }}</option>}</select></label>
+                <label class="version-field">任務分類<select name="category" [(ngModel)]="task.categoryId"><option value="">未分類</option>@for (category of workspace().categories; track category.id) {<option [value]="category.id">{{ category.name }}</option>}</select></label>
+                <label class="version-field">目前狀態<select name="status" [(ngModel)]="task.status">@for (status of workspace().statuses; track status.id) {<option [value]="status.id">{{ status.label }}</option>}</select></label>
+                <label class="version-field">優先順序<select name="priority" [(ngModel)]="task.priority">@for (priority of priorities; track priority.id) {<option [value]="priority.id">{{ priority.label }}</option>}</select></label>
+              </div>
+              <label class="version-checkbox"><input name="pinned" type="checkbox" [(ngModel)]="task.pinned"><app-icon [name]="task.pinned ? 'pinFilled' : 'pin'" />釘選任務</label>
+              <div class="version-fields schedule-fields">
+                <div><label class="version-field">開始日期<input type="date" name="startDate" [ngModel]="task.startDate" (ngModelChange)="dateChanged(task, 'start', $event)" min="1900-01-01" max="9999-12-31"></label><app-schedule-time [value]="task.startTime" (valueChange)="task.startTime = $event" label="開始時間" [disabled]="!task.startDate || busy()" />@if (task.startTime) {<button type="button" class="text-button" (click)="task.startTime = ''">移除開始時間</button>}</div>
+                <div><label class="version-field">截止日期<input type="date" name="dueDate" [ngModel]="task.dueDate" (ngModelChange)="dateChanged(task, 'due', $event)" min="1900-01-01" max="9999-12-31"></label><app-schedule-time [value]="task.dueTime" (valueChange)="task.dueTime = $event" label="截止時間" [disabled]="!task.dueDate || busy()" />@if (task.dueTime) {<button type="button" class="text-button" (click)="task.dueTime = ''">移除截止時間</button>}</div>
+              </div>
+              <h4>子任務</h4>
+              @for (subtask of task.subtasks; track subtask.id) {<div class="version-subtask"><input type="checkbox" [name]="'done-' + subtask.id" [(ngModel)]="subtask.done" [attr.aria-label]="'完成子任務 ' + subtask.title"><input [name]="'subtask-' + subtask.id" [(ngModel)]="subtask.title" required maxlength="200" aria-label="子任務名稱"><button type="button" [attr.aria-label]="'移除子任務 ' + subtask.title" (click)="removeSubtask(index, subtask.id)"><app-icon name="close" /></button></div>}
+              <div class="version-subtask"><input name="newSubtask" [(ngModel)]="newSubtasks[index]" maxlength="200" aria-label="新增子任務名稱" placeholder="新增子任務" (keydown.enter)="$event.preventDefault(); addSubtask(index)"><button type="button" (click)="addSubtask(index)">新增</button></div>
+              @if (version.task?.deletedAt) {<label class="version-checkbox trash-choice"><input type="checkbox" name="trashed" [ngModel]="!!task.deletedAt" (ngModelChange)="setTrashed(task, $event)">採用後放入垃圾桶</label><p class="version-note">取消勾選即可還原這份任務內容。</p>}
+            </div>
+            @if (error() && errorIndex() === index) {<p class="comparison-error" role="alert">{{ error() }}</p>}
+            <button type="submit" class="adopt-button" [disabled]="stale() || store.pendingWrites() > 0">{{ busy() ? '保存中…' : '儲存並採用這份' }}</button>
+          </fieldset>
+        </form>
+      } @else {
+        <div class="deleted-version"><app-icon name="trash" /><strong>這份版本已永久刪除任務</strong><p>採用後，任務會從目前工作空間移除，其他版本仍保留於備份歷史。</p></div>
+        @if (error() && errorIndex() === index) {<p class="comparison-error" role="alert">{{ error() }}</p>}
+        @if (deleting() === index) {<p class="version-note" role="alert">確定採用永久刪除版本？</p><button type="button" class="text-button" (click)="deleting.set(-1)">保留內容</button><button type="button" class="adopt-button danger" [disabled]="busy() || stale() || store.pendingWrites() > 0" (click)="save(index)">確認採用永久刪除</button>} @else {<button type="button" class="adopt-button danger" [disabled]="busy() || stale()" (click)="deleting.set(index)">採用永久刪除版本</button>}
+      }
+    </article>
+  }
+</div>

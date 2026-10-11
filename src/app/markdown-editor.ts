@@ -8,6 +8,7 @@ import { RichContent } from './rich-content';
 export class MarkdownEditor {
   private readonly injector = inject(Injector);
   readonly value = input('');
+  readonly labelId = input('description-label');
   readonly initialMode = input<'edit' | 'preview'>('edit');
   readonly expanded = input(false);
   readonly valueChange = output<string>();

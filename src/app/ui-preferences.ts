@@ -6,7 +6,7 @@ import { AppearancePreferences, TextSize, ThemeMode, themeTokens } from './appea
 export const TEXT_SIZES: {id: TextSize; label: string; scale: number}[] = [
   {id: 'extra-small', label: '特小 70%', scale: .7},
   {id: 'compact', label: '小 80%', scale: .8},
-  // Keep the saved identifier so existing 90% preferences and backups retain their size.
+  // Keep the saved identifier so existing local 90% preferences retain their size.
   {id: 'small', label: '中 90%', scale: .9},
   {id: 'standard', label: '標準 100%', scale: 1},
   {id: 'large', label: '大 115%', scale: 1.15},

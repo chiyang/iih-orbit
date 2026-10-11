@@ -1,6 +1,7 @@
 .modal-backdrop { position: fixed; inset: 0; background: rgb(var(--shadow-rgb) / 0.271); backdrop-filter: blur(4px); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: var(--sp24); }
 .modal { width: 760px; max-width: 100%; max-height: calc(100dvh - 48px); overflow-y: auto; border-radius: 15px; background: var(--surface); box-shadow: 0 24px 80px rgb(var(--shadow-rgb) / 0.169); animation: enter .18s ease-out; }
 .modal[data-modal='task'] { width: 820px; }
+.modal[data-modal='task-conflict'] { width: 1200px; }
 .task-form [hidden] { display: none !important; }
 .modal[data-modal='projects'] { width: 760px; }
 .modal[data-modal='workspaces'] { width: 900px; }

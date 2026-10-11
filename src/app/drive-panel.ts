@@ -7,7 +7,6 @@ import { DriveDocument, DriveFile, DriveSettings } from './drive-data';
 import { DriveService, type DriveRemovalReview } from './drive-service';
 import { driveCatalog, fileScope } from './drive-catalog';
 import { Icon } from './icon';
-import { TEXT_SIZES } from './ui-preferences';
 import { GoogleServiceHeader } from './google-service-header';
 
 @Component({selector: 'app-drive-panel', imports: [FormsModule, Icon, DatePipe, DecimalPipe, NgTemplateOutlet, GoogleServiceHeader], templateUrl: './drive-panel.html', styleUrl: './drive-panel.css'})
@@ -93,11 +92,12 @@ export class DrivePanel {
   });
   readonly useDescription = computed(() => this.useAction() === 'restore'
     ? '使用備份當時的全部工作空間與設定。自動同步會暫停，Google 需要重新連線。'
+    : this.useAction() === 'cloud' ? '以這份內容決定衝突，保留可安全整併的其他修改；無法安全判斷時使用選定內容。其他副本仍保留。'
     : `${this.preview()?.kind === 'full' ? '使用所有工作空間與設定' : '使用這些工作空間'}，並繼續${this.useAction() === 'cloud' && this.store.drive().mode === 'backup' ? '自動備份' : '跨裝置同步'}。`);
   readonly pendingTasks = computed(() => this.preview()?.data.workspaces.reduce((sum, w) => sum + w.tasks.length, 0) ?? 0);
   readonly savedAppearance = computed(() => {
     const preferences = this.preview()?.preferences;
-    return preferences ? {...preferences, themeLabel: {light: '淺色', dark: '深色', system: '跟隨系統'}[preferences.theme], fontLabel: TEXT_SIZES.find(item => item.id === preferences.textSize)?.label} : null;
+    return preferences ? {accent: preferences.accent, themeLabel: {light: '淺色', dark: '深色', system: '跟隨系統'}[preferences.theme]} : null;
   });
   confirmation = '';
   removalConfirmation = '';
@@ -186,7 +186,7 @@ export class DrivePanel {
       await this.drive.resolve(heads, file, revision);
       if (!this.drive.error() && !this.drive.runtime().conflict && this.drive.runtime().link?.datasetId === file.cloud.datasetId && this.store.generation() === generation && this.drive.auth.connectionVersion() === connection) {
         this.selectingCloud.set(false);
-        this.drive.message.set('已套用雲端內容，其他副本仍保留為過去備份。');
+        this.drive.message.set('已套用雲端內容並保留可安全整併的修改，其他副本仍保留為過去備份。');
       }
     } catch (error) {this.error.set(error instanceof Error ? error.message : '無法套用雲端內容，請重試。');}
     finally {this.importing.set(false);}

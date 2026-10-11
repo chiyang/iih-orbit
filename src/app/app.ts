@@ -46,13 +46,14 @@ import { StartupGuide } from './startup-guide';
 import { TaskPanel } from './task-panel';
 import { recentlyEdited } from './task-activity-data';
 import { TrashView } from './trash-view';
+import { TaskConflictEditor, TaskConflictContext } from './task-conflict-editor';
 
-type Modal = 'intro' | 'task' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'empty-trash' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | null;
+type Modal = 'intro' | 'task' | 'task-conflict' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'empty-trash' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView],
+  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView, TaskConflictEditor],
   templateUrl: './app.html',
   styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css', './startup.css', './task-shortcuts.css', './workspace-controls.css']
 })
@@ -93,6 +94,20 @@ export class App {
     const current = this.store.tasks().find(item => item.id === task.id);
     if (current) this.openTask(current.status, current);
     else this.notify('這個任務已被刪除或移至其他工作空間。');
+  }
+  readonly conflictContext = signal<TaskConflictContext | null>(null);
+  readonly conflictSaving = signal(false);
+  openTaskConflict(entry: Pick<TaskConflictContext, 'workspace' | 'conflict'>): void {
+    if (this.modal()) return;
+    this.store.refreshFromStorage();
+    const current = this.store.taskConflicts().find(value => value.workspace.id === entry.workspace.id && value.conflict.id === entry.conflict.id);
+    if (!current) {this.notify('這個衝突已處理完成。'); return;}
+    this.conflictContext.set({...structuredClone(current), generation: this.store.generation()});
+    this.conflictSaving.set(false); this.modal.set('task-conflict');
+  }
+  taskConflictSaved(persisted: boolean): void {
+    this.conflictSaving.set(false); this.closeModal();
+    this.notify(persisted ? '已儲存並採用任務版本；啟用同步並連線後，會傳到其他裝置。' : '內容只暫存於此分頁，請先匯出備份。');
   }
   async togglePin(task: Task): Promise<void> {
     if (this.modal() || this.store.pendingWrites()) return;
@@ -580,6 +595,8 @@ export class App {
 
   openTask(status: TaskStatus = 'todo', task?: Task, date = ''): void {
     if (Date.now() - this.dragEndedAt < 200) return;
+    const conflict = task && this.store.taskConflicts().find(entry => entry.workspace.id === this.store.currentWorkspace().id && entry.conflict.id === task.id);
+    if (conflict) {if (!this.modal()) this.openTaskConflict(conflict); else this.notify('此任務有同步衝突，草稿仍保留。請關閉後重新開啟，比較與編輯完整版本。'); return;}
     if (task?.deletedAt) { this.openTrash(); return; }
     if (!task) this.trashOpen.set(false);
     const initialStatus = this.statuses().some(item => item.id === status) ? status : this.statuses().find(item => item.kind === 'active')?.id ?? this.statuses()[0].id;
@@ -1105,11 +1122,12 @@ export class App {
   }
 
   closeModal(): void {
-    if (this.introSaving() || this.workspaceSaving()) return;
+    if (this.introSaving() || this.workspaceSaving() || this.conflictSaving()) return;
     if (this.modal() === 'intro' && this.introFirstUse() && this.store.onboarding() === 'guide') { void this.finishIntroduction(); return; }
     if (this.calendarPublishing()) return;
     if (this.modal() === 'settings' && this.store.pendingWrites() > 0) return;
     this.modal.set(null);
+    this.conflictContext.set(null);
     this.introFirstUse.set(false);
     this.firstWorkspaceDialog.set(false);
     this.descriptionFocused.set(false);

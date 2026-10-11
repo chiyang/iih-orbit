@@ -7,6 +7,8 @@ import {mkdir, mkdtemp, rm} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
 import {createDriveDocument, readDriveFile, versionGraph, versionProperties} from '../src/app/drive-data.ts';
+import {mergeDriveBackups} from '../src/app/drive-merge.ts';
+import {createBackup} from '../src/app/backup-data.ts';
 import {expiredDriveVersions} from '../src/app/drive-retention.ts';
 
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -112,6 +114,81 @@ test('自動同步有新版本才整理該集合並更新列表，整理失敗�
   } finally {f.close();}
 });
 
+test('任務同欄位衝突保存成單一雲端結果與側欄待選版本，其他任務仍能自動同步', async () => {
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync'); const root = [...f.documents.values()][0], remote = structuredClone(root);
+    remote.data.workspaces[0].tasks[0].title = '另一台裝置的版本'; remote.data.workspaces[0].tasks[0].description = '雲端的新描述';
+    f.documents.set('remote_conflict', await createDriveDocument(remote, root.cloud.datasetId, [root.cloud.versionId], 'sync'));
+    await f.store.updateAppearance({textSize: 'large'}); await f.store.saveTask({...f.store.tasks()[0], title: '本機的版本', pinned: true});
+    await f.service.sync(false);
+    assert.equal(f.service.error(), ''); assert.equal(f.service.runtime().conflict, undefined); assert.equal(versionGraph(await f.api.list()).heads.length, 1);
+    const entry = f.store.taskConflicts()[0]; assert.equal(entry.conflict.versions.length, 2); assert.equal(f.store.appearance().textSize, 'large');
+    assert.ok(entry.conflict.versions.every(version => version.task.description === '雲端的新描述' && version.task.pinned));
+    const before = f.documents.size; await f.service.sync(false); assert.equal(f.documents.size, before);
+    const edit = await f.store.saveTask({...f.store.tasks()[0], description: '不應覆寫待選版本'}); assert.equal(edit.ok, false); assert.match(edit.message, /衝突/);
+    const created = {...f.store.tasks()[0], id: 'unrelated-task', title: '其他任務'}; await f.store.saveTask(created); await f.service.sync(false);
+    assert.equal(f.documents.size, before + 1); assert.equal(f.store.taskConflicts().length, 1);
+    const chosen = entry.conflict.versions.find(version => version.task.title === '另一台裝置的版本');
+    assert.equal((await f.store.resolveTaskConflict(entry.workspace.id, entry.conflict, chosen.key)).ok, true);
+    assert.equal(f.store.taskConflicts().length, 0); assert.equal(f.store.tasks().find(task => task.id === 'sync-task').title, chosen.task.title);
+    assert.equal(f.store.undoLabel(), '選擇任務版本'); assert.equal((await f.store.undo()).ok, true); assert.equal(f.store.taskConflicts().length, 1);
+    assert.equal((await f.store.redo()).ok, true); assert.equal(f.store.taskConflicts().length, 0);
+    await f.service.sync(false); assert.equal(versionGraph(await f.api.list()).heads.length, 1);
+    const latest = [...f.documents.values()].at(-1); assert.equal(latest.data.workspaces[0].taskConflicts[0].resolved, chosen.key);
+    assert.equal(latest.data.workspaces[0].tasks.find(task => task.id === 'sync-task').description, '雲端的新描述');
+    const count = f.documents.size; await f.service.sync(false); assert.equal(f.documents.size, count);
+  } finally {f.close();}
+});
+
+test('側欄選擇版本拒絕過期衝突並可處理刪除版本，匯出與工作空間副本保留衝突內容', async () => {
+  const f = await fixture();
+  try {
+    const {backup: base} = await f.store.driveSnapshot('full', []), a = structuredClone(base), b = structuredClone(base);
+    a.data.workspaces[0].tasks = []; b.data.workspaces[0].tasks[0].description = '刪除期間另一台裝置的修改';
+    const merged = mergeDriveBackups(base, [a, b], undefined, true).backup;
+    assert.equal((await f.store.applyDriveBackup(merged, f.store.revision(), [])).ok, true);
+    const entry = f.store.taskConflicts()[0], stale = structuredClone(entry.conflict); stale.versions[0].key += 'stale';
+    assert.equal((await f.store.resolveTaskConflict(entry.workspace.id, stale, entry.conflict.versions[0].key)).ok, false);
+    const {backup: exported} = await f.store.driveSnapshot('full', []); assert.equal(exported.data.workspaces[0].taskConflicts[0].versions.length, 2);
+    const copied = await f.store.importBackup(createBackup(exported.data, 'workspaces', [entry.workspace.id])); assert.equal(copied.ok, true); assert.equal(f.store.taskConflicts().length, 2);
+    const copiedEntry = f.store.taskConflicts().find(value => value.workspace.id !== entry.workspace.id);
+    assert.notEqual(copiedEntry.conflict.id, entry.conflict.id); assert.ok(copiedEntry.conflict.versions.every(version => !version.task || version.task.id === copiedEntry.conflict.id));
+    const deleted = entry.conflict.versions.find(version => !version.task);
+    assert.equal((await f.store.resolveTaskConflict(entry.workspace.id, entry.conflict, deleted.key)).ok, true);
+    assert.equal(f.store.workspaces().find(workspace => workspace.id === entry.workspace.id).tasks.length, 0);
+    assert.equal(f.store.taskConflicts().length, 1);
+    assert.equal((await f.store.resolveTaskConflict(entry.workspace.id, entry.conflict, deleted.key)).ok, false);
+  } finally {f.close();}
+});
+
+test('修改並採用一次保存草稿與選擇，保留原版本、復原重做及同步；過期或不合法草稿拒絕', async () => {
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync');
+    const root = [...f.documents.values()][0], {backup: base} = await f.store.driveSnapshot('full', []), a = structuredClone(base), b = structuredClone(base);
+    a.data.workspaces[0].tasks[0].description = '工作電腦描述'; b.data.workspaces[0].tasks[0].description = '手機描述';
+    const pending = mergeDriveBackups(base, [a, b], undefined, true).backup;
+    assert.equal((await f.store.applyDriveBackup(pending, f.store.revision(), [])).ok, true);
+    const entry = f.store.taskConflicts()[0], originals = structuredClone(entry.conflict), selected = entry.conflict.versions[0], generation = f.store.generation();
+    const draft = {...structuredClone(selected.task), title: '人工整合任務', description: '保留工作電腦的步驟\n保留手機的備註', subtasks: [{id: 'manual', title: '手動新增', done: true}], pinned: true};
+    for (const invalid of [{...draft, id: 'other-task'}, {...draft, title: ''}, {...draft, categoryId: 'missing'}, {...draft, startDate: '2026-10-13', dueDate: '2026-10-12'}]) {
+      assert.equal((await f.store.resolveTaskConflict(entry.workspace.id, entry.conflict, selected.key, generation, invalid)).ok, false);
+      assert.deepEqual(f.store.taskConflicts()[0].conflict, originals);
+    }
+    assert.equal((await f.store.resolveTaskConflict(entry.workspace.id, entry.conflict, selected.key, generation, draft)).ok, true);
+    assert.equal(f.store.taskConflicts().length, 0); assert.equal(f.store.tasks()[0].description, draft.description);
+    const saved = f.store.workspaces().find(workspace => workspace.id === entry.workspace.id).taskConflicts[0];
+    assert.deepEqual(saved.versions, originals.versions); assert.equal(saved.resolved, selected.key);
+    await f.store.undo(); assert.equal(f.store.taskConflicts().length, 1); await f.store.redo(); assert.equal(f.store.tasks()[0].title, draft.title);
+    assert.equal((await f.store.resolveTaskConflict(entry.workspace.id, entry.conflict, selected.key, generation, {...draft, description: '過期修改'})).ok, false);
+    const late = await createDriveDocument(b, root.cloud.datasetId, [root.cloud.versionId], 'sync'); f.documents.set('late_phone', late);
+    await f.service.sync(false); assert.equal(f.service.error(), '');
+    assert.equal(f.store.taskConflicts().length, 0); assert.equal(f.store.tasks()[0].description, draft.description);
+    const count = f.documents.size; await f.service.sync(false); assert.equal(f.documents.size, count);
+  } finally {f.close();}
+});
+
 test('既有自動備份讀取後保留八份，之後每次保存也維持八份，手動另存保留', async () => {
   const f = await fixture();
   try {
@@ -197,7 +274,7 @@ test('多份雲端內容先展開選擇，選定副本立即套用且不需預�
   const f = await fixture();
   try {
     await f.service.start('full', [], 'sync'); const root = [...f.documents.values()][0];
-    const backup = structuredClone(root); backup.data.workspaces[0].tasks[0].title = '要選擇的雲端內容';
+    const backup = structuredClone(root); backup.data.workspaces[0].tasks[0].title = '要選擇的雲端內容'; backup.preferences.accent = '#123456'; await f.store.updateAppearance({accent: '#654321'});
     const remote = await createDriveDocument(backup, root.cloud.datasetId, [root.cloud.versionId], 'sync'); f.documents.set('remote_choice', remote);
     await f.store.saveTask({...f.store.tasks()[0], title: '選擇之前的本機內容'}); await f.service.sync();
     const panel = f.panel(); await settle();
@@ -224,7 +301,7 @@ test('雲端選擇在帳號連線改變時關閉，未連線不展開舊副本',
   const f = await fixture();
   try {
     await f.service.start('full', [], 'sync'); const root = [...f.documents.values()][0];
-    const backup = structuredClone(root); backup.data.workspaces[0].tasks[0].title = '不同的遠端內容';
+    const backup = structuredClone(root); backup.data.workspaces[0].tasks[0].title = '不同的遠端內容'; backup.preferences.accent = '#123456'; await f.store.updateAppearance({accent: '#654321'});
     const remote = await createDriveDocument(backup, root.cloud.datasetId, [root.cloud.versionId], 'sync'); f.documents.set('remote_choice', remote);
     await f.store.saveTask({...f.store.tasks()[0], title: '本機修改'}); await f.service.sync();
     const panel = f.panel(); await settle(); await panel.selectCloudContent(); assert.equal(panel.selectingCloud(), true);
@@ -238,7 +315,7 @@ test('直接套用雲端內容遇到下載失敗或本機、雲端、連線變�
     const f = await fixture();
     try {
       await f.service.start('full', [], 'sync'); const root = [...f.documents.values()][0];
-      const backup = structuredClone(root); backup.data.workspaces[0].tasks[0].title = '原先選定的雲端內容';
+      const backup = structuredClone(root); backup.data.workspaces[0].tasks[0].title = '原先選定的雲端內容'; backup.preferences.accent = '#123456'; await f.store.updateAppearance({accent: '#654321'});
       const remote = await createDriveDocument(backup, root.cloud.datasetId, [root.cloud.versionId], 'sync'); f.documents.set('remote_choice', remote);
       await f.store.saveTask({...f.store.tasks()[0], title: '保留的本機內容'}); await f.service.sync();
       const panel = f.panel(); await settle(); await panel.selectCloudContent();
@@ -395,7 +472,26 @@ test('Drive 控制器建立集合、保存本機修改，列表更新保留成�
   } finally {f.close();}
 });
 
-test('只更改主題色時，全部資料自動備份在等待時間後保存完整外觀與提醒設定', async t => {
+test('本機字級調整不產生自動備份或同步版本，重新載入後仍保留', async () => {
+  for (const mode of ['backup', 'sync']) {
+    const f = await fixture();
+    try {
+      await f.service.start('full', [], mode);
+      await f.service.sync(); await settle();
+      const count = f.documents.size, base = f.service.runtime().link.baseVersionId;
+      for (const textSize of ['compact', 'extra-large']) {
+        await f.store.updateAppearance({textSize}); await f.service.sync();
+        assert.equal(f.documents.size, count); assert.equal(f.service.runtime().link.baseVersionId, base);
+        assert.equal(f.service.runtime().conflict, undefined); assert.equal(f.service.error(), '');
+        assert.equal(f.store.appearance().textSize, textSize);
+        assert.equal(new BoardStore().appearance().textSize, textSize);
+      }
+      for (const document of f.documents.values()) assert.equal(Object.hasOwn(document.preferences, 'textSize'), false);
+    } finally {f.close();}
+  }
+});
+
+test('只更改主題色時，全部資料自動備份在等待時間後保存主題與提醒設定', async t => {
   t.mock.timers.enable({apis: ['setTimeout']});
   const f = await fixture();
   try {
@@ -404,12 +500,12 @@ test('只更改主題色時，全部資料自動備份在等待時間後保存�
     await f.store.updateAppearance({accent: '#3264ad'}); await settle();
     t.mock.timers.tick(14999); await settle(); assert.equal(sync.mock.callCount(), 0); assert.equal(f.documents.size, count);
     t.mock.timers.tick(1); assert.equal(sync.mock.callCount(), 1); await sync.mock.calls[0].result; assert.equal(f.documents.size, count + 1);
-    assert.deepEqual([...f.documents.values()].at(-1).preferences, f.store.appearance());
+    assert.deepEqual([...f.documents.values()].at(-1).preferences, {theme: f.store.appearance().theme, accent: f.store.appearance().accent});
     await f.store.updateAppearance({theme: 'dark', textSize: 'compact'});
     await f.store.updateReminders({leadMinutes: 60}); await settle();
     t.mock.timers.tick(15000); assert.equal(sync.mock.callCount(), 2); await sync.mock.calls[1].result; assert.equal(f.documents.size, count + 2);
     const saved = [...f.documents.values()].at(-1);
-    assert.deepEqual(saved.preferences, f.store.appearance()); assert.equal(saved.reminders.leadMinutes, 60);
+    assert.deepEqual(saved.preferences, {theme: f.store.appearance().theme, accent: f.store.appearance().accent}); assert.equal(saved.reminders.leadMinutes, 60);
     t.mock.timers.tick(15000); await settle(); assert.equal(f.documents.size, count + 2);
   } finally {f.close(); t.mock.timers.reset();}
 });
@@ -587,7 +683,7 @@ test('全部跨裝置同步接收只有設定的雲端更新，也套用外觀�
     const remote = await createDriveDocument(document, link.datasetId, [link.baseVersionId], 'sync'); f.documents.set('remote_settings', remote);
     const localDrive = structuredClone(f.store.drive()), version = f.auth.connectionVersion();
     await f.service.sync(); assert.equal(f.service.error(), '');
-    assert.deepEqual(f.store.appearance(), document.preferences); assert.deepEqual(f.store.reminders(), document.reminders);
+    assert.deepEqual(f.store.appearance(), {...document.preferences, textSize: 'standard'}); assert.deepEqual(f.store.reminders(), document.reminders);
     assert.equal(f.store.google().refreshMinutes, 1); assert.equal(f.store.google().sources[0].color, '#7951b0'); assert.equal(f.store.google().sources[0].name, '研究行事曆'); assert.equal(f.store.google().sources[0].visible, false);
     assert.equal(f.store.google().sources[0].id, 'local-calendar'); assert.equal(f.store.google().clientId, '123-example.apps.googleusercontent.com'); assert.equal(f.store.google().email, 'calendar@example.com');
     assert.deepEqual(f.store.drive(), localDrive); assert.equal(f.auth.connectionVersion(), version);
@@ -606,7 +702,7 @@ test('從雲端接續全部資料的預覽確認包含設定，確認後立即�
     const panel = f.panel(); await settle(); await panel.inspect(file); panel.prepare('join'); assert.equal(panel.confirmationPhrase(), '使用這份雲端資料');
     await panel.execute(); assert.equal(f.store.appearance().theme, 'light');
     panel.confirmation = panel.confirmationPhrase(); await panel.execute(); await settle();
-    assert.deepEqual(f.store.appearance(), expected.preferences); assert.deepEqual(f.store.reminders(), expected.reminders); assert.equal(panel.mode(), 'sync');
+    assert.deepEqual(f.store.appearance(), {...expected.preferences, textSize: 'standard'}); assert.deepEqual(f.store.reminders(), expected.reminders); assert.equal(panel.mode(), 'sync');
     const count = f.documents.size; await f.service.sync(); assert.equal(f.documents.size, count);
     await f.store.updateAppearance({accent: '#3264ad'}); await f.service.sync(); assert.equal(f.documents.size, count + 1);
     assert.equal([...f.documents.values()].at(-1).preferences.accent, '#3264ad');
@@ -680,7 +776,7 @@ test('刪除目前集合的另一份內容會解除分歧，保留本機修改�
   const f = await fixture();
   try {
     await f.service.start('full', [], 'sync'); const root = [...f.documents.values()][0];
-    const remoteBackup = structuredClone(root); remoteBackup.data.workspaces[0].tasks[0].title = '雲端修改';
+    const remoteBackup = structuredClone(root); remoteBackup.data.workspaces[0].tasks[0].title = '雲端修改'; remoteBackup.preferences.accent = '#123456'; await f.store.updateAppearance({accent: '#654321'});
     const remote = await createDriveDocument(remoteBackup, root.cloud.datasetId, [root.cloud.versionId], 'sync'); f.documents.set('branch_remote', remote);
     await f.store.saveTask({...f.store.tasks()[0], title: '本機修改'}); await f.service.sync(); assert.equal(f.service.runtime().conflict.length, 2);
     const link = structuredClone(f.service.runtime().link), save = f.api.save;
@@ -701,7 +797,7 @@ test('刪除本機正在使用的分支後保留本機內容，按使用雲端�
     const f = await fixture();
     try {
       await f.service.start('full', [], mode); const root = [...f.documents.values()][0];
-      const remoteBackup = structuredClone(root); remoteBackup.data.workspaces[0].tasks[0].title = '保留的雲端修改';
+      const remoteBackup = structuredClone(root); remoteBackup.data.workspaces[0].tasks[0].title = '保留的雲端修改'; remoteBackup.preferences.accent = '#123456'; await f.store.updateAppearance({accent: '#654321'});
       const remote = await createDriveDocument(remoteBackup, root.cloud.datasetId, [root.cloud.versionId], mode); f.documents.set('branch_remote', remote);
       await f.store.saveTask({...f.store.tasks()[0], title: '刪除雲端副本後仍在本機'}); await f.service.sync();
       const panel = f.panel(); await settle(); const localBranch = panel.currentCollection().heads.find(file => file.cloud.versionId === f.service.runtime().link.baseVersionId);

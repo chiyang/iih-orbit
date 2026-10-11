@@ -10,6 +10,7 @@
       }
     </fieldset>
     <label class="setting-field">字體大小<select aria-label="設定字體大小" [ngModel]="preferences.textSize()" (ngModelChange)="preferences.setTextSize($event)">@for (option of preferences.options; track option.id) {<option [value]="option.id">{{ option.label }}</option>}</select></label>
+    <p class="setting-note">字體大小只保存在目前瀏覽器，不包含在備份或遠端同步中。</p>
     <fieldset class="accent-swatches"><legend>主題色</legend>@for (accent of accents; track accent.color) {<button type="button" [style.--swatch]="accent.color" [class.selected]="preferences.accent() === accent.color" [attr.aria-label]="'主題色：' + accent.label" [attr.aria-pressed]="preferences.accent() === accent.color" (click)="setAccent(accent.color)">@if (preferences.accent() === accent.color) {<app-icon name="check" />}</button>}</fieldset>
     <div class="custom-color"><label>自訂主題色<input type="color" aria-label="選擇主題色" [value]="preferences.accent()" (change)="setAccent($any($event.target).value)"></label><label>HEX 色碼<input type="text" aria-label="主題色 HEX 色碼" maxlength="7" spellcheck="false" [value]="preferences.accent()" (change)="setAccent($any($event.target).value)" placeholder="#31584b"></label></div>
     <p class="setting-note">文字與按鈕會依主題調整對比。分類與看板狀態可在各自的管理視窗選擇顏色，不受主題色影響。</p>
@@ -28,6 +29,9 @@
     </section>
   <section class="settings-section settings-panel" role="tabpanel" id="settings-panel-data" aria-labelledby="settings-tab-data" [hidden]="activeTab() !== 'data'" tabindex="0">
     <h3 id="local-sync-title">本機同步與備份</h3>
+    <form (ngSubmit)="saveDeviceName()"><label class="setting-field">這個裝置的名稱<input name="deviceName" [(ngModel)]="deviceName" aria-label="這個裝置的名稱" required maxlength="60" placeholder="例如：工作電腦、我的 iPhone"></label><button type="submit" class="setting-button">儲存裝置名稱</button></form>
+    <p class="setting-note">名稱只保存在目前瀏覽器。之後編輯的任務會記錄來源，供衝突比較使用；既有版本不會補寫來源。</p>
+    @if (deviceFeedback()) {<p [class.form-error]="deviceError()" role="status">{{ deviceFeedback() }}</p>}
     <p class="sync-state" role="status"><i [class.warning]="store.hasUnsavedChanges() || store.storageWarning()"></i>{{ store.pendingWrites() ? '保存中' : store.hasUnsavedChanges() ? '本分頁有未保存的變更' : store.storageWarning() ? '儲存需要留意' : '已保存本機・分頁同步已啟用' }}</p>
     <p>同一瀏覽器、同一網站來源的分頁會自動同步資料與外觀。各分頁保留自己的工作空間選擇及未送出的表單。</p>
     <app-backup-panel (restored)="resetDone.emit()" />

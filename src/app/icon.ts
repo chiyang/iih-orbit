@@ -3,6 +3,7 @@ import { Component, computed, input } from '@angular/core';
 const PATHS: Record<string, string> = {
   plus: 'M12 5v14M5 12h14',
   help: 'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01',
+  warning: 'M12 3 2 21h20L12 3zM12 9v5M12 17h.01',
   mail: 'M3 5h18v14H3zM3 5l9 7 9-7',
   copy: 'M9 9h12v12H9zM15 9V3H3v12h6',
   search: 'M21 21l-4.5-4.5M19 10.5a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0',

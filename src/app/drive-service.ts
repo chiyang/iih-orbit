@@ -275,7 +275,7 @@ export class DriveService implements OnDestroy {
     }
   }
   async resolve(heads: string[], choice?: DriveFile, revision?: string): Promise<void> {
-    if (await this.run(engine => engine.resolve(heads, choice, revision, this.store.drive().mode === 'backup' ? 'backup' : 'sync'), '已使用選定內容，之前的備份仍保留。')) await this.refreshCatalog(this.runtime().link?.datasetId);
+    if (await this.run(engine => engine.resolve(heads, choice, revision, this.store.drive().mode === 'backup' ? 'backup' : 'sync'), '已使用選定內容並保留可安全整併的修改，之前的備份仍保留。')) await this.refreshCatalog(this.runtime().link?.datasetId);
   }
   async preview(file: DriveFile): Promise<DriveDocument | undefined> {
     let document: DriveDocument | undefined;
@@ -328,7 +328,7 @@ export class DriveService implements OnDestroy {
           const stopped = await this.store.stopDrive(review.generation, settings);
           if (!stopped.ok) throw new Error(stopped.message);
           settings = JSON.stringify({...JSON.parse(settings), mode: 'off'}); check();
-          delete state.link; delete state.conflict; delete state.lastSavedAt;
+          delete state.link; delete state.conflict; delete state.lastSavedAt; delete state.base; delete state.mergeBase;
         }
         if (pendingVersion) delete state.pending;
         await this.repository.write(review.context, state, guarded); check();

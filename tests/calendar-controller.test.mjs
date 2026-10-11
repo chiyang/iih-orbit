@@ -285,10 +285,12 @@ test('月曆每天預覽四項，超過可逐日或全部展開，全部展開�
 });
 
 function assertEditedTask(actual, expected) {
-  const {updatedAt, ...content} = actual;
+  const {updatedAt, editSource, ...content} = actual;
+  const {editSource: previousSource, ...expectedContent} = expected;
   assert.equal(typeof updatedAt, 'string');
   assert.equal(new Date(updatedAt).toISOString(), updatedAt);
-  assert.deepEqual(content, expected);
+  assert.equal(typeof editSource.id, 'string'); assert.equal(typeof editSource.name, 'string');
+  assert.deepEqual(content, expectedContent);
 }
 
 test('月曆拖曳保存本機任務並保留其他欄位，取消拖曳不寫入且不誤開編輯', async () => {

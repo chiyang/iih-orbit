@@ -38,6 +38,8 @@ export interface Task {
   pinned?: boolean;
   /** Last content edit; absent for tasks saved before edit tracking was introduced. */
   updatedAt?: string;
+  /** Origin of the last content edit; the device preference itself stays local. */
+  editSource?: DeviceIdentity;
   /** Retained in the workspace and backups while the task is in the trash. */
   deletedAt?: string;
   /** Legacy field retained only to read older backups; new copies have no source link. */
@@ -70,7 +72,14 @@ export interface BoardState {
   statuses: BoardStatus[];
   tasks: Task[];
   calendarTransfers?: CalendarTransfer[];
+  taskConflicts?: TaskConflict[];
 }
+
+export interface DeviceIdentity {id: string; name: string}
+export interface TaskConflictSource extends Partial<DeviceIdentity> {updatedAt?: string}
+export interface TaskConflictVersion {key: string; task: Task | null; source?: TaskConflictSource}
+/** Resolved records remain as ancestry markers so stale devices cannot reopen an old choice. */
+export interface TaskConflict {id: string; versions: TaskConflictVersion[]; resolved?: string}
 
 export interface BoardStatus {
   id: string;

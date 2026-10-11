@@ -52,12 +52,13 @@ test('側欄、專案、搜尋、表頭與月曆底色隨主題色改變，今�
   }
 });
 
-test('格式 5 備份包含完整外觀，舊格式 2 升級與非法顏色拒絕', () => {
+test('格式 5 備份包含主題且排除字級，舊格式 2 仍可讀取與非法顏色拒絕', () => {
   const workspace = emptyWorkspace('workspace', '工作');
   workspace.categories.push({id: 'custom', name: '分類', color: '#112233'});
   const state = {version: 1, activeWorkspaceId: workspace.id, workspaces: [workspace]};
   const backup = createBackup(state, 'full', [], {textSize: 'extra-small', theme: 'dark', accent: '#3264ad'});
   assert.equal(backup.formatVersion, 5);
+  assert.equal(Object.hasOwn(backup.preferences, 'textSize'), false);
   assert.deepEqual(readBackup(JSON.parse(JSON.stringify(backup))).preferences, backup.preferences);
   const old = {...backup, formatVersion: 2, preferences: {textSize: 'small'}};
   assert.deepEqual(readBackup(old).preferences, {...DEFAULT_APPEARANCE, textSize: 'small'});

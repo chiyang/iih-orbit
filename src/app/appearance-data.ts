@@ -1,6 +1,9 @@
 export type TextSize = 'extra-small' | 'compact' | 'small' | 'standard' | 'large' | 'extra-large';
 export type ThemeMode = 'light' | 'dark' | 'system';
 export interface AppearancePreferences {textSize: TextSize; theme: ThemeMode; accent: string}
+export type SharedAppearancePreferences = Pick<AppearancePreferences, 'theme' | 'accent'>;
+/** Legacy backup sizes remain readable for checksum verification, but are never applied. */
+export type BackupAppearancePreferences = SharedAppearancePreferences & {textSize?: TextSize};
 export const TEXT_SIZE_IDS: TextSize[] = ['extra-small', 'compact', 'small', 'standard', 'large', 'extra-large'];
 export const DEFAULT_APPEARANCE: AppearancePreferences = {textSize: 'standard', theme: 'light', accent: '#31584b'};
 export const ACCENT_COLORS = [
@@ -27,6 +30,18 @@ export function readAppearance(value: unknown): AppearancePreferences | null {
     || (source.theme !== undefined && !['light', 'dark', 'system'].includes(source.theme))
     || (source.accent !== undefined && !validHex(source.accent))) return null;
   return {textSize: source.textSize!, theme: source.theme ?? DEFAULT_APPEARANCE.theme, accent: (source.accent ?? DEFAULT_APPEARANCE.accent).toLowerCase()};
+}
+
+export function sharedAppearance(value: SharedAppearancePreferences): SharedAppearancePreferences {
+  return {theme: value.theme, accent: value.accent};
+}
+
+export function readBackupAppearance(value: unknown): BackupAppearancePreferences | null {
+  if (!value || typeof value !== 'object') return null;
+  const source = value as Partial<AppearancePreferences>;
+  const preferences = readAppearance({...source, textSize: source.textSize ?? DEFAULT_APPEARANCE.textSize});
+  if (!preferences || (source.textSize !== undefined && !TEXT_SIZE_IDS.includes(source.textSize))) return null;
+  return {...sharedAppearance(preferences), ...(source.textSize !== undefined ? {textSize: source.textSize} : {})};
 }
 
 function rgb(hex: string): number[] { return [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16)); }

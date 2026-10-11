@@ -35,8 +35,18 @@ export class Settings {
   readonly message = signal('');
   readonly error = signal('');
   readonly busy = signal(false);
+  deviceName = this.store.device().name;
+  readonly deviceFeedback = signal('');
+  readonly deviceError = signal(false);
   confirmation = '';
   private confirmedRevision = '';
+
+  saveDeviceName(): void {
+    const result = this.store.setDeviceName(this.deviceName);
+    this.deviceError.set(!result.ok);
+    this.deviceFeedback.set(result.ok ? '已保存裝置名稱，之後的任務編輯會附上這個來源。' : result.message);
+    if (result.ok) this.deviceName = this.store.device().name;
+  }
 
   tabKeydown(event: KeyboardEvent): void {
     const index = this.tabs.findIndex(tab => tab.id === this.activeTab());
