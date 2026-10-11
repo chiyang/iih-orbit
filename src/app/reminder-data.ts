@@ -1,6 +1,6 @@
 import type { BoardStatus, Task } from './models';
 import { COLUMNS } from './models.ts';
-import { taskMoment, validTime } from './task-schedule.ts';
+import { startOfWeek, taskMoment, validTime } from './task-schedule.ts';
 
 export interface ReminderPreferences {
   dueSoonDays: number;
@@ -9,7 +9,7 @@ export interface ReminderPreferences {
   allDayTime: string;
   includeGoogle: boolean;
 }
-export type DeadlineFilter = 'all' | 'overdue' | 'due-soon';
+export type DeadlineFilter = 'all' | 'unset' | 'overdue' | 'due-soon' | 'this-week';
 export const DUE_DAY_PRESETS = [1, 3, 7, 30];
 export const START_LEAD_PRESETS = [15, 30, 60];
 export const DEFAULT_REMINDERS: ReminderPreferences = {dueSoonDays: 3, popupEnabled: true, leadMinutes: 30, allDayTime: '09:00', includeGoogle: true};
@@ -29,4 +29,18 @@ export function deadlineState(task: Task, now: Date, days: number, statuses: rea
   if (deadline === null) return null;
   const remaining = deadline - now.getTime();
   return remaining < 0 ? 'overdue' : remaining <= days * 86400000 ? 'due-soon' : null;
+}
+
+export function currentWeekRange(now: Date): {start: number; end: number} {
+  const start = startOfWeek(now), end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return {start: start.getTime(), end: end.getTime()};
+}
+
+/** Date-only schedules include the whole day; timed ranges end exclusively. */
+export function taskInWeek(task: Task & {sourceInterval?: {start: number; end: number}}, range: {start: number; end: number}, statuses: readonly BoardStatus[] = COLUMNS): boolean {
+  if ((statuses.find(status => status.id === task.status)?.kind ?? 'active') !== 'active') return false;
+  const start = task.sourceInterval?.start ?? taskMoment(task.startDate || task.dueDate, task.startDate ? task.startTime : task.dueTime);
+  const end = task.sourceInterval?.end ?? taskMoment(task.dueDate || task.startDate, task.dueDate ? task.dueTime : task.startTime, true);
+  return start !== null && end !== null && start < range.end && (end > range.start || start === end && start === range.start);
 }

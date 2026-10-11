@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DEFAULT_REMINDERS, deadlineState, readReminders } from '../src/app/reminder-data.ts';
+import { currentWeekRange, DEFAULT_REMINDERS, deadlineState, readReminders, taskInWeek } from '../src/app/reminder-data.ts';
 import { itemsForReminderTab, reminderItems, startPopupCandidates, startWindow } from '../src/app/reminder-items.ts';
 import { ReminderDelivery, REMINDER_DELIVERY_KEY } from '../src/app/reminder-delivery.ts';
 import { COLUMNS } from '../src/app/models.ts';
@@ -59,6 +59,68 @@ test('明天與下週採日曆日期，週日屬於當週，正確跨月與跨�
   assert.match(next.label, /週日至週六/);
   assert.equal(dateKey(new Date(startWindow(new Date(2026, 9, 11), 'next-week').start)), '2026-10-18');
   assert.equal(dateKey(new Date(startWindow(new Date(2026, 11, 31), 'next-week').start)), '2027-01-03');
+});
+
+test('本週依排程重疊篩選，包含單一日期與跨週，排除完成封存、未排程與午夜結束的前週任務', () => {
+  const now = new Date(2026, 9, 7, 12), range = currentWeekRange(now);
+  assert.equal(dateKey(new Date(range.start)), '2026-10-04'); assert.equal(dateKey(new Date(range.end)), '2026-10-11');
+  const cases = [
+    [{dueDate: '2026-10-04', dueTime: '00:00'}, true],
+    [{startDate: '2026-10-10', startTime: '23:59', dueDate: ''}, true],
+    [{startDate: '2026-09-30', dueDate: '2026-10-12'}, true],
+    [{startDate: '2026-10-03', startTime: '23:00', dueDate: '2026-10-04', dueTime: '00:00'}, false],
+    [{dueDate: '2026-10-03'}, false],
+    [{startDate: '2026-10-11', dueDate: '2026-10-12'}, false],
+    [{startDate: '', dueDate: ''}, false],
+    [{status: 'done'}, false], [{status: 'archived'}, false]
+  ];
+  for (const [patch, expected] of cases) assert.equal(taskInWeek({...task, ...patch}, range), expected, JSON.stringify(patch));
+  const statuses = [{id: 'waiting', kind: 'active'}, {id: 'finished', kind: 'done'}];
+  assert.equal(taskInWeek({...task, status: 'waiting'}, range, statuses), true);
+  assert.equal(taskInWeek({...task, status: 'finished'}, range, statuses), false);
+  assert.equal(dateKey(new Date(currentWeekRange(new Date(2026, 9, 11)).start)), '2026-10-11');
+  const year = startWindow(new Date(2026, 11, 31), 'this-week');
+  assert.equal(dateKey(new Date(year.start)), '2026-12-27'); assert.equal(dateKey(new Date(year.end)), '2027-01-03');
+  assert.equal(year.label, '2026/12/27 — 2027/1/2（週日至週六）');
+});
+
+test('本週邊界沿用本機日曆週，跨夏令時間仍在週日午夜結束', () => {
+  const previous = process.env.TZ;
+  try {
+    process.env.TZ = 'America/New_York';
+    for (const [now, hours, last, next] of [
+      [new Date(2026, 2, 11), 167, '2026-03-14', '2026-03-15'],
+      [new Date(2026, 10, 4), 169, '2026-11-07', '2026-11-08']
+    ]) {
+      const range = currentWeekRange(now);
+      assert.equal((range.end - range.start) / 3600000, hours);
+      assert.equal(new Date(range.end).getHours(), 0);
+      assert.equal(taskInWeek({...task, dueDate: last, dueTime: '23:59'}, range), true);
+      assert.equal(taskInWeek({...task, dueDate: next, dueTime: '00:00'}, range), false);
+    }
+  } finally {if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous;}
+});
+
+test('本週清單包含跨週 Google 活動與截止任務，Google 專用結束邊界不多算一天', () => {
+  const now = new Date(2026, 9, 7, 12);
+  const state = workspace([
+    {...task, id: 'ongoing', startDate: '2026-09-30', dueDate: '2026-10-12'},
+    {...task, id: 'deadline', dueDate: '2026-10-04', dueTime: '00:00'},
+    {...task, id: 'start-only', startDate: '2026-10-10', dueDate: ''},
+    {...task, id: 'done', status: 'done'}, {...task, id: 'unscheduled', dueDate: ''}
+  ]);
+  const timed = google('timed', {dateTime: new Date(2026, 9, 3, 23).toISOString()}, {dateTime: new Date(2026, 9, 5, 1).toISOString()});
+  const midnight = google('midnight', {dateTime: new Date(2026, 9, 3, 23).toISOString()}, {dateTime: new Date(2026, 9, 4).toISOString()});
+  const point = google('point', {dateTime: new Date(2026, 9, 4).toISOString()}, {dateTime: new Date(2026, 9, 4).toISOString()});
+  const allDay = google('all-day', {date: '2026-10-03'}, {date: '2026-10-05'});
+  const previous = google('previous', {date: '2026-10-03'}, {date: '2026-10-04'});
+  const items = reminderItems(state, 'generation', [timed, midnight, point, allDay, previous, allDay]);
+  const weekly = itemsForReminderTab(items, 'this-week', now, 3, state);
+  assert.deepEqual(weekly.map(item => item.task.id), ['ongoing', allDay.task.id, timed.task.id, point.task.id, 'deadline', 'start-only']);
+  // An Orbit status with the same ID must not classify external events as completed.
+  const collision = {...state, statuses: [...COLUMNS, {id: 'external', kind: 'done'}]};
+  assert.equal(itemsForReminderTab(items, 'this-week', now, 3, collision).filter(item => item.external).length, 3);
+  assert.deepEqual(startPopupCandidates(items, now, DEFAULT_REMINDERS), []);
 });
 
 test('明天及下週開始包含全天 Google 與本機，排除完成封存、只有截止及已開始的跨日項目', () => {

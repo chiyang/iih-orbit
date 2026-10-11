@@ -1,10 +1,10 @@
 import type { Workspace, Task } from './models';
 import type { ExternalEvent, ExternalTask } from './google-data';
 import type { ReminderPreferences } from './reminder-data';
-import { deadlineState } from './reminder-data.ts';
-import { dateKey, parseDate, startOfWeek, taskMoment } from './task-schedule.ts';
+import { currentWeekRange, deadlineState, taskInWeek } from './reminder-data.ts';
+import { dateKey, parseDate, taskMoment } from './task-schedule.ts';
 
-export type ReminderTab = 'today' | 'tomorrow' | 'next-week' | 'due-soon' | 'overdue';
+export type ReminderTab = 'today' | 'tomorrow' | 'this-week' | 'next-week' | 'due-soon' | 'overdue';
 export interface ReminderItem {
   id: string;
   generation: string;
@@ -31,13 +31,14 @@ export function reminderItems(workspace: Workspace, generation: string, external
   return items;
 }
 
-export function startWindow(now: Date, tab: 'today' | 'tomorrow' | 'next-week'): {start: number; end: number; label: string} {
-  const start = tab === 'next-week' ? startOfWeek(now) : parseDate(dateKey(now));
+export function startWindow(now: Date, tab: 'today' | 'tomorrow' | 'this-week' | 'next-week'): {start: number; end: number; label: string} {
+  const weekly = tab === 'this-week' || tab === 'next-week';
+  const start = weekly ? new Date(currentWeekRange(now).start) : parseDate(dateKey(now));
   start.setDate(start.getDate() + (tab === 'next-week' ? 7 : tab === 'tomorrow' ? 1 : 0));
-  const end = new Date(start); end.setDate(end.getDate() + (tab === 'next-week' ? 7 : 1));
+  const end = new Date(start); end.setDate(end.getDate() + (weekly ? 7 : 1));
   const last = new Date(end); last.setDate(last.getDate() - 1);
   const format = (date: Date) => `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
-  return {start: start.getTime(), end: end.getTime(), label: tab === 'next-week' ? `${format(start)} — ${format(last)}（週日至週六）` : format(start)};
+  return {start: start.getTime(), end: end.getTime(), label: weekly ? `${format(start)} — ${format(last)}（週日至週六）` : format(start)};
 }
 
 export function itemsForReminderTab(items: readonly ReminderItem[], tab: ReminderTab, now: Date, days: number, workspace: Workspace): ReminderItem[] {
@@ -46,6 +47,11 @@ export function itemsForReminderTab(items: readonly ReminderItem[], tab: Reminde
       .sort((left, right) => taskMoment(left.task.dueDate, left.task.dueTime, true)! - taskMoment(right.task.dueDate, right.task.dueTime, true)! || left.task.title.localeCompare(right.task.title, 'zh-Hant-TW'));
   }
   const window = startWindow(now, tab);
+  if (tab === 'this-week') {
+    const scheduledStart = (item: ReminderItem) => item.start ?? taskMoment(item.task.dueDate, item.task.dueTime)!;
+    return items.filter(item => taskInWeek(item.task, window, item.external ? [] : workspace.statuses))
+      .sort((left, right) => scheduledStart(left) - scheduledStart(right) || left.task.title.localeCompare(right.task.title, 'zh-Hant-TW'));
+  }
   return items.filter(item => item.start !== null && item.start >= window.start && item.start < window.end
     && (tab !== 'today' || item.allDay || item.start >= now.getTime() - 300000))
     .sort((left, right) => left.start! - right.start! || Number(!left.allDay) - Number(!right.allDay) || left.task.title.localeCompare(right.task.title, 'zh-Hant-TW'));

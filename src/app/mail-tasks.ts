@@ -24,7 +24,36 @@ export class MailTasks {
     if (!event.dataTransfer || this.busy() || !this.gmail.preferences().accountId || !this.gmail.isListed(mail)) { event.preventDefault(); return; }
     const preferences = this.gmail.preferences();
     this.drag = {token: crypto.randomUUID(), mail: structuredClone(mail), email: preferences.email, accountId: preferences.accountId, workspaceId: this.store.currentWorkspace().id, generation: this.store.generation()};
-    event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData(GMAIL_MIME, this.drag.token); this.dragging.set(true);
+    event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData(GMAIL_MIME, this.drag.token);
+    this.setDragImage(event, mail.subject); this.dragging.set(true);
+  }
+  private setDragImage(event: DragEvent, subject: string): void {
+    const source = event.currentTarget as HTMLElement | null;
+    if (!source?.ownerDocument || !event.dataTransfer?.setDragImage) return;
+    try {
+      const canvas = source.ownerDocument.createElement('canvas'), context = canvas.getContext('2d');
+      if (!context) return;
+      // Transparent padding leaves the pointer clear without relying on negative hotspots.
+      canvas.width = 220; canvas.height = 52;
+      const style = source.ownerDocument.defaultView?.getComputedStyle(source);
+      context.globalAlpha = .5;
+      context.fillStyle = style?.getPropertyValue('--surface').trim() || '#ffffff';
+      context.strokeStyle = style?.getPropertyValue('--border').trim() || '#d5dce3';
+      context.beginPath(); context.roundRect(18.5, 18.5, 201, 33, 7); context.fill(); context.stroke();
+      context.globalAlpha = .72;
+      context.strokeStyle = style?.getPropertyValue('--accent-text').trim() || '#267451';
+      context.lineWidth = 1.5;
+      context.strokeRect(29, 29, 14, 10);
+      context.beginPath(); context.moveTo(29, 29); context.lineTo(36, 34); context.lineTo(43, 29); context.stroke();
+      const fontSize = Math.min(16, Math.max(12, parseFloat(style?.fontSize || '') || 14));
+      context.font = `500 ${fontSize}px ${style?.fontFamily || 'sans-serif'}`;
+      context.fillStyle = style?.getPropertyValue('--text').trim() || '#24342c'; context.textBaseline = 'middle';
+      const letters = Array.from(subject.replace(/\s+/g, ' ').trim() || '未命名郵件');
+      let label = letters.slice(0, 80).join(''), shortened = letters.length > 80;
+      while (label && context.measureText(label + (shortened ? '…' : '')).width > 154) { label = Array.from(label).slice(0, -1).join(''); shortened = true; }
+      context.fillText(label + (shortened ? '…' : ''), 54, 35);
+      event.dataTransfer.setDragImage(canvas, 0, 0);
+    } catch { /* Keep native dragging available if the browser cannot draw a custom preview. */ }
   }
   end(): void { this.drag = undefined; this.dragging.set(false); }
   accepts(event: DragEvent): boolean {

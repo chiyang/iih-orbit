@@ -34,7 +34,7 @@ export function readBrowseState(value: unknown): BrowseState {
     scope: choice(s.scope, ['all', 'active', 'done', 'archived'], 'all'),
     query: text(s.query, '', 1000), project: text(s.project, 'all'), category: text(s.category, 'all'),
     priority: choice(s.priority, ['all', 'high', 'medium', 'low'], 'all'),
-    deadline: choice(s.deadline, ['all', 'overdue', 'due-soon'], 'all'),
+    deadline: choice(s.deadline, ['all', 'unset', 'overdue', 'due-soon', 'this-week'], 'all'),
     deadlineDays: Number.isInteger(s.deadlineDays) && s.deadlineDays! >= 1 && s.deadlineDays! <= 30 ? s.deadlineDays! : null,
     sort: choice(s.sort, ['title', 'project', 'category', 'status', 'priority', 'startDate', 'dueDate', null], null),
     direction: choice(s.direction, ['asc', 'desc'], 'asc'),
@@ -42,7 +42,7 @@ export function readBrowseState(value: unknown): BrowseState {
     calendarScrollHour: typeof s.calendarScrollHour === 'number' && Number.isFinite(s.calendarScrollHour) && s.calendarScrollHour >= 0 && s.calendarScrollHour <= 24 ? s.calendarScrollHour : 7.75,
     showOrbit: s.showOrbit !== false, showGoogle: s.showGoogle !== false, progressExpanded: s.progressExpanded === true,
     panel: choice(s.panel, ['closed', 'gmail', 'reminders'], 'closed'),
-    reminderTab: choice(s.reminderTab, ['today', 'tomorrow', 'next-week', 'due-soon', 'overdue'], 'today')
+    reminderTab: choice(s.reminderTab, ['today', 'tomorrow', 'this-week', 'next-week', 'due-soon', 'overdue'], 'today')
   };
 }
 

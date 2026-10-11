@@ -4,6 +4,7 @@ button { color: var(--text); }
 .reminder-center-tabs button, .reminder-presets button { flex-shrink: 0; display: inline-flex; align-items: center; gap: var(--sp7); padding: var(--sp9) var(--sp12); border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: var(--font-11); }
 .reminder-center-tabs .selected, .reminder-presets .selected { background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-text); }
 .reminder-center-tabs small { font-variant-numeric: tabular-nums; font-size: var(--font-9); }
+.reminder-center-tabs app-icon { width: 13px; height: 13px; flex-shrink: 0; }
 .reminder-center-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp16); scrollbar-width: thin; }
 .reminder-range { display: flex; align-items: start; flex-wrap: wrap; gap: var(--sp12); margin-bottom: var(--sp18); }
 .reminder-range p { flex: 1; margin: 0; color: var(--text-muted); font-size: var(--font-11); line-height: 1.6; }

@@ -431,6 +431,65 @@ test('截止篩選連動看板、清單及日曆，排除完成與封存且不�
   } finally { close(); }
 });
 
+test('未設置截止日期包含只有開始日期的任務，遵守原狀態與其他篩選，重新整理保留', async () => {
+  const f = application(), {app, store} = f;
+  try {
+    await store.saveTask({...task, id: 'undated', title: '沒有日期', categoryId: '', projectId: '', startDate: '', dueDate: ''});
+    await store.saveTask({...task, id: 'start-only', title: '已安排開始', priority: 'high', dueDate: ''});
+    await store.saveTask({...task, id: 'done-undated', status: 'done', dueDate: ''});
+    await store.saveTask({...task, id: 'archived-undated', status: 'archived', dueDate: ''});
+    const progress = app.overallProgress().percent;
+    app.selectDeadlineOption('unset');
+    assert.equal(app.scope(), 'all'); assert.equal(app.deadlineSelection(), 'unset'); assert.equal(app.effectiveSortKey(), null);
+    assert.deepEqual(app.visibleTasks().map(task => task.id), ['undated', 'start-only', 'done-undated', 'archived-undated']);
+    assert.deepEqual(app.sortedTasks().map(task => task.id), ['undated', 'start-only', 'done-undated', 'archived-undated']);
+    assert.deepEqual(app.calendarTasks().map(task => task.id), ['undated', 'start-only', 'done-undated']);
+    assert.deepEqual(app.columns().flatMap(column => column.tasks).map(task => task.id), ['undated', 'start-only', 'done-undated']);
+    assert.equal(app.overallProgress().percent, progress);
+    for (const [scope, ids] of [['active', ['undated', 'start-only']], ['done', ['done-undated']], ['archived', ['archived-undated']]]) {
+      app.selectScope(scope); app.selectDeadlineOption('unset');
+      assert.equal(app.scope(), scope); assert.deepEqual(app.visibleTasks().map(task => task.id), ids);
+    }
+    app.selectScope('all'); app.selectDeadlineOption('unset'); app.view.set('list');
+    app.projectFilter.set('welcome'); app.categoryFilter.set('design'); app.priorityFilter.set('high'); app.query.set('已安排');
+    assert.deepEqual(app.visibleTasks().map(task => task.id), ['start-only']);
+    f.flush(); const restored = f.reopen();
+    assert.equal(restored.deadlineSelection(), 'unset'); assert.equal(restored.view(), 'list');
+    assert.deepEqual(restored.visibleTasks().map(task => task.id), ['start-only']);
+    app.clearFilters(); assert.equal(app.deadlineSelection(), 'all'); assert.equal(app.visibleTasks().length, 7);
+  } finally {f.close();}
+});
+
+test('本週篩選連動各視圖與其他條件，重新整理保留選擇，週日自動換週', async () => {
+  const f = application(), {app, store} = f;
+  try {
+    app.now.set(new Date(2026, 9, 7, 12));
+    await store.saveTask({...task, id: 'ongoing', startDate: '2026-09-30', dueDate: '2026-10-12', priority: 'high'});
+    await store.saveTask({...task, id: 'deadline-only', startDate: '', dueDate: '2026-10-04'});
+    await store.saveTask({...task, id: 'next-week', startDate: '2026-10-11', dueDate: '2026-10-11'});
+    await store.saveTask({...task, id: 'archived', status: 'archived'});
+    const progress = app.overallProgress().percent;
+    app.scope.set('done'); app.selectDeadlineOption('this-week');
+    const ids = ['welcome-task', 'daily', 'ongoing', 'deadline-only'];
+    assert.equal(app.scope(), 'active'); assert.equal(app.deadlineSelection(), 'this-week'); assert.equal(app.thisWeekCount(), 4);
+    assert.deepEqual(app.visibleTasks().map(task => task.id), ids);
+    assert.deepEqual(app.calendarTasks().map(task => task.id), ids);
+    assert.deepEqual(app.columns().flatMap(column => column.tasks).map(task => task.id), ids);
+    assert.deepEqual(app.sortedTasks().map(task => task.id), ['ongoing', 'welcome-task', 'daily', 'deadline-only']);
+    assert.equal(app.overallProgress().percent, progress);
+    app.projectFilter.set('welcome'); app.categoryFilter.set('design'); app.priorityFilter.set('high'); app.query.set('迎新');
+    assert.deepEqual(app.visibleTasks().map(task => task.id), ['ongoing']);
+    app.openReminders('this-week'); f.flush();
+    const restored = f.reopen(); restored.now.set(app.now());
+    assert.equal(restored.deadlineFilter(), 'this-week'); assert.equal(restored.reminderTab(), 'this-week');
+    assert.equal(restored.remindersOpen(), true); assert.deepEqual(restored.visibleTasks().map(task => task.id), ['ongoing']);
+    app.clearFilters(); app.selectDeadline('this-week'); app.now.set(new Date(2026, 9, 11));
+    assert.deepEqual(app.visibleTasks().map(task => task.id), ['ongoing', 'next-week']);
+    assert.equal(app.thisWeekCount(), 2);
+    app.selectDeadline('all'); assert.equal(app.deadlineFilter(), 'all'); assert.equal(app.scope(), 'active');
+  } finally {f.close();}
+});
+
 test('月曆來源選擇由主畫面保存，切換視圖、截止篩選與工作空間不重設顯示偏好', () => {
   const {app, close} = application();
   try {

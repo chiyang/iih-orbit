@@ -22,7 +22,7 @@ import { CalendarSources } from './calendar-sources';
 import { DriveStatus } from './drive-status';
 import { ExternalEventDetails } from './external-event-details';
 import { ExternalEvent } from './google-data';
-import { DeadlineFilter, deadlineState, DUE_DAY_PRESETS } from './reminder-data';
+import { currentWeekRange, DeadlineFilter, deadlineState, DUE_DAY_PRESETS, taskInWeek } from './reminder-data';
 import { ReminderCenter } from './reminder-center';
 import { ReminderBadge } from './reminder-badge';
 import { ReminderPopups } from './reminder-popups';
@@ -228,12 +228,17 @@ export class App {
   private toastTimer?: ReturnType<typeof setTimeout>;
   private dragEndedAt = 0;
 
+  readonly thisWeekRange = computed(() => currentWeekRange(this.now()));
+  readonly thisWeekCount = computed(() => this.store.tasks().filter(task => taskInWeek(task, this.thisWeekRange(), this.statuses())).length);
   readonly visibleTasks = computed(() => {
-    const search = this.query().trim().toLocaleLowerCase();
+    const search = this.query().trim().toLocaleLowerCase(), deadline = this.deadlineFilter();
     return tasksForProject(this.store.tasks(), this.selectedProjectId()).filter(task => {
       const matchesQuery = !search || `${task.title} ${task.description} ${this.category(task.categoryId).name} ${this.projectName(task.projectId)}`.toLocaleLowerCase().includes(search);
+      const matchesDate = deadline === 'all' || (deadline === 'unset' ? !task.dueDate
+        : deadline === 'this-week' ? taskInWeek(task, this.thisWeekRange(), this.statuses())
+        : deadlineState(task, this.now(), this.effectiveDeadlineDays(), this.statuses()) === deadline);
       return matchesQuery && (this.categoryFilter() === 'all' || task.categoryId === this.categoryFilter())
-        && (this.deadlineFilter() === 'all' || deadlineState(task, this.now(), this.effectiveDeadlineDays(), this.statuses()) === this.deadlineFilter())
+        && matchesDate
         && (this.priorityFilter() === 'all' || task.priority === this.priorityFilter())
         && (this.scope() !== 'active' || (!this.store.isDone(task) && !this.store.isArchived(task)))
         && (this.scope() !== 'done' || this.store.isDone(task))
@@ -247,7 +252,7 @@ export class App {
   });
   readonly activeTaskCount = computed(() => this.store.activeTasks().filter(task => !this.store.isDone(task)).length);
   readonly calendarTasks = computed(() => this.visibleTasks().filter(task => !this.store.isArchived(task)));
-  readonly effectiveSortKey = computed(() => this.sortKey() ?? (this.deadlineFilter() === 'all' ? null : 'dueDate'));
+  readonly effectiveSortKey = computed(() => this.sortKey() ?? (this.deadlineFilter() === 'all' || this.deadlineFilter() === 'unset' ? null : this.deadlineFilter() === 'this-week' ? 'startDate' : 'dueDate'));
   readonly sortedTasks = computed(() => sortTasks(this.visibleTasks(), this.store.categories(), this.effectiveSortKey(), this.sortKey() ? this.sortDirection() : 'asc', this.statuses(), this.store.projects()));
   readonly hasFilters = computed(() => !!this.query() || this.selectedProjectId() !== 'all' || this.categoryFilter() !== 'all' || this.priorityFilter() !== 'all' || this.scope() !== 'all' || this.deadlineFilter() !== 'all');
   readonly deadlineCounts = computed(() => this.store.tasks().reduce((counts, task) => {
@@ -324,10 +329,13 @@ export class App {
   }
 
   selectDeadline(value: DeadlineFilter): void {
-    if (!['all', 'overdue', 'due-soon'].includes(value)) return;
+    if (!['all', 'unset', 'overdue', 'due-soon', 'this-week'].includes(value)) return;
     this.deadlineFilter.set(value);
     if (value === 'all') this.deadlineDays.set(null);
-    if (value !== 'all') { this.scope.set('active'); this.sortKey.set(null); }
+    if (value !== 'all') {
+      if (value !== 'unset') this.scope.set('active');
+      this.sortKey.set(null);
+    }
   }
 
   selectDueSoonDays(days: number): void {
@@ -336,7 +344,7 @@ export class App {
   }
   selectDeadlineOption(value: string): void {
     if (value.startsWith('due-') && value !== 'due-soon') { const days = Number(value.slice(4)); if (DUE_DAY_PRESETS.includes(days)) this.selectDueSoonDays(days); }
-    else if (['all', 'overdue', 'due-soon'].includes(value)) { this.deadlineDays.set(null); this.selectDeadline(value as DeadlineFilter); }
+    else if (['all', 'unset', 'overdue', 'due-soon', 'this-week'].includes(value)) { this.deadlineDays.set(null); this.selectDeadline(value as DeadlineFilter); }
   }
   openReminders(tab: ReminderTab = 'today'): void {
     if (this.modal()) return;

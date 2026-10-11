@@ -17,7 +17,7 @@ export class Reminders implements OnDestroy {
   readonly blocked = signal(false);
   readonly warning = signal('');
   readonly items = computed(() => reminderItems(this.store.currentWorkspace(), this.store.generation(), this.google.reminderEvents()));
-  readonly summaryCount = computed(() => new Set((['today', 'tomorrow', 'next-week', 'due-soon', 'overdue'] as const).flatMap(tab =>
+  readonly summaryCount = computed(() => new Set((['today', 'tomorrow', 'this-week', 'next-week', 'due-soon', 'overdue'] as const).flatMap(tab =>
     itemsForReminderTab(this.items(), tab, this.now(), this.store.reminders().dueSoonDays, this.store.currentWorkspace()).map(item => item.id))).size);
   readonly candidates = computed(() => startPopupCandidates(this.items(), this.now(), this.store.reminders()));
   readonly popups = signal<PopupCandidate[]>([]);

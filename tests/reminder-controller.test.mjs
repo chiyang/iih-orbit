@@ -198,6 +198,30 @@ test('列表更新保持篩選，新月曆預設納入；單一來源與單一�
   } finally { f.close(); }
 });
 
+test('本週提醒呈現完整排程、來源篩選與去重計數，分頁變更可保存', () => {
+  storage([
+    {...task, id: 'ongoing', startDate: '2026-09-30', dueDate: '2026-10-12'},
+    {...task, id: 'deadline', startDate: '', startTime: '', dueDate: '2026-10-04', dueTime: ''},
+    {...task, id: 'done', status: 'done'}
+  ]);
+  const f = controller();
+  try {
+    const event = calendarEvent(source('a'), 'Google 活動', '2026-10-05');
+    f.google.reminderEvents.set([event, event]);
+    let selected;
+    f.center.tabChange.subscribe(tab => {selected = tab;});
+    f.center.selectTab('this-week');
+    assert.equal(selected, 'this-week'); assert.equal(f.center.tabs().find(tab => tab.id === 'this-week').count, 3);
+    assert.equal(f.center.count(), 3); assert.equal(f.reminders.summaryCount(), 3);
+    assert.equal(f.center.rangeLabel(), '2026/10/4 — 2026/10/10（週日至週六）');
+    assert.equal(f.center.dateLabel(f.center.listItems()[0]), '2026/09/30 · 11:00 — 2026/10/12 · 12:00');
+    assert.equal(f.center.dateLabel(f.center.listItems()[1]), '2026/10/04 · 當天結束 截止');
+    f.center.selectSource('google'); assert.deepEqual(f.center.visibleItems().map(item => item.task.id), [event.task.id]);
+    f.center.selectTab('today'); assert.equal(f.center.sourceFilter(), 'all');
+    f.center.selectTab('this-week'); assert.equal(f.center.sourceFilter(), 'google');
+  } finally {f.close();}
+});
+
 test('切換工作空間或重置資料清除訊息中心舊篩選，返回仍可從全部查看', async () => {
   storage(); const f = controller();
   try {

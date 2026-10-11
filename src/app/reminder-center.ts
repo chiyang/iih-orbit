@@ -26,8 +26,9 @@ export class ReminderCenter {
   readonly openItem = output<ReminderItem>();
   readonly openSettings = output<void>();
   readonly showDeadline = output<number>();
+  readonly tabChange = output<ReminderTab>();
   readonly tabs = computed(() => ([
-    {id: 'today', label: '今日開始'}, {id: 'tomorrow', label: '明天開始'}, {id: 'next-week', label: '下週開始'},
+    {id: 'today', label: '今日開始'}, {id: 'tomorrow', label: '明天開始'}, {id: 'this-week', label: '本週任務'}, {id: 'next-week', label: '下週開始'},
     {id: 'due-soon', label: `${this.dueDays()} 天內到期`}, {id: 'overdue', label: '已逾期'}
   ] as {id: ReminderTab; label: string}[]).map(tab => ({...tab, count: this.entries(tab.id).length})));
   readonly count = computed(() => new Set(this.tabs().flatMap(tab => this.entries(tab.id).map(item => item.id))).size);
@@ -65,6 +66,9 @@ export class ReminderCenter {
   private entries(tab: ReminderTab): ReminderItem[] {
     return itemsForReminderTab(this.reminders.items(), tab, this.reminders.now(), this.dueDays(), this.reminders.store.currentWorkspace());
   }
+  selectTab(tab: ReminderTab): void {
+    this.activeTab.set(tab); this.tabChange.emit(tab);
+  }
   selectSource(source: ReminderSource): void {
     if (!this.sources.some(option => option.id === source)) return;
     this.updateFilters({source});
@@ -92,6 +96,16 @@ export class ReminderCenter {
     if (current) this.openItem.emit(current);
   }
   dateLabel(item: ReminderItem): string {
+    if (this.activeTab() === 'this-week') {
+      const {startDate, startTime, dueDate, dueTime} = item.task;
+      const format = (date: string, time: string) => `${date.replaceAll('-', '/')}${time ? ' · ' + time : ''}`;
+      if (startDate && dueDate) {
+        if (startDate === dueDate) return `${startDate.replaceAll('-', '/')} · ${startTime || dueTime ? `${startTime || '00:00'} — ${dueTime || '當天結束'}` : '全天'}`;
+        return `${format(startDate, startTime)} — ${format(dueDate, dueTime)}`;
+      }
+      return startDate ? `${format(startDate, startTime)}${startTime ? '' : ' · 全天'} 開始`
+        : `${format(dueDate, dueTime)}${dueTime ? '' : ' · 當天結束'} 截止`;
+    }
     const deadline = this.activeTab() === 'due-soon' || this.activeTab() === 'overdue';
     const date = deadline ? item.task.dueDate : item.task.startDate;
     const time = deadline ? item.task.dueTime : item.task.startTime;

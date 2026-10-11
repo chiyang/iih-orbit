@@ -9,7 +9,7 @@
       <button type="button" [class.selected]="showGoogle() && !deadlineFiltered()" [attr.aria-pressed]="googleVisible()" [disabled]="deadlineFiltered()" [attr.aria-describedby]="deadlineFiltered() ? 'calendar-source-help' : null" (click)="toggleGoogle()"><span class="source-google-mark" aria-hidden="true">G</span>Google 月曆</button>
       <button type="button" [class.selected]="showOrbit()" [attr.aria-pressed]="showOrbit()" (click)="toggleOrbit()"><span class="source-orbit-dot" aria-hidden="true"></span>Orbit 任務</button>
     </div>
-    <span class="calendar-display-help" id="calendar-source-help" role="status">@if (deadlineFiltered()) {截止篩選已暫時隱藏 Google 活動，清除篩選後恢復原選擇。} @else if (!showGoogle() && !showOrbit()) {目前隱藏所有來源，點選上方按鈕即可顯示。} @else if (mode() === 'month') {全天優先 · 同組 Google 在前 · 各來源內依時間排序}</span>
+    <span class="calendar-display-help" id="calendar-source-help" role="status">@if (deadlineFiltered()) {任務日期篩選已暫時隱藏 Google 活動，清除篩選後恢復原選擇。} @else if (!showGoogle() && !showOrbit()) {目前隱藏所有來源，點選上方按鈕即可顯示。} @else if (mode() === 'month') {全天優先 · 同組 Google 在前 · 各來源內依時間排序}</span>
   </div>
   @if (mode() === 'week') {
     <div class="week-scroll" #weekScroller aria-label="一週時間表" (scroll)="rememberScroll()">

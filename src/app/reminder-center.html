@@ -1,4 +1,4 @@
-  <div class="reminder-center-tabs" role="group" aria-label="提醒範圍">@for (tab of tabs(); track tab.id) {<button [class.selected]="activeTab() === tab.id" [attr.aria-pressed]="activeTab() === tab.id" (click)="activeTab.set(tab.id)">{{ tab.label }}<small>{{ tab.count }}</small></button>}</div>
+  <div class="reminder-center-tabs" role="group" aria-label="提醒範圍">@for (tab of tabs(); track tab.id) {<button [class.selected]="activeTab() === tab.id" [attr.aria-pressed]="activeTab() === tab.id" (click)="selectTab(tab.id)"><app-icon [name]="tab.id === 'due-soon' || tab.id === 'overdue' ? 'clock' : 'calendar'" />{{ tab.label }}<small>{{ tab.count }}</small></button>}</div>
   <div class="reminder-center-content">
     <div class="reminder-range"><p>{{ rangeLabel() }}</p><button (click)="openSettings.emit()"><app-icon name="settings" />提醒設定</button></div>
     @if (activeTab() === 'due-soon') {<div class="reminder-presets" role="group" aria-label="到期天數">@for (days of presets; track days) {<button [class.selected]="dueDays() === days" [attr.aria-pressed]="dueDays() === days" (click)="dueDays.set(days)">{{ days }} 天</button>}<button class="deadline-list" (click)="showDeadline.emit(dueDays())"><app-icon name="list" />查看任務清單</button></div>}
@@ -24,5 +24,6 @@
       } @empty {<div class="reminder-empty"><app-icon name="circleCheck" /><strong>{{ listItems().length ? '目前篩選沒有符合的提醒' : '這個範圍沒有提醒' }}</strong><p>{{ listItems().length ? '可調整來源與月曆選擇，或清除此列表篩選。' : '可切換其他日期或查看到期任務。' }}</p></div>}
     </div>
     @if (activeTab() === 'today' || activeTab() === 'tomorrow' || activeTab() === 'next-week') {<p class="reminder-help">依開始日期整理，包含全天安排；跨日項目只在開始日列入。Google 活動為唯讀。</p>}
+    @if (activeTab() === 'this-week') {<p class="reminder-help">包含排程與本週重疊的待完成任務及 Google 活動。</p>}
     @if (reminders.warning()) {<p class="reminder-warning" role="status">{{ reminders.warning() }}</p>}
   </div>
