@@ -63,6 +63,26 @@ test('提醒徽章只計算未查看項目，開啟側欄後收起，隱藏及�
   } finally {reopened?.close(); f.close();}
 });
 
+test('開啟側欄後新提醒標記保留至本次瀏覽結束，舊提醒不標新，暫時遮住與切換範圍保留標記', async () => {
+  storage(); const f = controller();
+  try {
+    f.center.active = signal(false); f.center.visible = signal(false); f.flush();
+    f.reminders.markViewed(); await settle();
+    await f.store.saveTask({...task, id: 'new', title: '新增提醒'}); f.flush(); assert.equal(f.reminders.unseenCount(), 1);
+    f.center.active.set(true); f.center.visible.set(true); f.flush(); await settle();
+    const newId = f.reminders.items().find(item => item.task.id === 'new').id, oldId = f.reminders.items().find(item => item.task.id === task.id).id;
+    assert.equal(f.reminders.unseenCount(), 0); assert.equal(f.center.newItemIds().has(newId), true); assert.equal(f.center.newItemIds().has(oldId), false);
+    f.center.selectTab('this-week'); f.flush(); assert.equal(f.center.newItemIds().has(newId), true);
+    f.center.visible.set(false); f.flush(); f.center.visible.set(true); f.flush(); assert.equal(f.center.newItemIds().has(newId), true);
+    await f.store.saveTask({...task, id: 'later', title: '後續提醒'}); f.flush(); await settle();
+    assert.equal(f.reminders.unseenCount(), 0); assert.equal(f.center.newItemIds().size, 2);
+    f.center.active.set(false); f.center.visible.set(false); f.flush(); assert.equal(f.center.newItemIds().size, 0);
+    f.center.active.set(true); f.center.visible.set(true); f.flush(); await settle(); assert.equal(f.center.newItemIds().size, 0);
+    await f.store.saveTask({...task, startTime: '11:30'}); f.flush(); await settle(); assert.equal(f.center.newItemIds().has(oldId), true);
+    await f.store.saveWorkspace('', '其他工作空間'); f.flush(); await settle(); assert.equal(f.center.newItemIds().size, 0);
+  } finally {f.close();}
+});
+
 test('查看後改標題不再提醒，改期或變成逾期時提示一次，側欄收起仍能提示新安排', async () => {
   storage(); const f = controller();
   try {

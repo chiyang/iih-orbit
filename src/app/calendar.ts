@@ -63,6 +63,7 @@ export class Calendar {
   readonly today = computed(() => dateKey(this.now()));
   readonly weekScroller = viewChild<ElementRef<HTMLDivElement>>('weekScroller');
   readonly fullDayHours = signal(false);
+  readonly widthMode = computed(() => this.preferences.calendarWidth?.() ?? 'wide');
   readonly weekRange = computed(() => this.fullDayHours() ? {startHour: 0, endHour: 24} : this.preferences.weekRange?.() ?? DEFAULT_WEEK_RANGE);
   readonly startMinute = computed(() => this.weekRange().startHour * 60);
   readonly endMinute = computed(() => this.weekRange().endHour * 60);

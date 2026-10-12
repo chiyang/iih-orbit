@@ -2,7 +2,7 @@ import { DOCUMENT } from '@angular/common';
 import { computed, effect, inject, Injectable, OnDestroy, signal } from '@angular/core';
 import { BoardStore } from './board-store';
 import { AppearancePreferences, TextSize, ThemeMode, themeTokens } from './appearance-data';
-import { CALENDAR_DISPLAY_KEY, loadWeekRange, readWeekRange, validWeekRange, type WeekTimeRange } from './calendar-display';
+import { CALENDAR_DISPLAY_KEY, loadCalendarWidth, loadWeekRange, readWeekRange, validWeekRange, type CalendarWidth, type WeekTimeRange } from './calendar-display';
 
 export const TEXT_SIZES: {id: TextSize; label: string; scale: number}[] = [
   {id: 'extra-small', label: '特小 70%', scale: .7},
@@ -28,9 +28,11 @@ export class UiPreferences implements OnDestroy {
   readonly storageWarning = this.store.storageWarning;
   readonly weekRange = signal(loadWeekRange());
   readonly weekRangeWarning = signal('');
-  private unsavedWeekRange = false;
-  private readonly reloadWeekRange = () => {if (!this.unsavedWeekRange) this.weekRange.set(loadWeekRange());};
-  private readonly calendarStorageChanged = (event: StorageEvent) => {if (!event.key || event.key === CALENDAR_DISPLAY_KEY) this.reloadWeekRange();};
+  readonly calendarWidth = signal(loadCalendarWidth());
+  readonly calendarWidthWarning = signal('');
+  private unsavedCalendarDisplay = false;
+  private readonly reloadCalendarDisplay = () => {if (!this.unsavedCalendarDisplay) {this.weekRange.set(loadWeekRange()); this.calendarWidth.set(loadCalendarWidth());}};
+  private readonly calendarStorageChanged = (event: StorageEvent) => {if (!event.key || event.key === CALENDAR_DISPLAY_KEY) this.reloadCalendarDisplay();};
   private readonly media = this.document.defaultView?.matchMedia?.('(prefers-color-scheme: dark)');
   private readonly systemDark = signal(this.media?.matches ?? false);
   readonly dark = computed(() => this.theme() === 'dark' || (this.theme() === 'system' && this.systemDark()));
@@ -46,22 +48,29 @@ export class UiPreferences implements OnDestroy {
     });
     this.media?.addEventListener('change', this.mediaListener);
     this.document.defaultView?.addEventListener?.('storage', this.calendarStorageChanged);
-    this.document.defaultView?.addEventListener?.('focus', this.reloadWeekRange);
+    this.document.defaultView?.addEventListener?.('focus', this.reloadCalendarDisplay);
   }
 
   ngOnDestroy(): void {
     this.media?.removeEventListener('change', this.mediaListener);
     this.document.defaultView?.removeEventListener?.('storage', this.calendarStorageChanged);
-    this.document.defaultView?.removeEventListener?.('focus', this.reloadWeekRange);
+    this.document.defaultView?.removeEventListener?.('focus', this.reloadCalendarDisplay);
   }
 
   setWeekRange(range: WeekTimeRange): boolean {
     if (!validWeekRange(range)) {this.weekRangeWarning.set('結束時間需晚於開始時間，且至少相隔 1 小時。'); return false;}
     const saved = readWeekRange(range);
     this.weekRange.set(saved); this.weekRangeWarning.set('');
-    try {localStorage.setItem(CALENDAR_DISPLAY_KEY, JSON.stringify({version: 1, range: saved})); this.unsavedWeekRange = false;}
-    catch {this.unsavedWeekRange = true; this.weekRangeWarning.set('目前分頁已套用，但瀏覽器無法保存時間範圍。');}
+    try {localStorage.setItem(CALENDAR_DISPLAY_KEY, JSON.stringify({version: 1, range: saved, width: this.calendarWidth()})); this.unsavedCalendarDisplay = false; this.calendarWidthWarning.set('');}
+    catch {this.unsavedCalendarDisplay = true; this.weekRangeWarning.set('目前分頁已套用，但瀏覽器無法保存時間範圍。');}
     return true;
+  }
+
+  setCalendarWidth(width: CalendarWidth): void {
+    if (width !== 'standard' && width !== 'wide') return;
+    this.calendarWidth.set(width); this.calendarWidthWarning.set('');
+    try {localStorage.setItem(CALENDAR_DISPLAY_KEY, JSON.stringify({version: 1, range: this.weekRange(), width})); this.unsavedCalendarDisplay = false;}
+    catch {this.unsavedCalendarDisplay = true; this.calendarWidthWarning.set('已套用寬度，但瀏覽器無法保存選擇。');}
   }
 
   async setTextSize(value: unknown): Promise<void> {

@@ -30,6 +30,8 @@ export class GmailPanel {
   readonly expanded = signal(new Set<string>());
   readonly threadViews = signal(new Map<string, ThreadView>());
   readonly refreshing = signal(false);
+  private readonly viewedNewThreadIds = linkedSignal(() => {this.gmail.previewIdentity(); return new Set<string>();});
+  readonly newThreadIds = computed(() => new Set([...this.gmail.newThreadIds(), ...this.viewedNewThreadIds()]));
   private readonly context = computed(() => JSON.stringify([this.gmail.previewIdentity(), [...this.gmail.selected()].sort(), this.gmail.query()]));
   private previousContext = '';
   private viewedVisit = '';
@@ -44,12 +46,13 @@ export class GmailPanel {
       const identity = this.gmail.previewIdentity(), context = JSON.stringify([this.gmail.store.generation(), this.gmail.clientId(), this.gmail.preferences().accountId, visit]);
       const loaded = !this.gmail.busy() && !this.gmail.error() && !this.gmail.showingPrevious() && (this.gmail.updatedAt() > 0 || this.gmail.messages().length > 0);
       untracked(() => {
-        if (!active) {this.viewedVisit = ''; this.refreshedVisit = ''; return;}
+        if (!active) {this.viewedVisit = ''; this.refreshedVisit = ''; this.viewedNewThreadIds.set(new Set()); return;}
         if (!visible || !foreground) return;
-        if (visit > 0 && this.refreshedVisit !== context) {this.refreshedVisit = context; void this.gmail.load(true);}
+        if (visit > 0 && this.refreshedVisit !== context) {this.refreshedVisit = context; void this.gmail.load();}
         if (!loaded || this.gmail.busy() || this.gmail.error() || this.viewedVisit === context) return;
         // A visit acknowledges one batch. Later arrivals remain new while this panel stays open.
-        if (this.notifications.acknowledgeCurrent(identity)) this.viewedVisit = context;
+        const newThreadIds = new Set(this.gmail.newThreadIds());
+        if (this.notifications.acknowledgeCurrent(identity)) {this.viewedVisit = context; this.viewedNewThreadIds.set(newThreadIds);}
       });
     });
     document.addEventListener('visibilitychange', this.visibilityChanged);

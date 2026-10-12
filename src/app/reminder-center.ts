@@ -13,11 +13,14 @@ interface ReminderListFilters {source: ReminderSource; excludedCalendars: string
 export class ReminderCenter {
   readonly reminders = inject(Reminders);
   readonly initialTab = input<ReminderTab>('today');
+  readonly active = input(true);
   readonly visible = input(true);
   readonly activeTab = linkedSignal(() => this.initialTab());
   readonly dueDays = linkedSignal(() => this.reminders.store.reminders().dueSoonDays);
   readonly presets = DUE_DAY_PRESETS;
   private readonly filterContext = computed(() => JSON.stringify([this.reminders.store.generation(), this.reminders.store.currentWorkspace().id]));
+  private readonly newNoticeKeys = linkedSignal(() => {this.filterContext(); return new Set<string>();});
+  readonly newItemIds = computed(() => new Set(this.reminders.summaryNotices().filter(notice => this.newNoticeKeys().has(notice.key)).map(notice => notice.item.id)));
   private readonly listFilters = linkedSignal(() => {
     this.filterContext();
     return {} as Partial<Record<ReminderTab, ReminderListFilters>>;
@@ -66,9 +69,14 @@ export class ReminderCenter {
 
   constructor() {
     effect(() => {
+      if (!this.active()) {untracked(() => this.newNoticeKeys.set(new Set())); return;}
       if (!this.visible() || !this.reminders.active()) return;
-      this.reminders.summaryNotices();
-      untracked(() => this.reminders.markViewed());
+      const notices = this.reminders.summaryNotices(), unseen = new Set(this.reminders.unseenNotices().map(notice => notice.key));
+      untracked(() => {
+        // Keep this visit's new markers after the header count is acknowledged.
+        this.newNoticeKeys.update(keys => new Set(notices.filter(notice => keys.has(notice.key) || unseen.has(notice.key)).map(notice => notice.key)));
+        this.reminders.markViewed();
+      });
     });
   }
 

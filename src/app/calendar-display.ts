@@ -1,4 +1,5 @@
 export interface WeekTimeRange {startHour: number; endHour: number}
+export type CalendarWidth = 'standard' | 'wide';
 export const CALENDAR_DISPLAY_KEY = 'iih-orbit-calendar-display-v1';
 export const DEFAULT_WEEK_RANGE: WeekTimeRange = {startHour: 8, endHour: 19};
 
@@ -13,4 +14,8 @@ export function readWeekRange(value: unknown): WeekTimeRange {
 export function loadWeekRange(): WeekTimeRange {
   try {const record = JSON.parse(localStorage.getItem(CALENDAR_DISPLAY_KEY) ?? 'null'); return readWeekRange(record?.version === 1 ? record.range : null);}
   catch {return {...DEFAULT_WEEK_RANGE};}
+}
+export function loadCalendarWidth(): CalendarWidth {
+  try {const record = JSON.parse(localStorage.getItem(CALENDAR_DISPLAY_KEY) ?? 'null'); return record?.version === 1 && record.width === 'standard' ? 'standard' : 'wide';}
+  catch {return 'wide';}
 }

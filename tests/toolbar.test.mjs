@@ -58,26 +58,27 @@ async function notifications() {
   const storage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value)};
   const window = {addEventListener() {}, removeEventListener() {}}, document = {visibilityState: 'visible', addEventListener() {}, removeEventListener() {}}, navigator = {onLine: true};
   for (const [key, value] of Object.entries({window, document, navigator, localStorage: storage})) Object.defineProperty(globalThis, key, {value, configurable: true});
-  const gmail = {store: {generation: signal('generation')}, clientId: signal('client'), preferences: signal({accountId: 'account'}), auth: {connected: signal(false), connectionVersion: signal(1)}, newThreadIds: signal(new Set()), arrivalWarning: signal(''), previewIdentity() {return JSON.stringify([this.store.generation(), this.clientId(), this.preferences().accountId, this.auth.connectionVersion()]);}};
+  let refreshed;
+  const gmail = {store: {generation: signal('generation')}, clientId: signal('client'), preferences: signal({accountId: 'account'}), auth: {connected: signal(false), connectionVersion: signal(1)}, newThreadIds: signal(new Set()), arrivalWarning: signal(''), onRefreshed(listener) {refreshed = listener; return () => {refreshed = undefined;};}, previewIdentity() {return JSON.stringify([this.store.generation(), this.clientId(), this.preferences().accountId, this.auth.connectionVersion()]);}};
   let history = {historyId: '100'}, failure;
   gmail.auth.api = async (path, params) => {requests.push([path, params]); if (failure) throw failure; if (path === 'profile') return {historyId: '100'}; if (path === 'history') return history; return {id: path.slice(9), threadId: path === 'messages/new' ? 'thread' : 'thread-' + path.slice(9), labelIds: ['INBOX', 'UNREAD']};};
   const scheduler = {add(effect) {effects.add(effect);}, schedule() {}, remove(effect) {effects.delete(effect);}};
   const injector = createEnvironmentInjector([{provide: GmailService, useValue: gmail}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   const service = runInInjectionContext(injector, () => new GmailNotifications());
-  const flush = async () => {for (let round = 0; round < 30 && [...effects].some(effect => effect.dirty); round++) for (const effect of effects) if (effect.dirty) effect.run(); await service.check();};
+  const flush = async () => {for (let round = 0; round < 30 && [...effects].some(effect => effect.dirty); round++) for (const effect of effects) if (effect.dirty) effect.run();};
   await flush();
-  return {service, gmail, requests, values, navigator, document, flush, setHistory(value) {history = value;}, setFailure(value) {failure = value;}, close() {service.ngOnDestroy(); injector.destroy(); for (const [key, descriptor] of originals) {if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];}}};
+  return {service, gmail, requests, values, navigator, document, flush, refresh: () => refreshed?.(), setHistory(value) {history = value;}, setFailure(value) {failure = value;}, close() {service.ngOnDestroy(); injector.destroy(); for (const [key, descriptor] of originals) {if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];}}};
 }
 
-test('新郵件檢查僅在授權有效、頁面可見且在線時執行，不自行開啟授權', async () => {
+test('新郵件只隨有效連線的成功郵件更新檢查，連線與回到前景不獨立查詢', async () => {
   const f = await notifications();
   try {
-    await f.service.check(true); assert.equal(f.requests.length, 0);
-    f.gmail.auth.connected.set(true); f.document.visibilityState = 'hidden'; await f.flush(); await f.service.check(true); assert.equal(f.requests.length, 0);
-    f.document.visibilityState = 'visible'; f.navigator.onLine = false; await f.service.check(true); assert.equal(f.requests.length, 0);
-    f.navigator.onLine = true; await f.service.check(true); assert.equal(f.requests.length, 1); assert.equal(f.service.count(), 0);
-    await f.service.check(); assert.equal(f.requests.length, 1);
-    f.setHistory({historyId: '120', history: [{messagesAdded: [{message: {id: 'new'}}]}]}); await f.service.check(true);
+    await f.refresh(); assert.equal(f.requests.length, 0);
+    f.gmail.auth.connected.set(true); f.document.visibilityState = 'hidden'; await f.flush(); assert.equal(f.requests.length, 0);
+    f.document.visibilityState = 'visible'; f.navigator.onLine = false; await f.refresh(); assert.equal(f.requests.length, 0);
+    f.navigator.onLine = true; await f.refresh(); assert.equal(f.requests.length, 1); assert.equal(f.service.count(), 0);
+    await f.flush(); assert.equal(f.requests.length, 1);
+    f.setHistory({historyId: '120', history: [{messagesAdded: [{message: {id: 'new'}}]}]}); await f.refresh();
     assert.equal(f.service.count(), 1); assert.equal(f.gmail.newThreadIds().has('thread'), true);
   } finally {f.close();}
 });
@@ -85,13 +86,14 @@ test('新郵件檢查僅在授權有效、頁面可見且在線時執行，不�
 test('查看紀錄以當前 Gmail 身分處理；失敗保留提示，切換帳號不混入舊新郵件', async () => {
   const f = await notifications();
   try {
-    f.gmail.auth.connected.set(true); await f.flush();
-    f.setHistory({historyId: '120', history: [{messagesAdded: [{message: {id: 'new'}}]}]}); await f.service.check(true);
+    f.gmail.auth.connected.set(true); await f.flush(); await f.refresh();
+    f.setHistory({historyId: '120', history: [{messagesAdded: [{message: {id: 'new'}}]}]}); await f.refresh();
     assert.equal(f.service.acknowledgeCurrent('old-account'), false); assert.equal(f.service.count(), 1);
-    f.setFailure(new Error('network')); await f.service.check(true); assert.equal(f.service.count(), 1); assert.match(f.service.warning(), /network/);
+    f.setFailure(new Error('network')); await f.refresh(); assert.equal(f.service.count(), 1); assert.match(f.service.warning(), /network/);
     assert.equal(f.service.acknowledgeCurrent(f.gmail.previewIdentity()), true); assert.equal(f.service.count(), 0);
     assert.deepEqual(JSON.parse(f.values.get('iih-orbit-gmail-arrivals-v1')).viewed, ['new']);
     f.setFailure(undefined); f.gmail.preferences.set({accountId: 'different-account'}); await f.flush();
+    await f.refresh();
     assert.equal(f.service.count(), 0); assert.equal(f.service.state().context.includes('different-account'), true);
   } finally {f.close();}
 });
@@ -99,15 +101,15 @@ test('查看紀錄以當前 Gmail 身分處理；失敗保留提示，切換帳�
 test('開啟 Gmail 整批收起通知與新郵件標記，保存本機識別；後續到信重新累計，Gmail 未讀不變', async () => {
   const f = await notifications();
   try {
-    f.gmail.auth.connected.set(true); await f.flush();
-    f.setHistory({historyId: '120', history: [{messagesAdded: ['one', 'two'].map(id => ({message: {id}}))}]}); await f.service.check(true);
+    f.gmail.auth.connected.set(true); await f.flush(); await f.refresh();
+    f.setHistory({historyId: '120', history: [{messagesAdded: ['one', 'two'].map(id => ({message: {id}}))}]}); await f.refresh();
     assert.equal(f.service.count(), 2);
     const requests = f.requests.length;
     f.service.acknowledgeCurrent(f.gmail.previewIdentity());
     assert.equal(f.service.count(), 0); assert.equal(f.gmail.newThreadIds().size, 0); assert.equal(f.requests.length, requests);
     const saved = JSON.parse(f.values.get('iih-orbit-gmail-arrivals-v1'));
     assert.deepEqual(saved.pending, []); assert.deepEqual(saved.viewed.sort(), ['one', 'two']);
-    f.setHistory({historyId: '130', history: [{messagesAdded: ['one', 'two', 'three'].map(id => ({message: {id}}))}]}); await f.service.check(true);
+    f.setHistory({historyId: '130', history: [{messagesAdded: ['one', 'two', 'three'].map(id => ({message: {id}}))}]}); await f.refresh();
     assert.equal(f.service.count(), 1); assert.deepEqual([...f.gmail.newThreadIds()], ['thread-three']);
     assert.equal(f.requests.every(([path]) => !path.includes('modify')), true);
   } finally {f.close();}
@@ -116,11 +118,11 @@ test('開啟 Gmail 整批收起通知與新郵件標記，保存本機識別；�
 test('整批查看與新郵件請求重疊時，不復活舊通知，也不清除稍後取得的新郵件', async () => {
   const f = await notifications(); let release;
   try {
-    f.gmail.auth.connected.set(true); await f.flush();
-    f.setHistory({historyId: '120', history: [{messagesAdded: [{message: {id: 'new'}}]}]}); await f.service.check(true);
+    f.gmail.auth.connected.set(true); await f.flush(); await f.refresh();
+    f.setHistory({historyId: '120', history: [{messagesAdded: [{message: {id: 'new'}}]}]}); await f.refresh();
     const original = f.gmail.auth.api;
     f.gmail.auth.api = async (path, params) => path === 'history' ? new Promise(resolve => {release = resolve;}) : original(path, params);
-    const checking = f.service.check(true);
+    const checking = f.refresh(); await new Promise(resolve => setImmediate(resolve));
     f.service.acknowledgeCurrent(f.gmail.previewIdentity()); assert.equal(f.service.count(), 0);
     release({historyId: '130', history: [{messagesAdded: ['new', 'later'].map(id => ({message: {id}}))}]}); await checking;
     assert.equal(f.service.count(), 1); assert.deepEqual(f.service.state().pending.map(mail => mail.id), ['later']);

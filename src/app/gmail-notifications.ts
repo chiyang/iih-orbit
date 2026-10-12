@@ -14,19 +14,16 @@ export class GmailNotifications implements OnDestroy {
   private context = '';
   private tracker?: GmailArrivalTracker;
   private destroyed = false;
-  private lastCheck = 0;
   private pending?: Promise<void>;
-  private readonly wake = () => {void this.check();};
   private readonly storageChanged = (event: StorageEvent) => {if (event.key === STORAGE_KEY) this.adoptStored();};
-  private readonly timer: ReturnType<typeof setInterval>;
+  private readonly stopRefreshChecks: () => void;
   constructor() {
     effect(() => {const message = this.warning() || this.storageWarning(); untracked(() => this.gmail.arrivalWarning.set(message));});
     effect(() => {
       const context = JSON.stringify([this.gmail.store.generation(), this.gmail.clientId(), this.gmail.preferences().accountId]);
-      const connected = this.gmail.auth.connected(), version = this.gmail.auth.connectionVersion();
       untracked(() => {
         if (context !== this.context) {
-          this.context = context; this.lastCheck = 0; this.pending = undefined; this.checking.set(false); this.warning.set(''); this.storageWarning.set('');
+          this.context = context; this.pending = undefined; this.checking.set(false); this.warning.set(''); this.storageWarning.set('');
           let initial;
           try {initial = readGmailArrivalState(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null'), context);} catch { /* Begin with an empty local notification baseline. */ }
           this.state.set(initial); this.gmail.newThreadIds.set(new Set(initial?.pending.map(mail => mail.threadId)));
@@ -36,11 +33,9 @@ export class GmailNotifications implements OnDestroy {
             try {localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); this.storageWarning.set('');} catch {this.storageWarning.set('新郵件提示無法保存，重新整理後會重新檢查。');}
           });
         }
-        if (connected && version) void this.check();
       });
     });
-    this.timer = setInterval(this.wake, 60000);
-    window.addEventListener('online', this.wake); window.addEventListener('focus', this.wake); document.addEventListener('visibilitychange', this.wake);
+    this.stopRefreshChecks = this.gmail.onRefreshed(() => this.check());
     window.addEventListener('storage', this.storageChanged);
   }
   private adoptStored(): void {
@@ -57,19 +52,24 @@ export class GmailNotifications implements OnDestroy {
     if (ids.length) this.tracker.acknowledge(ids);
     return true;
   }
-  check(force = false): Promise<void> {
+  private check(): Promise<void> {
     this.adoptStored();
-    if (this.pending) return this.pending;
-    if (this.destroyed || !this.tracker || !this.gmail.auth.connected() || !this.gmail.preferences().accountId || navigator.onLine === false || document.visibilityState === 'hidden' || !force && Date.now() - this.lastCheck < 60000) return Promise.resolve();
-    const context = this.context, version = this.gmail.auth.connectionVersion(), tracker = this.tracker;
-    const current = () => !this.destroyed && context === this.context && version === this.gmail.auth.connectionVersion() && this.gmail.auth.connected();
-    this.lastCheck = Date.now(); this.checking.set(true);
-    const run = tracker.check(current).then(() => {if (current()) this.warning.set('');}).catch(error => {if (current()) this.warning.set(error instanceof Error ? error.message : '暫時無法檢查新郵件。');}).finally(() => {if (this.pending === run) {this.pending = undefined; this.checking.set(false);}});
+    if (this.destroyed || !this.tracker || !this.gmail.auth.connected() || !this.gmail.preferences().accountId || navigator.onLine === false
+      || this.context !== JSON.stringify([this.gmail.store.generation(), this.gmail.clientId(), this.gmail.preferences().accountId])) return Promise.resolve();
+    const context = this.context, version = this.gmail.auth.connectionVersion(), tracker = this.tracker, previous = this.pending;
+    const current = () => !this.destroyed && context === this.context && version === this.gmail.auth.connectionVersion() && this.gmail.auth.connected()
+      && context === JSON.stringify([this.gmail.store.generation(), this.gmail.clientId(), this.gmail.preferences().accountId]);
+    const run = (async () => {
+      await previous;
+      if (!current()) return;
+      this.adoptStored(); this.checking.set(true);
+      try {await tracker.check(current); if (current()) this.warning.set('');}
+      catch (error) {if (current()) this.warning.set(error instanceof Error ? error.message : '暫時無法檢查新郵件。');}
+    })().finally(() => {if (this.pending === run) {this.pending = undefined; this.checking.set(false);}});
     this.pending = run; return run;
   }
   ngOnDestroy(): void {
-    this.destroyed = true; clearInterval(this.timer);
-    window.removeEventListener('online', this.wake); window.removeEventListener('focus', this.wake); document.removeEventListener('visibilitychange', this.wake);
+    this.destroyed = true; this.stopRefreshChecks();
     window.removeEventListener('storage', this.storageChanged);
   }
 }

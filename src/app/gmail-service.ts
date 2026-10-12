@@ -55,6 +55,7 @@ export class GmailService implements OnDestroy {
   private readonly cache = new GmailPreviewCache();
   private readonly failedLoads = new Map<string, {retryAt: number; message: string}>();
   private refreshTimer?: ReturnType<typeof setTimeout>;
+  private readonly refreshListeners = new Set<() => Promise<void>>();
   private readonly threadCache = new Map<string, {updatedAt: number; messages: MailPreview[]}>();
   private readonly threadPending = new Map<string, Promise<MailPreview[]>>();
   private threadIdentity = '';
@@ -175,6 +176,10 @@ export class GmailService implements OnDestroy {
     try { return structuredClone(await run); }
     finally { if (this.threadPending.get(mail.threadId) === run) this.threadPending.delete(mail.threadId); }
   }
+  onRefreshed(listener: () => Promise<void>): () => void {
+    this.refreshListeners.add(listener);
+    return () => {this.refreshListeners.delete(listener);};
+  }
   async load(force = false, more = false): Promise<void> {
     if (!this.auth.connected() || navigator.onLine === false) return;
     if (this.pending) return this.pending;
@@ -223,6 +228,8 @@ export class GmailService implements OnDestroy {
         this.summaries.set([...summaries.values()]);
         this.messages.set(append ? [...this.messages(), ...messages.filter(mail => !this.messages().some(old => old.id === mail.id))] : messages);
         this.showingPrevious.set(false); this.updatedAt.set(Date.now()); this.failedLoads.delete(scope); this.persistCache();
+        // Finish arrival checks before a newly opened panel acknowledges this batch.
+        if (!more) await Promise.all([...this.refreshListeners].map(listener => listener()));
       } catch (error) {
         if (current() && !controller.signal.aborted) {
           const message = error instanceof Error ? error.message : '無法讀取 Gmail 郵件，請重試。';
@@ -251,5 +258,5 @@ export class GmailService implements OnDestroy {
     catch { this.warning.set('郵件已讀取，但無法保存離線預覽；重新整理後會重新讀取。'); }
   }
   private clearCache(): void { this.api.clearCache(); this.failedLoads.clear(); try { this.cache.clear(); } catch { this.warning.set('無法清理郵件預覽快取。'); } }
-  ngOnDestroy(): void { this.destroyed = true; this.epoch++; this.listController?.abort(); this.threadCache.clear(); this.threadPending.clear(); this.expandedMessages.set([]); clearTimeout(this.refreshTimer); window.removeEventListener('online', this.wake); window.removeEventListener('offline', this.wake); window.removeEventListener('storage', this.changed); document.removeEventListener('visibilitychange', this.wake); }
+  ngOnDestroy(): void { this.destroyed = true; this.epoch++; this.listController?.abort(); this.refreshListeners.clear(); this.threadCache.clear(); this.threadPending.clear(); this.expandedMessages.set([]); clearTimeout(this.refreshTimer); window.removeEventListener('online', this.wake); window.removeEventListener('offline', this.wake); window.removeEventListener('storage', this.changed); document.removeEventListener('visibilitychange', this.wake); }
 }

@@ -308,6 +308,34 @@ test('郵件快取只在本機：再次開啟沿用新鮮快取；舊標籤回�
     await f.store.resetData(true, f.store.revision()); f.flush(); assert.equal(f.gmail.preferences().accountId, ''); assert.equal(f.gmail.messages().length, 0); assert.equal(f.values.has('iih-orbit-gmail-cache-v1'), false);
   } finally {f.close();}
 });
+test('開啟及重開 Gmail 遵守五分鐘快取期限，手動更新立即讀取，空郵箱同樣不反覆更新', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: Date.now()});
+  const f = fixture(); let panel, pages = 0, empty = false;
+  try {
+    f.auth.api = async path => {
+      if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]};
+      if (path === 'messages') {pages++; return {messages: empty ? [] : [{id: 'mail'}]};}
+      return path.startsWith('threads/') ? {id: preview.threadId, messages: [raw('mail')]} : raw('mail');
+    };
+    await f.gmail.load(); const stamp = f.gmail.updatedAt();
+    panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(true); panel.visible = signal(true); panel.visit = signal(1); f.flush();
+    assert.equal(f.gmail.busy(), false); assert.equal(pages, 1);
+    t.mock.timers.tick(400); await new Promise(resolve => setImmediate(resolve)); f.flush();
+    for (let visit = 2; visit <= 3; visit++) {
+      panel.active.set(false); f.flush(); panel.active.set(true); panel.visit.set(visit); f.flush();
+      assert.equal(f.gmail.busy(), false); t.mock.timers.tick(400); await new Promise(resolve => setImmediate(resolve)); f.flush();
+    }
+    assert.equal(pages, 1); assert.equal(f.gmail.updatedAt(), stamp);
+    await panel.refresh(); f.flush(); assert.equal(pages, 2);
+    panel.active.set(false); f.flush(); t.mock.timers.tick(5 * 60000);
+    panel.active.set(true); panel.visit.set(4); f.flush(); assert.equal(f.gmail.busy(), true);
+    await f.gmail.load(); f.flush(); assert.equal(pages, 3);
+    t.mock.timers.tick(400); await new Promise(resolve => setImmediate(resolve)); assert.equal(pages, 3);
+    empty = true; await panel.refresh(); f.flush(); assert.equal(pages, 4); assert.equal(f.gmail.messages().length, 0);
+    panel.active.set(false); f.flush(); panel.active.set(true); panel.visit.set(5); f.flush();
+    assert.equal(f.gmail.busy(), false); t.mock.timers.tick(400); await new Promise(resolve => setImmediate(resolve)); assert.equal(pages, 4);
+  } finally {panel?.ngOnDestroy(); f.close();}
+});
 test('各標籤與搜尋先顯示對應快取，五分鐘內不下載；過期更新失敗不覆蓋成功時間與原郵件', async t => {
   t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: Date.now()});
   const f = fixture(), pages = []; let fail = false;
@@ -616,6 +644,127 @@ test('右側欄切換不改動工作區視圖，郵件建立按鈕填入獨立�
   } finally {child.destroy(); f.close();}
 });
 
+test('新郵件只隨成功的列表更新檢查，沒有每分鐘、連線或焦點檢查，通知失敗不影響郵件', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'setInterval', 'Date'], now: Date.now()});
+  const f = fixture(), events = new Map(), checks = []; let notifications, failList = false, failHistory = false;
+  try {
+    window.addEventListener = (name, handler) => events.set(name, handler);
+    document.addEventListener = (name, handler) => events.set(name, handler);
+    f.auth.api = async (path, params) => {
+      if (path === 'profile') {checks.push(path); return {historyId: '100'};}
+      if (path === 'history') {
+        checks.push(path); if (failHistory) throw new Error('history unavailable');
+        return {historyId: String(100 + checks.length), history: [{messagesAdded: [{message: {id: 'arrived'}}]}]};
+      }
+      if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]};
+      if (path === 'messages') {if (failList) throw new Error('list unavailable'); return {messages: [{id: 'mail'}]};}
+      if (params.format === 'minimal') return {id: 'arrived', threadId: 'thread-arrived', labelIds: ['INBOX', 'UNREAD']};
+      return path.startsWith('threads/') ? {id: preview.threadId, messages: [raw('mail')]} : raw('mail');
+    };
+    notifications = runInInjectionContext(f.child, () => new GmailNotifications()); f.flush();
+    f.auth.connectionVersion.set(1); f.flush();
+    for (const name of ['online', 'focus', 'visibilitychange']) events.get(name)?.();
+    t.mock.timers.tick(3 * 60000); await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(checks, []); assert.deepEqual([...events.keys()], ['storage']);
+    await f.gmail.load(); f.flush(); assert.deepEqual(checks, ['profile']); assert.equal(notifications.count(), 0);
+    await f.gmail.load(); await f.gmail.load(false, true); f.flush(); assert.equal(checks.length, 1);
+    await f.gmail.load(true); f.flush(); assert.equal(checks.length, 2); assert.equal(notifications.count(), 1);
+    await f.gmail.load(true); f.flush(); assert.equal(checks.length, 3);
+    failList = true; await f.gmail.load(true); f.flush(); assert.equal(checks.length, 3); assert.equal(notifications.count(), 1);
+    failList = false; failHistory = true; const baseline = notifications.state().historyId;
+    await f.gmail.load(true); f.flush(); assert.equal(checks.length, 4); assert.equal(f.gmail.error(), '');
+    assert.equal(f.gmail.messages()[0].id, 'mail'); assert.equal(notifications.state().historyId, baseline); assert.equal(notifications.count(), 1);
+    assert.match(f.gmail.arrivalWarning(), /history unavailable/); assert.equal(f.gmail.busy(), false); assert.equal(notifications.checking(), false);
+    failHistory = false; await f.gmail.load(true); f.flush(); assert.equal(checks.length, 5); assert.equal(f.gmail.arrivalWarning(), '');
+    t.mock.timers.tick(10 * 60000); await new Promise(resolve => setImmediate(resolve)); assert.equal(checks.length, 5);
+    notifications.ngOnDestroy(); await f.gmail.load(true); assert.equal(checks.length, 5);
+  } finally {notifications?.ngOnDestroy(); f.close();}
+});
+
+test('通知檢查途中切換篩選，下一次成功更新接續檢查，不合併掉更新或重用舊基準', async () => {
+  const f = fixture(), historyStarts = [], releases = []; let notifications;
+  try {
+    const context = JSON.stringify([f.store.generation(), f.gmail.clientId(), f.gmail.preferences().accountId]);
+    f.values.set('iih-orbit-gmail-arrivals-v1', JSON.stringify({version: 1, context, historyId: '100', checkedAt: Date.now(), pending: [], viewed: []}));
+    f.auth.api = async (path, params) => {
+      if (path === 'history') {
+        historyStarts.push(params.startHistoryId);
+        return new Promise(resolve => {releases.push(id => resolve({historyId: String(100 + releases.length), history: [{messagesAdded: [{message: {id}}]}]}));});
+      }
+      if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}, {id: 'Work', name: 'Work', type: 'user'}]};
+      if (path === 'messages') return {messages: [{id: params.labelIds}]};
+      const id = path.startsWith('threads/') ? path.slice('threads/thread-'.length) : path.split('/')[1];
+      if (params.format === 'minimal') return {id, threadId: 'thread-' + id, labelIds: ['INBOX', 'UNREAD']};
+      return path.startsWith('threads/') ? {id: 'thread-' + id, messages: [raw(id)]} : raw(id);
+    };
+    notifications = runInInjectionContext(f.child, () => new GmailNotifications()); f.flush();
+    const first = f.gmail.load(); await new Promise(resolve => setImmediate(resolve));
+    f.gmail.applyLabels(['Work']); f.flush(); const second = f.gmail.load();
+    await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(historyStarts, ['100']); assert.equal(f.gmail.busy(), true);
+    releases[0]('first'); await first; await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(historyStarts, ['100', '101']); assert.equal(f.gmail.busy(), true);
+    releases[1]('second'); await second; f.flush();
+    assert.equal(f.gmail.messages()[0].id, 'Work'); assert.equal(f.gmail.busy(), false); assert.equal(notifications.checking(), false);
+    assert.equal(notifications.state().historyId, '102'); assert.equal(notifications.count(), 2);
+    assert.deepEqual([...f.gmail.newThreadIds()].sort(), ['thread-first', 'thread-second']);
+  } finally {notifications?.ngOnDestroy(); f.close();}
+});
+
+test('更新通知途中切換 Gmail 帳號，舊帳號的遲到回應不覆蓋新帳號基準或提示', async () => {
+  const f = fixture(); let notifications, releaseHistory;
+  try {
+    const context = JSON.stringify([f.store.generation(), f.gmail.clientId(), f.gmail.preferences().accountId]);
+    f.values.set('iih-orbit-gmail-arrivals-v1', JSON.stringify({version: 1, context, historyId: '100', checkedAt: Date.now(), pending: [], viewed: []}));
+    f.auth.api = async path => {
+      if (path === 'history') return new Promise(resolve => {releaseHistory = () => resolve({historyId: '101', history: [{messagesAdded: [{message: {id: 'old'}}]}]});});
+      if (path === 'profile') return {historyId: '200'};
+      if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]};
+      if (path === 'messages') return {messages: [{id: 'mail'}]};
+      return path.startsWith('threads/') ? {id: preview.threadId, messages: [raw('mail')]} : raw('mail');
+    };
+    notifications = runInInjectionContext(f.child, () => new GmailNotifications()); f.flush();
+    const old = f.gmail.load(); await new Promise(resolve => setImmediate(resolve));
+    f.gmail.preferences.set({...f.gmail.preferences(), accountId: 'another', email: 'another@example.test'});
+    f.auth.account.set({id: 'another', email: 'another@example.test'}); f.auth.connectionVersion.update(n => n + 1); f.flush();
+    await f.gmail.load(); releaseHistory(); await old; f.flush();
+    assert.equal(notifications.state().historyId, '200'); assert.equal(notifications.count(), 0); assert.equal(f.gmail.newThreadIds().size, 0);
+    assert.equal(notifications.state().context, JSON.stringify([f.store.generation(), f.gmail.clientId(), 'another']));
+    assert.equal(f.gmail.arrivalWarning(), ''); assert.equal(f.gmail.busy(), false);
+    assert.equal(JSON.parse(f.values.get('iih-orbit-gmail-arrivals-v1')).historyId, '200');
+  } finally {notifications?.ngOnDestroy(); f.close();}
+});
+
+test('開啟 Gmail 等待這次更新的通知檢查再整批查看，已開啟時手動更新保留後續新郵件', async () => {
+  const f = fixture(); let notifications, child, panel, releaseHistory, arrival = 'arrived';
+  try {
+    const context = JSON.stringify([f.store.generation(), f.gmail.clientId(), f.gmail.preferences().accountId]);
+    f.values.set('iih-orbit-gmail-arrivals-v1', JSON.stringify({version: 1, context, historyId: '100', checkedAt: Date.now(), pending: [], viewed: []}));
+    f.auth.api = async (path, params) => {
+      if (path === 'history') return new Promise(resolve => {releaseHistory = () => resolve({historyId: arrival === 'arrived' ? '101' : '102', history: [{messagesAdded: [{message: {id: arrival}}]}]});});
+      if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]};
+      if (path === 'messages') return {messages: [{id: 'mail'}]};
+      if (params.format === 'minimal') return {id: arrival, threadId: 'thread-' + arrival, labelIds: ['INBOX', 'UNREAD']};
+      return path.startsWith('threads/') ? {id: preview.threadId, messages: [raw('mail')]} : raw('mail');
+    };
+    notifications = runInInjectionContext(f.child, () => new GmailNotifications()); f.flush();
+    child = createEnvironmentInjector([{provide: GmailNotifications, useValue: notifications}], f.child);
+    panel = runInInjectionContext(child, () => new GmailPanel()); panel.active = signal(true); panel.visible = signal(true); panel.visit = signal(1); f.flush();
+    await new Promise(resolve => setImmediate(resolve)); f.flush();
+    assert.equal(f.gmail.messages().length, 1); assert.equal(f.gmail.busy(), true); assert.equal(notifications.checking(), true);
+    releaseHistory(); await f.gmail.load(); f.flush();
+    assert.equal(f.gmail.busy(), false); assert.equal(notifications.count(), 0); assert.deepEqual(notifications.state().viewed, ['arrived']);
+    assert.equal(f.gmail.newThreadIds().size, 0); assert.equal(panel.newThreadIds().has('thread-arrived'), true);
+    panel.visible.set(false); f.flush(); panel.visible.set(true); f.flush(); assert.equal(panel.newThreadIds().has('thread-arrived'), true);
+    arrival = 'later'; const refreshed = panel.refresh();
+    await new Promise(resolve => setImmediate(resolve)); f.flush(); assert.equal(f.gmail.busy(), true);
+    releaseHistory(); await refreshed; f.flush();
+    assert.equal(notifications.count(), 1); assert.equal(f.gmail.newThreadIds().has('thread-later'), true);
+    panel.visit.set(2); f.flush(); assert.equal(f.gmail.busy(), false); assert.equal(notifications.count(), 0);
+    assert.deepEqual([...panel.newThreadIds()], ['thread-later']);
+    panel.active.set(false); f.flush(); panel.active.set(true); panel.visit.set(3); f.flush(); assert.equal(panel.newThreadIds().size, 0);
+  } finally {panel?.ngOnDestroy(); notifications?.ngOnDestroy(); child?.destroy(); f.close();}
+});
+
 test('Gmail 側欄載入後整批查看一次；更新、後續到信、焦點返回及關閉郵件預覽不再次收起通知', async () => {
   const f = fixture(); let panel;
   try {
@@ -646,7 +795,8 @@ test('Gmail 側欄隱藏或頁面在背景時不視為已查看；真正顯示�
   } finally {panel?.ngOnDestroy(); f.close();}
 });
 
-test('側欄已開啟 Gmail 時點擊新郵件徽章，更新後查看下一批通知；失敗保留通知，預覽單封不另行查看通知', async () => {
+test('側欄已開啟 Gmail 時點擊新郵件徽章重用快取，過期更新失敗保留通知，預覽單封不另行查看通知', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: Date.now()});
   const f = fixture(), child = createEnvironmentInjector([{provide: UiPreferences, useValue: {textSize: () => 'standard'}}], f.child); let panel;
   try {
     f.gmail.messages.set([preview]);
@@ -655,15 +805,17 @@ test('側欄已開啟 Gmail 時點擊新郵件徽章，更新後查看下一批�
     panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(true); panel.visible = signal(true); panel.visit = app.mailVisit; f.flush();
     await new Promise(resolve => setImmediate(resolve)); f.flush();
     const visits = f.panelViews.length;
+    app.activatePanel({target: 'gmail'}); f.flush(); assert.equal(f.gmail.busy(), false); assert.equal(f.panelViews.length, visits + 1);
+    t.mock.timers.tick(5 * 60000);
     f.auth.api = async () => {throw new Error('network');};
     app.activatePanel({target: 'gmail'}); f.flush(); await new Promise(resolve => setImmediate(resolve)); f.flush();
-    assert.equal(f.panelViews.length, visits); assert.equal(app.mailOpen(), true);
+    assert.equal(f.panelViews.length, visits + 1); assert.equal(app.mailOpen(), true);
     f.auth.api = async path => path === 'labels' ? {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]} : path === 'messages' ? {messages: [{id: 'mail', threadId: preview.threadId}]} : path.startsWith('threads/') ? {id: preview.threadId, messages: [raw('mail')]} : raw('mail');
-    app.activatePanel({target: 'gmail'}); f.flush();
-    assert.equal(f.panelViews.length, visits);
+    t.mock.timers.tick(30000); app.activatePanel({target: 'gmail'}); f.flush();
+    assert.equal(f.panelViews.length, visits + 1);
     await new Promise(resolve => setImmediate(resolve)); f.flush();
-    assert.equal(app.mailOpen(), true); assert.equal(app.panelTab(), 'gmail'); assert.equal(f.panelViews.length, visits + 1);
-    app.openMailPreview(preview); assert.equal(app.modal(), 'mail-preview'); assert.equal(f.panelViews.length, visits + 1);
+    assert.equal(app.mailOpen(), true); assert.equal(app.panelTab(), 'gmail'); assert.equal(f.panelViews.length, visits + 2);
+    app.openMailPreview(preview); assert.equal(app.modal(), 'mail-preview'); assert.equal(f.panelViews.length, visits + 2);
     app.closeModal(); app.activatePanel({target: 'toggle'}); assert.equal(app.panelOpen(), false);
   } finally {panel?.ngOnDestroy(); child.destroy(); f.close();}
 });

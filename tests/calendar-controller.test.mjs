@@ -10,7 +10,7 @@ import { COLUMNS } from '../src/app/models.ts';
 import { JSDOM } from 'jsdom';
 import { externalEvent } from '../src/app/google-data.ts';
 import { copyEventTask, createEventBody } from '../src/app/calendar-transfer-data.ts';
-import { CALENDAR_DISPLAY_KEY, loadWeekRange, readWeekRange } from '../src/app/calendar-display.ts';
+import { CALENDAR_DISPLAY_KEY, loadCalendarWidth, loadWeekRange, readWeekRange } from '../src/app/calendar-display.ts';
 
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -29,7 +29,7 @@ function calendarController(tasks = [base], external = []) {
   const store = new BoardStore(), effects = new Set();
   const scheduler = {add(effect) { effects.add(effect); }, schedule() {}, remove(effect) { effects.delete(effect); }};
   const google = {store, events: signal(external), visibleSources: signal([]), setMonthRange() {}};
-  const preferences = {scale: () => .9, weekRange: signal({startHour: 8, endHour: 19}), weekRangeWarning: signal('')};
+  const preferences = {scale: () => .9, weekRange: signal({startHour: 8, endHour: 19}), weekRangeWarning: signal(''), calendarWidth: signal('wide'), calendarWidthWarning: signal('')};
   const injector = createEnvironmentInjector([{provide: GoogleCalendarService, useValue: google}, {provide: UiPreferences, useValue: preferences}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   // No DOM or browser: test the action controller and store using signals and pointer coordinates only.
   globalThis.ngServerMode = true;
@@ -127,6 +127,28 @@ test('本機週範圍讀取拒絕損壞及不合法時間，保存失敗保留�
     const originalSet = localStorage.setItem; localStorage.setItem = () => {throw new Error('quota');};
     try {assert.equal(UiPreferences.prototype.setWeekRange.call(f.preferences, {startHour: 9, endHour: 18}), true); assert.deepEqual(f.preferences.weekRange(), {startHour: 9, endHour: 18}); assert.match(f.preferences.weekRangeWarning(), /無法保存/);}
     finally {localStorage.setItem = originalSet;}
+  } finally {f.close();}
+});
+
+test('月週寬度共用本機選擇，舊設定保留寬版，保存時不覆蓋週時間範圍', () => {
+  const f = calendarController();
+  try {
+    assert.equal(loadCalendarWidth(), 'wide');
+    f.values.set(CALENDAR_DISPLAY_KEY, JSON.stringify({version: 1, range: {startHour: 6, endHour: 22}}));
+    assert.equal(loadCalendarWidth(), 'wide'); assert.deepEqual(loadWeekRange(), {startHour: 6, endHour: 22});
+    f.preferences.weekRange.set(loadWeekRange());
+    UiPreferences.prototype.setCalendarWidth.call(f.preferences, 'standard');
+    assert.equal(f.calendar.widthMode(), 'standard'); assert.equal(loadCalendarWidth(), 'standard');
+    f.calendar.mode.set('week'); assert.equal(f.calendar.widthMode(), 'standard');
+    UiPreferences.prototype.setWeekRange.call(f.preferences, {startHour: 7, endHour: 21});
+    assert.equal(loadCalendarWidth(), 'standard'); assert.deepEqual(loadWeekRange(), {startHour: 7, endHour: 21});
+    const originalSet = localStorage.setItem; localStorage.setItem = () => {throw new Error('quota');};
+    try {UiPreferences.prototype.setCalendarWidth.call(f.preferences, 'wide'); assert.equal(f.calendar.widthMode(), 'wide'); assert.match(f.preferences.calendarWidthWarning(), /無法保存/);}
+    finally {localStorage.setItem = originalSet;}
+    assert.equal(loadCalendarWidth(), 'standard');
+    for (const value of ['broken', JSON.stringify({version: 1, width: 'invalid'}), JSON.stringify({version: 2, width: 'standard'})]) {
+      f.values.set(CALENDAR_DISPLAY_KEY, value); assert.equal(loadCalendarWidth(), 'wide');
+    }
   } finally {f.close();}
 });
 

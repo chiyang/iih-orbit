@@ -24,7 +24,8 @@ export class Reminders implements OnDestroy {
   private readonly seen = signal(this.loadSeen());
   readonly attentionWarning = signal('');
   readonly summaryNotices = computed(() => this.summaryItems().map(item => ({item, key: reminderNoticeKey(item, this.now(), this.store.reminders().dueSoonDays, this.store.currentWorkspace())})));
-  readonly unseenItems = computed(() => this.summaryNotices().filter(notice => !this.seen().has(notice.key)).map(notice => notice.item));
+  readonly unseenNotices = computed(() => this.summaryNotices().filter(notice => !this.seen().has(notice.key)));
+  readonly unseenItems = computed(() => this.unseenNotices().map(notice => notice.item));
   readonly unseenCount = computed(() => this.unseenItems().length);
   readonly candidates = computed(() => startPopupCandidates(this.items(), this.now(), this.store.reminders()));
   readonly popups = signal<PopupCandidate[]>([]);

@@ -20,12 +20,12 @@
     @if (listItems().length) {<p class="reminder-result-count" role="status">顯示 {{ visibleItems().length }}／{{ listItems().length }} 筆@if (visibleItems().length !== listItems().length) {<button (click)="clearFilters()">清除此列表篩選</button>}</p>}
     <div class="reminder-items">
       @for (item of visibleItems(); track item.id) {
-        <button class="reminder-item" [orbitColor]="color(item)" (click)="open(item)"><span class="reminder-source" [class.google-source]="item.external">{{ item.external ? 'G' : 'O' }}</span><span class="reminder-item-content"><strong>{{ item.task.title }}</strong><span>{{ dateLabel(item) }}</span><small>{{ item.external ? 'Google・' + item.external.source.name + '・唯讀' : 'Orbit 任務' }}</small></span><app-icon name="chevron" /></button>
+        <button class="reminder-item" [orbitColor]="color(item)" (click)="open(item)"><span class="reminder-source" [class.google-source]="item.external">{{ item.external ? 'G' : 'O' }}</span><span class="reminder-item-content"><span class="reminder-item-title"><strong>{{ item.task.title }}</strong>@if (newItemIds().has(item.id)) {<small class="reminder-new-tag">新提醒</small>}</span><span>{{ dateLabel(item) }}</span><small>{{ item.external ? 'Google・' + item.external.source.name + '・唯讀' : 'Orbit 任務' }}</small></span><app-icon name="chevron" /></button>
       } @empty {<div class="reminder-empty"><app-icon name="circleCheck" /><strong>{{ listItems().length ? '目前篩選沒有符合的提醒' : '這個範圍沒有提醒' }}</strong><p>{{ listItems().length ? '可調整來源與月曆選擇，或清除此列表篩選。' : '可切換其他日期或查看到期任務。' }}</p></div>}
     </div>
     @if (activeTab() === 'today' || activeTab() === 'tomorrow' || activeTab() === 'next-week') {<p class="reminder-help">依開始日期整理，包含全天安排；跨日項目只在開始日列入。Google 活動為唯讀。</p>}
     @if (activeTab() === 'this-week') {<p class="reminder-help">包含排程與本週重疊的待完成任務及 Google 活動。</p>}
-    <p class="reminder-help">開啟此側欄後收起現有提醒徽章，安排仍保留在清單中。新增、改期或進入今日／逾期時會再提示。</p>
+    <p class="reminder-help">開啟此側欄後收起現有提醒徽章，「新提醒」標記保留至這次瀏覽結束。新增、改期或進入今日／逾期時會再提示。</p>
     @if (reminders.warning()) {<p class="reminder-warning" role="status">{{ reminders.warning() }}</p>}
     @if (reminders.attentionWarning()) {<p class="reminder-warning" role="status">{{ reminders.attentionWarning() }}</p>}
   </div>

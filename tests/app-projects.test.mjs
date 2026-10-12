@@ -87,6 +87,7 @@ test('週視圖範圍設定驗證起訖、只保存本機，重新開啟仍可�
   const f = application(), preferences = f.settings.preferences;
   try {
     preferences.weekRange = signal({startHour: 8, endHour: 19}); preferences.weekRangeWarning = signal('');
+    preferences.calendarWidth = signal('wide'); preferences.calendarWidthWarning = signal('');
     preferences.setWeekRange = range => UiPreferences.prototype.setWeekRange.call(preferences, range);
     f.settings.changeWeekRange('startHour', '6'); f.settings.changeWeekRange('endHour', '21'); f.settings.saveWeekRange();
     assert.deepEqual(preferences.weekRange(), {startHour: 6, endHour: 21}); assert.match(f.settings.weekRangeFeedback(), /已保存/);

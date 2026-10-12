@@ -20,6 +20,8 @@ button { color: var(--text); }
 .reminder-item-content strong { color: var(--text); font-size: var(--font-13); line-height: 1.5; overflow-wrap: anywhere; }
 .reminder-item-content > span { color: var(--text-muted); font-size: var(--font-11); }
 .reminder-item-content small { color: var(--text-muted); font-size: var(--font-9); overflow-wrap: anywhere; }
+.reminder-item-title {display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp6);}
+.reminder-item-content .reminder-new-tag {flex-shrink: 0; padding: 1px var(--sp4); border-radius: 4px; color: var(--danger-text); background: var(--warning-bg); font-size: var(--font-8); font-weight: 600; white-space: nowrap;}
 .reminder-item > app-icon { width: 15px; height: 15px; color: var(--text-muted); }
 .reminder-empty { text-align: center; padding: 50px var(--sp16); color: var(--text-muted); }
 .reminder-empty app-icon { width: 32px; height: 32px; display: flex; margin: 0 auto var(--sp15); color: var(--accent-text); }
