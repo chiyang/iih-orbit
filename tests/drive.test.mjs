@@ -257,7 +257,7 @@ test('完整備份摘要包含外觀、提醒及公開 Google／Drive 設定，�
   const changed = structuredClone(b); changed.exportedAt = '2026-10-10T00:00:00Z'; changed.appVersion = '1.7.0'; changed.data.activeWorkspaceId = 'second';
   assert.equal(await backupHash(changed), original);
   for (const modify of [
-    b => {b.preferences.accent = '#123456';}, b => {b.preferences.theme = 'dark';},
+    b => {b.preferences.accent = '#123456';},
     b => {b.reminders.dueSoonDays = 7;}, b => {b.reminders.popupEnabled = false;}, b => {b.reminders.leadMinutes = 60;},
     b => {b.reminders.allDayTime = '08:00';}, b => {b.reminders.includeGoogle = false;},
     b => {b.google.clientId = '123-other.apps.googleusercontent.com';}, b => {b.google.refreshMinutes = 15;},
@@ -277,7 +277,7 @@ test('全部資料手動備份與自動備份保存主題色及提醒，只有�
   f.local().preferences = {textSize: 'extra-small', theme: 'dark', accent: '#3264ad'};
   await f.engine.synchronize('backup'); assert.equal(f.uploads(), 2);
   let latest = [...f.documents.values()].at(-1);
-  assert.deepEqual((await readDriveDocument(latest)).preferences, {theme: f.local().preferences.theme, accent: f.local().preferences.accent});
+  assert.deepEqual((await readDriveDocument(latest)).preferences, {accent: f.local().preferences.accent});
   assert.equal(f.runtime().link.baseBackupHash, await backupHash(latest));
   await f.engine.synchronize('backup'); assert.equal(f.uploads(), 2);
   f.local().reminders.leadMinutes = 60;
@@ -359,8 +359,8 @@ test('自動同步追蹤本機任務與偏好修改，每次相同內容不重�
   const f = fixture(); await f.engine.start('full', [], 'sync');
   assert.equal(f.uploads(), 1); await f.engine.synchronize('sync'); assert.equal(f.uploads(), 1);
   f.edit('本機修改'); await f.engine.synchronize('sync'); assert.equal(f.uploads(), 2);
-  f.local().preferences.theme = 'dark'; await f.engine.synchronize('sync'); assert.equal(f.uploads(), 3);
-  await f.engine.synchronize('sync'); assert.equal(f.uploads(), 3);
+  f.local().preferences.theme = 'dark'; await f.engine.synchronize('sync'); assert.equal(f.uploads(), 2);
+  f.local().preferences.accent = '#3264ad'; await f.engine.synchronize('sync'); assert.equal(f.uploads(), 3);
   f.local().data.workspaces[0].headerCompact = true; await f.engine.synchronize('sync'); assert.equal(f.uploads(), 4);
   assert.equal([...f.documents.values()].at(-1).data.workspaces[0].headerCompact, true);
   await f.engine.synchronize('sync'); assert.equal(f.uploads(), 4);
@@ -537,7 +537,7 @@ test('新版同步摘要包含外觀、提醒與月曆顯示，忽略授權連�
   b.google.sources = [{id: 'source', accountId: 'account', calendarId: 'calendar', name: '行事曆', color: '#31584b', visible: true, workspaceIds: ['workspace', 'second']}];
   const original = await syncHash(b);
   for (const modify of [
-    b => {b.preferences.theme = 'dark';}, b => {b.preferences.accent = '#3264ad';},
+    b => {b.preferences.accent = '#3264ad';},
     b => {b.reminders.dueSoonDays = 7;}, b => {b.reminders.leadMinutes = 60;}, b => {b.reminders.popupEnabled = false;},
     b => {b.reminders.includeGoogle = false;}, b => {b.reminders.allDayTime = '08:30';}, b => {b.google.refreshMinutes = 1;},
     b => {b.google.sources[0].name = '研究行事曆';}, b => {b.google.sources[0].color = '#7951b0';}, b => {b.google.sources[0].visible = false;}
@@ -548,6 +548,7 @@ test('新版同步摘要包含外觀、提醒與月曆顯示，忽略授權連�
   local.google.sources[0].id = 'another-source'; local.google.sources[0].workspaceIds.reverse();
   local.exportedAt = '2026-10-10T00:00:00Z'; local.appVersion = 'later'; local.data.activeWorkspaceId = 'second';
   local.preferences.textSize = 'extra-large';
+  local.preferences.theme = 'system';
   assert.equal(await syncHash(local), original);
   const selected = createBackup(b.data, 'workspaces', ['workspace'], b.preferences, b.google, false, b.reminders, b.drive);
   const globals = structuredClone(selected); globals.preferences = {...b.preferences, theme: 'dark'}; globals.reminders = {...b.reminders, leadMinutes: 60}; globals.google = {...b.google, sources: []};
@@ -558,17 +559,17 @@ test('新版雲端摘要可辨識格式且維持索引上限，舊檔原校驗�
   const b = backup(), old = {...b, cloud: {formatVersion: 1, datasetId: crypto.randomUUID(), versionId: crypto.randomUUID(), parents: [], purpose: 'sync', fileHash: await checksum(b), syncHash: await syncHash(b, 1)}};
   assert.deepEqual(await readDriveDocument(old), old); assert.deepEqual(readDriveFile(metadata(old)).cloud, old.cloud);
   const document = await createDriveDocument(b, old.cloud.datasetId, Array.from({length: 20}, () => crypto.randomUUID()), 'sync');
-  const properties = versionProperties(document); assert.equal(Object.keys(properties).length, 30); assert.match(properties.syncHash, /^v3:/);
+  const properties = versionProperties(document); assert.equal(Object.keys(properties).length, 30); assert.match(properties.syncHash, /^v4:/);
   assert.deepEqual(readDriveFile(metadata(document)).cloud, document.cloud); assert.deepEqual(await readDriveDocument(document), document);
   const corrupted = structuredClone(document); corrupted.preferences.accent = '#3264ad'; corrupted.cloud.fileHash = await checksum(readBackup(corrupted));
   await assert.rejects(readDriveDocument(corrupted), /校驗/);
-  const unknown = metadata(document); unknown.appProperties.syncHash = 'v4:' + document.cloud.syncHash;
+  const unknown = metadata(document); unknown.appProperties.syncHash = 'v5:' + document.cloud.syncHash;
   assert.throws(() => readDriveFile(unknown));
 });
 
 test('舊雲端字級仍接受原始校驗，新版摘要與重新保存排除字級', async () => {
   const b = backup(); b.preferences.textSize = 'compact';
-  for (const formatVersion of [1, 2]) {
+  for (const formatVersion of [1, 2, 3]) {
     const old = {...b, cloud: {formatVersion, datasetId: crypto.randomUUID(), versionId: crypto.randomUUID(), parents: [], purpose: 'sync', fileHash: await checksum(b), syncHash: await syncHash(b, formatVersion)}};
     assert.deepEqual(await readDriveDocument(old), old);
     assert.deepEqual(readDriveFile(metadata(old)).cloud, old.cloud);
@@ -579,7 +580,7 @@ test('舊雲端字級仍接受原始校驗，新版摘要與重新保存排除�
     const next = await createDriveDocument(old, old.cloud.datasetId, [old.cloud.versionId], 'sync');
     assert.equal(Object.hasOwn(next.preferences, 'textSize'), false);
     assert.deepEqual(await readDriveDocument(next), next);
-    assert.equal(next.cloud.formatVersion, 3);
+    assert.equal(next.cloud.formatVersion, 4);
   }
 });
 
@@ -596,7 +597,7 @@ test('舊格式 2 同步及備份基準排除字級後，不因本機字級或�
     await f.repository.write('account', runtime);
     f.local().preferences.textSize = 'extra-large';
     await f.engine.synchronize(mode);
-    assert.equal(f.uploads(), 0); assert.equal(f.runtime().conflict, undefined); assert.equal(f.runtime().link.baseHashVersion, 3);
+    assert.equal(f.uploads(), 0); assert.equal(f.runtime().conflict, undefined); assert.equal(f.runtime().link.baseHashVersion, 4);
     assert.deepEqual(f.documents.get('legacy_font'), old);
     if (mode === 'sync') {
       const changed = structuredClone(b); changed.preferences.textSize = 'small';
@@ -616,12 +617,45 @@ test('舊同步基準升級一次便追蹤設定，舊內容與校驗不改寫�
   const runtime = structuredClone(f.runtime()); delete runtime.link.baseHashVersion; runtime.link.baseHash = old.cloud.syncHash;
   await f.repository.write('account', await readDriveRuntime(runtime)); let reads = 0; const read = f.api.read;
   f.api.read = async file => {reads++; return read(file);};
-  await f.engine.synchronize('sync'); assert.equal(f.runtime().link.baseHashVersion, 3); assert.equal(f.uploads(), 0); assert.equal(reads, 1);
+  await f.engine.synchronize('sync'); assert.equal(f.runtime().link.baseHashVersion, 4); assert.equal(f.uploads(), 0); assert.equal(reads, 1);
   await f.engine.synchronize('sync'); assert.equal(reads, 1); assert.equal(f.uploads(), 0);
   f.local().preferences.accent = '#3264ad'; await f.engine.synchronize('sync'); assert.equal(f.uploads(), 1);
-  const latest = [...f.documents.values()].at(-1); assert.equal(latest.cloud.formatVersion, 3); assert.deepEqual(latest.cloud.parents, [old.cloud.versionId]);
+  const latest = [...f.documents.values()].at(-1); assert.equal(latest.cloud.formatVersion, 4); assert.deepEqual(latest.cloud.parents, [old.cloud.versionId]);
   assert.deepEqual(f.documents.get('legacy_drive'), old); assert.deepEqual(await readDriveDocument(old), old);
-  assert.equal((await readDriveRuntime(f.runtime())).link.baseHashVersion, 3);
+  assert.equal((await readDriveRuntime(f.runtime())).link.baseHashVersion, 4);
+});
+
+test('格式 3 的原始主題校驗保留，舊同步與備份基準升級後主題變更不另存或造成分歧', async () => {
+  for (const mode of ['sync', 'backup']) {
+    const f = fixture(), b = backup(); b.preferences.theme = 'dark';
+    const originalHash = await checksum({kind: b.kind, workspaces: b.data.workspaces, sources: [], preferences: {theme: 'dark', accent: b.preferences.accent}, reminders: b.reminders, refreshMinutes: b.google.refreshMinutes});
+    assert.equal(await syncHash(b, 3), originalHash);
+    const old = {...b, cloud: {formatVersion: 3, datasetId: crypto.randomUUID(), versionId: crypto.randomUUID(), parents: [], purpose: mode, fileHash: await checksum(b), syncHash: originalHash}};
+    assert.deepEqual(await readDriveDocument(old), old);
+    const tampered = structuredClone(old); tampered.preferences.theme = 'light';
+    await assert.rejects(readDriveDocument(tampered), /校驗/);
+    assert.notEqual(await syncHash(tampered, 3), originalHash); assert.equal(await syncHash(tampered), await syncHash(old));
+    assert.equal(await backupHash(tampered), await backupHash(old));
+    f.documents.set('legacy_theme', structuredClone(old)); await f.engine.join(readDriveFile(metadata(old, 'legacy_theme')), f.revision());
+    const {appVersion, exportedAt, data, ...content} = readBackup(old), runtime = structuredClone(f.runtime());
+    runtime.link.baseHashVersion = 3; runtime.link.baseHash = originalHash;
+    runtime.link.baseBackupHash = await checksum({...content, data: {version: data.version, workspaces: data.workspaces}});
+    await f.repository.write('account', await readDriveRuntime(runtime));
+    f.local().preferences.theme = 'system'; await f.engine.synchronize(mode);
+    assert.equal(f.uploads(), 0); assert.equal(f.runtime().conflict, undefined); assert.equal(f.runtime().link.baseHashVersion, 4);
+    assert.deepEqual(f.documents.get('legacy_theme'), old); assert.equal((await readDriveRuntime(f.runtime())).link.baseHashVersion, 4);
+    if (mode === 'sync') {
+      const changed = structuredClone(b); changed.preferences.theme = 'light';
+      const child = {...changed, cloud: {...old.cloud, versionId: crypto.randomUUID(), parents: [old.cloud.versionId], fileHash: await checksum(changed), syncHash: await syncHash(changed, 3)}};
+      f.documents.set('legacy_theme_child', child); await f.engine.synchronize(mode);
+      assert.equal(f.runtime().link.baseVersionId, child.cloud.versionId); assert.equal(f.local().preferences.theme, 'system');
+      assert.equal(f.uploads(), 0); assert.equal(f.runtime().conflict, undefined);
+    }
+    f.local().preferences.accent = '#3264ad'; await f.engine.synchronize(mode);
+    assert.equal(f.uploads(), 1); const saved = [...f.documents.values()].at(-1);
+    assert.equal(saved.cloud.formatVersion, 4); assert.equal(Object.hasOwn(saved.preferences, 'theme'), false);
+    assert.deepEqual(await readDriveDocument(saved), saved);
+  }
 });
 
 test('兩台裝置只改設定也會保存分歧，使用雲端設定前保留本機版本，解決後不重複回傳', async () => {

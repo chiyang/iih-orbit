@@ -472,7 +472,7 @@ test('Drive 控制器建立集合、保存本機修改，列表更新保留成�
   } finally {f.close();}
 });
 
-test('本機字級調整不產生自動備份或同步版本，重新載入後仍保留', async () => {
+test('本機深淺主題與字級調整不產生自動備份或同步版本，重新載入後仍保留', async () => {
   for (const mode of ['backup', 'sync']) {
     const f = await fixture();
     try {
@@ -486,12 +486,18 @@ test('本機字級調整不產生自動備份或同步版本，重新載入後�
         assert.equal(f.store.appearance().textSize, textSize);
         assert.equal(new BoardStore().appearance().textSize, textSize);
       }
-      for (const document of f.documents.values()) assert.equal(Object.hasOwn(document.preferences, 'textSize'), false);
+      for (const theme of ['dark', 'system', 'light']) {
+        await f.store.updateAppearance({theme}); await f.service.sync();
+        assert.equal(f.documents.size, count); assert.equal(f.service.runtime().link.baseVersionId, base);
+        assert.equal(f.service.runtime().conflict, undefined); assert.equal(f.service.error(), '');
+        assert.equal(new BoardStore().appearance().theme, theme);
+      }
+      for (const document of f.documents.values()) {assert.equal(Object.hasOwn(document.preferences, 'textSize'), false); assert.equal(Object.hasOwn(document.preferences, 'theme'), false);}
     } finally {f.close();}
   }
 });
 
-test('只更改主題色時，全部資料自動備份在等待時間後保存主題與提醒設定', async t => {
+test('只更改主題色時，全部資料自動備份在等待時間後保存主題色與提醒設定', async t => {
   t.mock.timers.enable({apis: ['setTimeout']});
   const f = await fixture();
   try {
@@ -500,12 +506,12 @@ test('只更改主題色時，全部資料自動備份在等待時間後保存�
     await f.store.updateAppearance({accent: '#3264ad'}); await settle();
     t.mock.timers.tick(14999); await settle(); assert.equal(sync.mock.callCount(), 0); assert.equal(f.documents.size, count);
     t.mock.timers.tick(1); assert.equal(sync.mock.callCount(), 1); await sync.mock.calls[0].result; assert.equal(f.documents.size, count + 1);
-    assert.deepEqual([...f.documents.values()].at(-1).preferences, {theme: f.store.appearance().theme, accent: f.store.appearance().accent});
+    assert.deepEqual([...f.documents.values()].at(-1).preferences, {accent: f.store.appearance().accent});
     await f.store.updateAppearance({theme: 'dark', textSize: 'compact'});
     await f.store.updateReminders({leadMinutes: 60}); await settle();
     t.mock.timers.tick(15000); assert.equal(sync.mock.callCount(), 2); await sync.mock.calls[1].result; assert.equal(f.documents.size, count + 2);
     const saved = [...f.documents.values()].at(-1);
-    assert.deepEqual(saved.preferences, {theme: f.store.appearance().theme, accent: f.store.appearance().accent}); assert.equal(saved.reminders.leadMinutes, 60);
+    assert.deepEqual(saved.preferences, {accent: f.store.appearance().accent}); assert.equal(saved.reminders.leadMinutes, 60);
     t.mock.timers.tick(15000); await settle(); assert.equal(f.documents.size, count + 2);
   } finally {f.close(); t.mock.timers.reset();}
 });
@@ -683,7 +689,7 @@ test('全部跨裝置同步接收只有設定的雲端更新，也套用外觀�
     const remote = await createDriveDocument(document, link.datasetId, [link.baseVersionId], 'sync'); f.documents.set('remote_settings', remote);
     const localDrive = structuredClone(f.store.drive()), version = f.auth.connectionVersion();
     await f.service.sync(); assert.equal(f.service.error(), '');
-    assert.deepEqual(f.store.appearance(), {...document.preferences, textSize: 'standard'}); assert.deepEqual(f.store.reminders(), document.reminders);
+    assert.deepEqual(f.store.appearance(), {...document.preferences, theme: 'light', textSize: 'standard'}); assert.deepEqual(f.store.reminders(), document.reminders);
     assert.equal(f.store.google().refreshMinutes, 1); assert.equal(f.store.google().sources[0].color, '#7951b0'); assert.equal(f.store.google().sources[0].name, '研究行事曆'); assert.equal(f.store.google().sources[0].visible, false);
     assert.equal(f.store.google().sources[0].id, 'local-calendar'); assert.equal(f.store.google().clientId, '123-example.apps.googleusercontent.com'); assert.equal(f.store.google().email, 'calendar@example.com');
     assert.deepEqual(f.store.drive(), localDrive); assert.equal(f.auth.connectionVersion(), version);
@@ -702,7 +708,7 @@ test('從雲端接續全部資料的預覽確認包含設定，確認後立即�
     const panel = f.panel(); await settle(); await panel.inspect(file); panel.prepare('join'); assert.equal(panel.confirmationPhrase(), '使用這份雲端資料');
     await panel.execute(); assert.equal(f.store.appearance().theme, 'light');
     panel.confirmation = panel.confirmationPhrase(); await panel.execute(); await settle();
-    assert.deepEqual(f.store.appearance(), {...expected.preferences, textSize: 'standard'}); assert.deepEqual(f.store.reminders(), expected.reminders); assert.equal(panel.mode(), 'sync');
+    assert.deepEqual(f.store.appearance(), {...expected.preferences, theme: 'light', textSize: 'standard'}); assert.deepEqual(f.store.reminders(), expected.reminders); assert.equal(panel.mode(), 'sync');
     const count = f.documents.size; await f.service.sync(); assert.equal(f.documents.size, count);
     await f.store.updateAppearance({accent: '#3264ad'}); await f.service.sync(); assert.equal(f.documents.size, count + 1);
     assert.equal([...f.documents.values()].at(-1).preferences.accent, '#3264ad');
@@ -846,7 +852,7 @@ test('雲端預覽只有一個一致的使用動作，過去備份套用設定�
     await panel.copy(); await settle(); assert.equal(f.store.workspaces().length, before + 1); assert.deepEqual(f.store.appearance(), appearance);
     assert.match(f.service.message(), /已加入工作空間/); assert.equal(f.store.drive().mode, 'sync');
     await panel.inspect(old); panel.prepare('restore'); panel.confirmation = panel.useLabel; await panel.execute(); await settle();
-    assert.equal(f.store.workspaces().length, before); assert.equal(f.store.appearance().theme, 'dark'); assert.equal(f.store.appearance().accent, '#7951b0'); assert.equal(f.store.drive().mode, 'off');
+    assert.equal(f.store.workspaces().length, before); assert.equal(f.store.appearance().theme, 'light'); assert.equal(f.store.appearance().accent, '#7951b0'); assert.equal(f.store.drive().mode, 'off');
   } finally {f.close();}
 });
 

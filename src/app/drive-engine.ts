@@ -35,14 +35,14 @@ export class DriveEngine {
   }
   private async upgradeBaseline(state: DriveRuntime, files: DriveFile[]): Promise<void> {
     const link = state.link!;
-    if (link.baseHashVersion === 3) return;
+    if (link.baseHashVersion === 4) return;
     const baseline = files.find(file => file.cloud.versionId === link.baseVersionId);
     if (!baseline) throw new DriveCollectionDeleted(link.datasetId);
     const document = await this.api.read(baseline); this.check();
     state.base = document;
     link.baseHash = await syncHash(document);
     if (link.baseBackupHash !== undefined) link.baseBackupHash = await backupHash(document);
-    link.baseHashVersion = 3; this.check(); await this.persist(state);
+    link.baseHashVersion = 4; this.check(); await this.persist(state);
   }
   async flush(): Promise<void> {
     const state = await this.state(), pending = state.pending;
@@ -94,7 +94,7 @@ export class DriveEngine {
     if (JSON.stringify(latest.heads.map(head => head.cloud.versionId).sort()) !== JSON.stringify(actualHeads)) throw new Error('確認期間雲端資料已更新，請重新查看後使用。');
     await this.api.assertAvailable(file.cloud.datasetId); this.check();
     await this.board.apply(document, expectedRevision, document.data.workspaces.map(w => w.id)); this.check();
-    state.link = {datasetId: document.cloud.datasetId, kind: document.kind, workspaceIds: document.kind === 'workspaces' ? document.data.workspaces.map(w => w.id) : [], baseVersionId: document.cloud.versionId, baseHash: await syncHash(document), baseHashVersion: 3, baseBackupHash: await backupHash(document)};
+    state.link = {datasetId: document.cloud.datasetId, kind: document.kind, workspaceIds: document.kind === 'workspaces' ? document.data.workspaces.map(w => w.id) : [], baseVersionId: document.cloud.versionId, baseHash: await syncHash(document), baseHashVersion: 4, baseBackupHash: await backupHash(document)};
     state.base = document; delete state.mergeBase;
     delete state.conflict; await this.persist(state);
     if (graph.heads.length > 1) {
@@ -213,12 +213,12 @@ export class DriveEngine {
     // Read a legacy baseline once without rewriting the immutable version or its checksum.
     await this.upgradeBaseline(state, files);
     const dirty = localHash !== link.baseHash;
-    const legacyHead = head.cloud.formatVersion !== 3 && head.cloud.versionId !== link.baseVersionId && graph.heads.length === 1 ? await this.api.read(head) : undefined;
-    const headHash = head.cloud.formatVersion === 3 ? head.cloud.syncHash : head.cloud.versionId === link.baseVersionId ? link.baseHash : legacyHead ? await syncHash(legacyHead) : undefined;
+    const legacyHead = head.cloud.formatVersion !== 4 && head.cloud.versionId !== link.baseVersionId && graph.heads.length === 1 ? await this.api.read(head) : undefined;
+    const headHash = head.cloud.formatVersion === 4 ? head.cloud.syncHash : head.cloud.versionId === link.baseVersionId ? link.baseHash : legacyHead ? await syncHash(legacyHead) : undefined;
     this.check();
     if (graph.heads.length === 1 && head.kind === link.kind && headHash === localHash) {
       if (head.cloud.versionId !== link.baseVersionId) { const document = legacyHead ?? await this.api.read(head); this.check(); state.base = document; link.baseBackupHash = await backupHash(document); this.check(); }
-      link.baseVersionId = head.cloud.versionId; link.baseHash = localHash; link.baseHashVersion = 3; delete state.conflict; delete state.mergeBase; await this.persist(state); return;
+      link.baseVersionId = head.cloud.versionId; link.baseHash = localHash; link.baseHashVersion = 4; delete state.conflict; delete state.mergeBase; await this.persist(state); return;
     }
     if (graph.heads.length === 1 && head.cloud.versionId !== link.baseVersionId && !dirty && graph.descendant(head.cloud.versionId, link.baseVersionId)) {
       const document = legacyHead ?? await this.api.read(head); this.check();
@@ -226,14 +226,14 @@ export class DriveEngine {
       if (document.kind !== link.kind || (link.kind === 'workspaces' && (document.data.workspaces.length !== link.workspaceIds.length || document.data.workspaces.some(w => !link.workspaceIds.includes(w.id))))) throw new Error('雲端集合範圍變更，請重新預覽並接續。');
       await this.board.apply(document, local.revision, link.workspaceIds); this.check();
       state.base = document;
-      link.baseVersionId = head.cloud.versionId; link.baseHash = await syncHash(document); link.baseHashVersion = 3; link.baseBackupHash = await backupHash(document); delete state.conflict; delete state.mergeBase; await this.persist(state); return;
+      link.baseVersionId = head.cloud.versionId; link.baseHash = await syncHash(document); link.baseHashVersion = 4; link.baseBackupHash = await backupHash(document); delete state.conflict; delete state.mergeBase; await this.persist(state); return;
     }
     if ((graph.heads.length > 1 || head.cloud.versionId !== link.baseVersionId) && await this.autoMerge(state, local, files)) return;
     if (graph.heads.length === 1 && head.cloud.versionId === link.baseVersionId) {
       if (!dirty) return;
       state.mergeBase = state.base;
       await this.queue(state, await createDriveDocument(local.backup, link.datasetId, [link.baseVersionId], 'sync')); await this.flush();
-    } else if (dirty && !graph.heads.some(f => f.cloud.formatVersion === 3 && f.cloud.syncHash === localHash)) {
+    } else if (dirty && !graph.heads.some(f => f.cloud.formatVersion === 4 && f.cloud.syncHash === localHash)) {
       // Save a local branch before asking the user to resolve two independently edited copies.
       await this.queue(state, await createDriveDocument(local.backup, link.datasetId, link.baseVersionId ? [link.baseVersionId] : [], 'sync')); await this.flush();
     }
@@ -267,7 +267,7 @@ export class DriveEngine {
       selected = await this.api.read(cloudChoice); this.check();
       await this.api.assertAvailable(link.datasetId); this.check();
       const hash = await syncHash(local.backup);
-      if (!graph.heads.some(f => f.cloud.formatVersion === 3 && f.cloud.syncHash === hash)) {
+      if (!graph.heads.some(f => f.cloud.formatVersion === 4 && f.cloud.syncHash === hash)) {
         const branch = await createDriveDocument(local.backup, link.datasetId, link.baseVersionId ? [link.baseVersionId] : [], purpose);
         const expected = [...graph.heads.map(f => f.cloud.versionId).filter(id => !branch.cloud.parents.includes(id)), branch.cloud.versionId].sort();
         await this.queue(state, branch); await this.flush();

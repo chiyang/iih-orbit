@@ -178,13 +178,13 @@ test('專案與狀態交叉引用失效時不套用無效內容，仍保留其�
   assert.equal(result.backup.data.workspaces[1].headerCompact, true); assert.doesNotThrow(() => readBackup(result.backup));
 });
 
-test('外觀與提醒不同設定可整併，瀏覽視圖、字級與 Google 連線不參與衝突', () => {
+test('主題色與提醒不同設定可整併，深淺主題、字級、瀏覽視圖與 Google 連線不參與衝突', () => {
   const {base, a, b} = versions();
   for (const backup of [base, a, b]) backup.data.workspaces.push(emptyWorkspace('other', '另一空間', () => 'other-project'));
   a.preferences.theme = 'dark'; a.preferences.textSize = 'large'; a.google.accountId = 'local'; a.data.activeWorkspaceId = 'other';
-  b.preferences.accent = '#123456'; b.preferences.textSize = 'extra-small'; b.google.accountId = 'remote'; b.reminders.leadMinutes = 60;
+  b.preferences.theme = 'system'; b.preferences.accent = '#123456'; b.preferences.textSize = 'extra-small'; b.google.accountId = 'remote'; b.reminders.leadMinutes = 60;
   const result = mergeDriveBackups(base, [a, b]);
-  assert.deepEqual(result.conflicts, []); assert.equal(result.backup.preferences.theme, 'dark'); assert.equal(result.backup.preferences.accent, '#123456');
+  assert.deepEqual(result.conflicts, []); assert.equal(Object.hasOwn(result.backup.preferences, 'theme'), false); assert.equal(result.backup.preferences.accent, '#123456');
   assert.equal(result.backup.preferences.textSize, undefined); assert.equal(result.backup.google.accountId, 'local'); assert.equal(result.backup.data.activeWorkspaceId, 'other');
   assert.equal(result.backup.reminders.leadMinutes, 60);
 });

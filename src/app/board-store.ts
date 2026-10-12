@@ -463,7 +463,7 @@ export class BoardStore implements OnDestroy {
     }, {requirePersistence: true});
   }
 
-  /** Full synchronization includes theme settings; font size, authentication and Drive controls stay local. */
+  /** Full synchronization includes accent colors; theme, font size, authentication and Drive controls stay local. */
   applyDriveBackup(input: OrbitBackup, expectedRevision: string, targetIds: string[]): Promise<StoreResult> {
     const backup = readBackup(input);
     return this.transact(data => {
@@ -540,7 +540,7 @@ export class BoardStore implements OnDestroy {
     return this.transact(data => {
       if (backup.kind === 'full') {
         if (!expectedRevision || data.revision !== expectedRevision) throw new Error('確認期間資料已更新，請重新檢查覆蓋範圍後再匯入。');
-        return {...data, generation: crypto.randomUUID(), state: structuredClone(backup.data), preferences: {...sharedAppearance(backup.preferences ?? DEFAULT_APPEARANCE), textSize: data.preferences!.textSize}, reminders: backup.reminders ?? {...DEFAULT_REMINDERS}, drive: {...structuredClone(backup.drive ?? DEFAULT_DRIVE), mode: 'off'}, google: {...structuredClone(backup.google ?? DEFAULT_GOOGLE), refreshMinutes: 0}};
+        return {...data, generation: crypto.randomUUID(), state: structuredClone(backup.data), preferences: {...data.preferences!, ...sharedAppearance(backup.preferences ?? DEFAULT_APPEARANCE)}, reminders: backup.reminders ?? {...DEFAULT_REMINDERS}, drive: {...structuredClone(backup.drive ?? DEFAULT_DRIVE), mode: 'off'}, google: {...structuredClone(backup.google ?? DEFAULT_GOOGLE), refreshMinutes: 0}};
       }
       const workspaceIds = new Map(backup.data.workspaces.map((workspace, index) => [workspace.id, added[index].id]));
       const sources = (backup.calendarSources ?? []).map(source => ({...structuredClone(source), id: crypto.randomUUID(), workspaceIds: source.workspaceIds.map(id => workspaceIds.get(id)!)}));

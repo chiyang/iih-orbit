@@ -10,7 +10,7 @@
       }
     </fieldset>
     <label class="setting-field">字體大小<select aria-label="設定字體大小" [ngModel]="preferences.textSize()" (ngModelChange)="preferences.setTextSize($event)">@for (option of preferences.options; track option.id) {<option [value]="option.id">{{ option.label }}</option>}</select></label>
-    <p class="setting-note">字體大小只保存在目前瀏覽器，不包含在備份或遠端同步中。</p>
+    <p class="setting-note">深淺色／跟隨系統與字體大小只保存在目前瀏覽器，不包含在備份或遠端同步中；還原舊備份也會保留本機選擇。</p>
     <fieldset class="accent-swatches"><legend>主題色</legend>@for (accent of accents; track accent.color) {<button type="button" [style.--swatch]="accent.color" [class.selected]="preferences.accent() === accent.color" [attr.aria-label]="'主題色：' + accent.label" [attr.aria-pressed]="preferences.accent() === accent.color" (click)="setAccent(accent.color)">@if (preferences.accent() === accent.color) {<app-icon name="check" />}</button>}</fieldset>
     <div class="custom-color"><label>自訂主題色<input type="color" aria-label="選擇主題色" [value]="preferences.accent()" (change)="setAccent($any($event.target).value)"></label><label>HEX 色碼<input type="text" aria-label="主題色 HEX 色碼" maxlength="7" spellcheck="false" [value]="preferences.accent()" (change)="setAccent($any($event.target).value)" placeholder="#31584b"></label></div>
     <p class="setting-note">文字與按鈕會依主題調整對比。分類與看板狀態可在各自的管理視窗選擇顏色，不受主題色影響。</p>

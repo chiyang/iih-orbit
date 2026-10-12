@@ -91,13 +91,13 @@ export class DrivePanel {
     return !this.drive.catalogFresh() || action !== this.useAction() || this.store.revision() !== this.revision() || this.useConnection() !== this.drive.auth.connectionVersion() || action !== 'restore' && JSON.stringify([...heads].sort()) !== JSON.stringify(this.reviewedHeads());
   });
   readonly useDescription = computed(() => this.useAction() === 'restore'
-    ? '使用備份當時的全部工作空間與設定。自動同步會暫停，Google 需要重新連線。'
+    ? '使用備份當時的全部工作空間與設定，保留本機深淺色主題與字體大小。自動同步會暫停，Google 需要重新連線。'
     : this.useAction() === 'cloud' ? '以這份內容決定衝突，保留可安全整併的其他修改；無法安全判斷時使用選定內容。其他副本仍保留。'
-    : `${this.preview()?.kind === 'full' ? '使用所有工作空間與設定' : '使用這些工作空間'}，並繼續${this.useAction() === 'cloud' && this.store.drive().mode === 'backup' ? '自動備份' : '跨裝置同步'}。`);
+    : `${this.preview()?.kind === 'full' ? '使用所有工作空間與設定，保留本機深淺色主題與字體大小' : '使用這些工作空間'}，並繼續${this.useAction() === 'cloud' && this.store.drive().mode === 'backup' ? '自動備份' : '跨裝置同步'}。`);
   readonly pendingTasks = computed(() => this.preview()?.data.workspaces.reduce((sum, w) => sum + w.tasks.length, 0) ?? 0);
   readonly savedAppearance = computed(() => {
     const preferences = this.preview()?.preferences;
-    return preferences ? {accent: preferences.accent, themeLabel: {light: '淺色', dark: '深色', system: '跟隨系統'}[preferences.theme]} : null;
+    return preferences ? {accent: preferences.accent} : null;
   });
   confirmation = '';
   removalConfirmation = '';
