@@ -1059,13 +1059,18 @@ test('完成核對時無法讀取目前內容，回報未完成並保留本機�
 });
 
 test('完成核對期間仍維持同步中，第二次同步不插隊；核對完成才解除停用', async () => {
-  const f = await fixture(); let release;
+  const f = await fixture(), checking = Promise.withResolvers(), resume = Promise.withResolvers(); let running;
   try {
     await f.service.start('full', [], 'sync');
     const snapshot = f.store.driveSnapshot.bind(f.store); let calls = 0;
-    f.store.driveSnapshot = async (...args) => {const value = await snapshot(...args); if (++calls === 2) await new Promise(resolve => {release = resolve;}); return value;};
-    const running = f.service.sync(); await settle();
+    f.store.driveSnapshot = async (...args) => {
+      const value = await snapshot(...args);
+      if (++calls === 2) {checking.resolve(); await resume.promise;}
+      return value;
+    };
+    running = f.service.sync();
+    await Promise.race([checking.promise, running.then(result => assert.fail(`同步提前結束，未進入完成核對：${result}`))]);
     assert.equal(f.service.syncing(), true); assert.equal(await f.service.sync(), 'skipped');
-    release(); assert.equal(await running, 'complete'); assert.equal(f.service.syncing(), false);
-  } finally {release?.(); f.close();}
+    resume.resolve(); assert.equal(await running, 'complete'); assert.equal(f.service.syncing(), false);
+  } finally {resume.resolve(); try {await running;} finally {f.close();}}
 });
