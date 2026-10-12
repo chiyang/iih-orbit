@@ -10,6 +10,7 @@ import { COLUMNS } from '../src/app/models.ts';
 import { JSDOM } from 'jsdom';
 import { externalEvent } from '../src/app/google-data.ts';
 import { copyEventTask, createEventBody } from '../src/app/calendar-transfer-data.ts';
+import { CALENDAR_DISPLAY_KEY, loadWeekRange, readWeekRange } from '../src/app/calendar-display.ts';
 
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -28,7 +29,8 @@ function calendarController(tasks = [base], external = []) {
   const store = new BoardStore(), effects = new Set();
   const scheduler = {add(effect) { effects.add(effect); }, schedule() {}, remove(effect) { effects.delete(effect); }};
   const google = {store, events: signal(external), visibleSources: signal([]), setMonthRange() {}};
-  const injector = createEnvironmentInjector([{provide: GoogleCalendarService, useValue: google}, {provide: UiPreferences, useValue: {scale: () => .9}}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
+  const preferences = {scale: () => .9, weekRange: signal({startHour: 8, endHour: 19}), weekRangeWarning: signal('')};
+  const injector = createEnvironmentInjector([{provide: GoogleCalendarService, useValue: google}, {provide: UiPreferences, useValue: preferences}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   // No DOM or browser: test the action controller and store using signals and pointer coordinates only.
   globalThis.ngServerMode = true;
   let calendar;
@@ -37,7 +39,7 @@ function calendarController(tasks = [base], external = []) {
   calendar.tasks = store.tasks; calendar.categories = store.categories; calendar.statuses = store.statuses; calendar.mode = signal('month'); calendar.anchor.set(new Date(2026, 9, 9));
   calendar.showOrbit = signal(true); calendar.showGoogle = signal(true); calendar.deadlineFiltered = signal(false);
   const flush = () => { for (const effect of effects) if (effect.dirty) effect.run(); };
-  return {calendar, store, google, flush, close: () => { calendar.endDrag(); injector.destroy(); }};
+  return {calendar, store, google, preferences, values, flush, close: () => { calendar.endDrag(); injector.destroy(); }};
 }
 function dragEvent(x = 20, y = 20) {
   let prevented = false, stopped = false;
@@ -67,6 +69,64 @@ test('月週視圖往返保留選中日，跨年週導覽後返回正確月份',
     f.calendar.selectedDate.set(monthDate); f.calendar.mode.set('month'); f.flush();
     assert.equal(f.calendar.periodTitle(), '2027 年 1 月');
     assert.deepEqual(f.calendar.days().filter(day => day.selected).map(day => day.key), ['2027-01-07']);
+  } finally {f.close();}
+});
+
+test('週視圖預設 08–19 時，調整範圍與暫時全天顯示保留所有安排及原始時間', () => {
+  const tasks = [{...base, id: 'early', startTime: '06:00', dueTime: '07:00'}, {...base, id: 'cross', startTime: '07:00', dueTime: '09:00'}, {...base, id: 'late', startTime: '20:00', dueTime: '21:00'}];
+  const f = calendarController(tasks);
+  try {
+    const {calendar} = f; calendar.mode.set('week');
+    assert.equal(calendar.hours()[0].label, '08:00'); assert.equal(calendar.weekEndLabel(), '19:00'); assert.equal(calendar.slots().length, 22);
+    assert.equal(calendar.timelineHeight(), calendar.hourHeight() * 11); assert.equal(calendar.periodTaskCount(), 3);
+    const visible = calendar.weekDays().find(day => day.key === base.startDate).timedEvents;
+    assert.deepEqual(visible.map(event => event.task.id), ['cross']); assert.equal(visible[0].displayStart, 480); assert.equal(visible[0].startMinute, 420); assert.equal(visible[0].label, '07:00 – 09:00');
+    assert.deepEqual(calendar.outsideWeekEvents().map(entry => entry.event.task.id), ['early', 'late']);
+    calendar.toggleWeekHours(); assert.equal(calendar.hours()[0].label, '00:00'); assert.equal(calendar.slots().length, 48); assert.equal(calendar.outsideWeekEvents().length, 0);
+    assert.equal(calendar.weekDays().find(day => day.key === base.startDate).timedEvents.length, 3);
+    assert.deepEqual(f.preferences.weekRange(), {startHour: 8, endHour: 19}); calendar.toggleWeekHours();
+    f.preferences.weekRange.set({startHour: 6, endHour: 22}); assert.equal(calendar.hours()[0].label, '06:00'); assert.equal(calendar.weekEndLabel(), '22:00'); assert.equal(calendar.outsideWeekEvents().length, 0);
+    assert.deepEqual(f.store.tasks().map(task => task.startTime), ['06:00', '07:00', '20:00']);
+  } finally {f.close();}
+});
+
+test('範圍時間表的拖放、鍵盤邊界及現在時間線以設定起點定位', () => {
+  const f = calendarController();
+  try {
+    const {calendar} = f, element = {getBoundingClientRect: () => ({top: 100})};
+    assert.equal(calendar.timePosition(base.startDate, element, 100 + calendar.hourHeight() / 2).minute, 510);
+    assert.equal(calendar.timePosition(base.startDate, element, -100).minute, 480);
+    assert.equal(calendar.timePosition(base.startDate, element, 10000).minute, 1125);
+    let focused = ''; calendar.weekScroller = () => ({nativeElement: {querySelector(selector) {return {focus() {focused = selector;}};}}});
+    calendar.slotKeydown({key: 'ArrowUp', preventDefault() {}}, 0, 480); assert.match(focused, /data-minute="480"/);
+    calendar.slotKeydown({key: 'ArrowDown', preventDefault() {}}, 6, 1110); assert.match(focused, /data-minute="1110"/);
+    calendar.now.set(new Date(2026, 9, 9, 7)); assert.equal(calendar.nowInRange(), false);
+    calendar.now.set(new Date(2026, 9, 9, 8)); assert.equal(calendar.nowInRange(), true); assert.equal(calendar.nowPosition(), 0);
+    calendar.now.set(new Date(2026, 9, 9, 19)); assert.equal(calendar.nowInRange(), false);
+  } finally {f.close();}
+});
+
+test('窄版月曆使用開始時間，只有截止時用截止時間，完整時間標籤保留', () => {
+  const due = {...base, id: 'due', startDate: '', startTime: '', dueTime: '17:30'}, external = googleEntry('meeting', {dateTime: '2026-10-09T13:00:00'}, {dateTime: '2026-10-09T14:00:00'});
+  const f = calendarController([base, due], [external]);
+  try {
+    assert.equal(f.calendar.compactMonthScheduleLabel(base, base.startDate), '09:00'); assert.equal(f.calendar.monthScheduleLabel(base, base.startDate), '09:00 – 10:00');
+    assert.equal(f.calendar.compactMonthScheduleLabel(due, due.dueDate), '17:30'); assert.match(f.calendar.monthScheduleLabel(due, due.dueDate), /17:30 截止/);
+    assert.equal(f.calendar.compactMonthScheduleLabel(external.task, base.startDate), '13:00');
+    assert.match(f.calendar.taskTitle(base), /09:00.*10:00/);
+  } finally {f.close();}
+});
+
+test('本機週範圍讀取拒絕損壞及不合法時間，保存失敗保留當前可用範圍', () => {
+  const f = calendarController();
+  try {
+    for (const value of [null, {startHour: 19, endHour: 8}, {startHour: -1, endHour: 19}, {startHour: 8, endHour: 25}, {startHour: '8', endHour: 19}, {startHour: 8.5, endHour: 19}]) assert.deepEqual(readWeekRange(value), {startHour: 8, endHour: 19});
+    assert.equal(UiPreferences.prototype.setWeekRange.call(f.preferences, {startHour: 5, endHour: 20}), true);
+    assert.deepEqual(loadWeekRange(), {startHour: 5, endHour: 20});
+    f.values.set(CALENDAR_DISPLAY_KEY, 'broken'); assert.deepEqual(loadWeekRange(), {startHour: 8, endHour: 19});
+    const originalSet = localStorage.setItem; localStorage.setItem = () => {throw new Error('quota');};
+    try {assert.equal(UiPreferences.prototype.setWeekRange.call(f.preferences, {startHour: 9, endHour: 18}), true); assert.deepEqual(f.preferences.weekRange(), {startHour: 9, endHour: 18}); assert.match(f.preferences.weekRangeWarning(), /無法保存/);}
+    finally {localStorage.setItem = originalSet;}
   } finally {f.close();}
 });
 
@@ -317,7 +377,7 @@ test('週時間拖曳使用滑鼠抓取偏移定位，保存開始與截止；�
     const start = dragEvent(20, calendar.hourHeight() / 4);
     calendar.startDrag(start, base, {kind: 'time', day: base.startDate, minute: 540});
     const element = {getBoundingClientRect: () => ({top: 0})};
-    const target = calendar.timePosition('2026-10-10', element, calendar.hourHeight() * 11.25);
+    const target = calendar.timePosition('2026-10-10', element, calendar.hourHeight() * 3.25);
     assert.equal(target.minute, 660);
     await calendar.drop(dragEvent(), target);
     assertEditedTask(store.tasks()[0], {...base, startDate: '2026-10-10', startTime: '11:00', dueDate: '2026-10-10', dueTime: '12:00'});

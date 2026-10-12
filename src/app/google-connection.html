@@ -15,9 +15,14 @@
 @if (message()) {<p class="google-status" role="status">{{ message() }}</p>}
 @if (error()) {<p class="google-error" role="alert">{{ error() }}</p>}
 <div class="google-connect-all">
-  <button type="button" class="google-primary" [disabled]="busy() || unsaved() || !store.google().clientId || !combined.ready() || !drive.online() || !!drive.runtime().pending" (click)="connectAll()">{{ connectingAll() ? '等待全部授權…' : '一次授權全部服務' }}</button>
-  <p>一次選擇同一帳號，授權 Calendar（讀取與移轉）、Gmail 與 Drive；下方仍可分別連線。</p>
-  @if (drive.runtime().pending) {<p class="google-note">請先完成 Drive 等待上傳的資料。</p>}
+  @if (connections.allConnected()) {
+    <div class="google-all-connected" role="status"><app-icon name="check" /><strong>目前 Google 全部服務已連線</strong></div>
+    <p>Calendar（讀取與移轉）、Gmail 與 Drive 授權有效；下方可分別管理帳號與連線。</p>
+  } @else {
+    <button type="button" class="google-primary" [disabled]="busy() || unsaved() || !connections.canConnect()" (click)="connectAll()">{{ connectingAll() ? '等待全部授權…' : connections.renewalNeeded() ? '重新授權全部服務' : '一次授權全部服務' }}</button>
+    <p>{{ connections.renewalNeeded() ? '部分 Google 授權已到期，重新授權後即可接續使用。' : '一次選擇同一帳號，授權 Calendar（讀取與移轉）、Gmail 與 Drive；下方仍可分別連線。' }}</p>
+    @if (drive.runtime().pending) {<p class="google-note">請先完成 Drive 等待上傳的資料，或在下方單獨重新連線 Drive。</p>}
+  }
 </div>
 <div class="google-services">
   <section class="google-service" aria-labelledby="connection-calendar">

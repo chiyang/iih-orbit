@@ -1,5 +1,5 @@
 :host { display: block; }
-.calendar-view { border: 1px solid var(--border); border-radius: 11px; overflow: hidden; background: var(--surface); }
+.calendar-view { border: 1px solid var(--border); border-radius: 11px; overflow: hidden; background: var(--surface); container: orbit-calendar / inline-size; }
 .calendar-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp15); padding: var(--sp21) var(--sp23); background: var(--header-bg); }
 .calendar-heading { display: flex; align-items: center; gap: var(--sp12); min-width: 0; flex: 1 1 340px; }
 .calendar-icon { width: 37px; height: 37px; background: var(--accent-soft); color: var(--accent-text); border-radius: 10px; display: grid; place-items: center; flex-shrink: 0; }
@@ -23,6 +23,8 @@ h2 { margin: 0; font-size: var(--font-17); font-weight: 600; color: var(--accent
 .source-google-mark { font-weight: 700; }
 .source-orbit-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .calendar-display-help { color: var(--text-muted); font-size: var(--font-9); line-height: 1.6; }
+.week-range-control {display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp8); color: var(--text-muted); font-size: var(--font-9); margin-left: auto;}
+.week-range-control button {padding: var(--sp6) var(--sp9); border: 1px solid var(--border); border-radius: 6px; background: var(--control-bg); color: var(--accent-text); font-size: inherit;}
 .calendar-scroll { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(calc(120px * var(--font-scale)), 1fr)); min-width: calc(840px * var(--font-scale)); }
 .weekday-heading { padding: var(--sp12) 0; background: var(--header-bg); color: var(--text-muted); text-align: center; font-size: var(--font-11); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
@@ -59,6 +61,7 @@ h2 { margin: 0; font-size: var(--font-17); font-weight: 600; color: var(--accent
 .month-task-dot { width: 6px; height: 6px; background: var(--event-line); border-radius: 50%; flex-shrink: 0; }
 .month-timed .external-mark { color: var(--event-text); }
 .month-timed small { flex: 0 0 auto; max-width: none; opacity: 1; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.month-time-compact {display: none;}
 .task-completed { opacity: .65; }
 .more-tasks { background: transparent; text-align: left; color: var(--text-soft); font-size: var(--font-9); padding: var(--sp3) var(--sp5); }
 .more-tasks:hover { color: var(--text-muted); }
@@ -139,3 +142,10 @@ h3 span { border-radius: 4px; background: var(--accent-soft); color: var(--text-
 .calendar-move-error { color: var(--danger-text); }
 @media (max-width: 900px) { .calendar-toolbar { padding: var(--sp17); } h2 { font-size: var(--font-14); } .calendar-icon { width: 31px; height: 31px; } }
 @media (max-width: 700px) { .calendar-toolbar { flex-wrap: wrap; padding: var(--sp15); gap: var(--sp12); } .calendar-heading { gap: var(--sp9); } h2 { font-size: var(--font-13); } .calendar-heading p { font-size: var(--font-9); } .week-view .calendar-navigation { margin-left: auto; } .week-scroll { height: clamp(440px, calc(100dvh - 180px), 680px); } .week-timetable { min-width: calc(910px * var(--font-scale)); --time-gutter: calc(58px * var(--font-scale)); } .calendar-note { padding: var(--sp12) var(--sp15); font-size: var(--font-8); } .unscheduled-tasks { padding: var(--sp16) var(--sp15); } .unscheduled-heading { gap: var(--sp8); } }
+@container orbit-calendar (max-width: 1050px) {
+  .calendar-grid {grid-template-columns: repeat(7, minmax(calc(220px * var(--font-scale)), 1fr)); min-width: calc(1540px * var(--font-scale));}
+  .week-timetable {min-width: calc(1540px * var(--font-scale) + var(--time-gutter));}
+  .month-time-full {display: none;}
+  .month-time-compact {display: inline;}
+  .month-timed small {max-width: 45%;}
+}

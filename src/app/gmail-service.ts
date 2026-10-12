@@ -24,6 +24,8 @@ export class GmailService implements OnDestroy {
   private readonly summaries = signal<ThreadSummary[]>([]);
   readonly expandedMessages = signal<MailPreview[]>([]);
   readonly query = signal('');
+  readonly newThreadIds = signal(new Set<string>());
+  readonly arrivalWarning = signal('');
   readonly threads = computed(() => {
     const groups = new Map<string, MailPreview[]>();
     for (const mail of this.messages()) { const group = groups.get(mail.threadId) ?? []; group.push(mail); groups.set(mail.threadId, group); }

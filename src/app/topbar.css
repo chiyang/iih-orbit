@@ -10,10 +10,5 @@
 .topbar-tools > .text-size-control {position: relative; padding: 0; gap: 0;}
 .topbar-tools .text-size-control .font-symbol {position: absolute; left: var(--sp10); pointer-events: none;}
 .topbar-tools .text-size-control select {height: 100%; min-height: 0; max-width: none; padding: 0 var(--sp5) 0 calc(var(--sp10) + var(--font-13) * 1.35 + var(--sp7)); border-radius: inherit;}
-.storage-status-group {display: none; flex-direction: column; align-items: flex-start; gap: var(--sp5); flex-shrink: 0;}
-.storage-status-group .save-status {display: flex; padding: 0; border: 0; background: transparent; font-size: var(--font-9); white-space: nowrap; cursor: pointer;}
-.storage-status-group .save-status:hover {text-decoration: underline;}
-.storage-status-group .save-status:focus-visible {outline: 2px solid var(--accent-strong); outline-offset: 3px;}
-@container workspace-main (min-width: 1100px) {.storage-status-group {display: flex;}}
 @media (max-width: 700px) {.topbar {padding-inline: var(--sp18);} .topbar-tools {justify-content: flex-start;}}
 @media (max-width: 400px) {.topbar-tools .text-size-control select {padding-left: var(--sp10);}}

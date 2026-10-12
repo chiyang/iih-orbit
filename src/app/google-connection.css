@@ -8,6 +8,8 @@
 .copy-feedback:not(.google-error) {color: var(--accent-text);}
 .google-connect-all {margin-top: var(--sp22); padding: var(--sp16); border: 1px solid var(--accent-border); border-radius: 9px; background: var(--accent-soft);}
 .google-connect-all p {margin-bottom: 0;}
+.google-all-connected {display: flex; align-items: center; gap: var(--sp8); color: var(--accent-text);}
+.google-all-connected app-icon {width: 18px; height: 18px; flex-shrink: 0;}
 .google-services {display: grid; gap: var(--sp14); margin: var(--sp22) 0;}
 .google-service {padding: var(--sp18); border: 1px solid var(--border); border-radius: 9px; background: var(--section-bg);}
 .service-heading {display: flex; align-items: center; justify-content: space-between; gap: var(--sp12);}

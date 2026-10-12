@@ -10,6 +10,7 @@
       <button type="button" [class.selected]="showOrbit()" [attr.aria-pressed]="showOrbit()" (click)="toggleOrbit()"><span class="source-orbit-dot" aria-hidden="true"></span>Orbit 任務</button>
     </div>
     <span class="calendar-display-help" id="calendar-source-help" role="status">@if (deadlineFiltered()) {任務篩選已暫時隱藏 Google 活動，清除篩選後恢復原選擇。} @else if (!showGoogle() && !showOrbit()) {目前隱藏所有來源，點選上方按鈕即可顯示。} @else if (mode() === 'month') {全天優先 · 同組 Google 在前 · 各來源內依時間排序}</span>
+    @if (mode() === 'week') {<div class="week-range-control"><span>{{ weekRangeLabel() }}@if (outsideWeekEvents().length) { · {{ outsideWeekEvents().length }} 項時段外安排}</span><button type="button" [attr.aria-pressed]="fullDayHours()" (click)="toggleWeekHours()">{{ fullDayHours() ? '使用設定時段' : '顯示全天時段' }}</button></div>}
   </div>
   @if (mode() === 'week') {
     <div class="week-scroll" #weekScroller aria-label="一週時間表" (scroll)="rememberScroll()">
@@ -41,24 +42,24 @@
         </div>
         <div class="week-time-body" [style.height.px]="timelineHeight()">
           <div class="week-time-axis" aria-hidden="true">
-            @for (hour of hours; track hour.hour) {<span class="hour-label" [style.top.px]="hour.hour * hourHeight()">{{ hour.label }}</span>}
-            <span class="hour-label last-hour">24:00</span>
+            @for (hour of hours(); track hour.hour) {<span class="hour-label" [style.top.px]="(hour.hour - weekRange().startHour) * hourHeight()">{{ hour.label }}</span>}
+            <span class="hour-label last-hour">{{ weekEndLabel() }}</span>
           </div>
           @for (day of weekDays(); track day.key; let dayIndex = $index) {
             <section class="time-day" [class.week-today]="day.today" [class.week-selected-day]="day.selected" [attr.data-date]="day.key" [attr.aria-label]="day.key + ' 時間欄'" (dragover)="timeDragOver($event, day.key)" (drop)="timeDrop($event, day.key)">
-              @for (slot of slots; track slot.minute) {
-                <button class="time-slot" [class.half-hour]="slot.minute % 60 !== 0" [style.height.px]="hourHeight() / 2" [attr.data-day]="dayIndex" [attr.data-minute]="slot.minute" [attr.tabindex]="slot.minute === 540 ? 0 : -1" [attr.aria-label]="'在 ' + day.key + ' ' + slot.label + ' 新增任務'" [attr.title]="slot.label + ' 新增任務'" (click)="createAt(day.key, slot.label)" (keydown)="slotKeydown($event, dayIndex, slot.minute)"></button>
+              @for (slot of slots(); track slot.minute) {
+                <button class="time-slot" [class.half-hour]="slot.minute % 60 !== 0" [style.height.px]="hourHeight() / 2" [attr.data-day]="dayIndex" [attr.data-minute]="slot.minute" [attr.tabindex]="slot.minute === firstFocusMinute() ? 0 : -1" [attr.aria-label]="'在 ' + day.key + ' ' + slot.label + ' 新增任務'" [attr.title]="slot.label + ' 新增任務'" (click)="createAt(day.key, slot.label)" (keydown)="slotKeydown($event, dayIndex, slot.minute)"></button>
               }
               @for (event of day.timedEvents; track event.task.id) {
-                <button class="timed-event" [orbitColor]="category(event.task.categoryId).color" [class.task-completed]="isDone(event.task)" [class.short-event]="event.displayEnd - event.displayStart < 60" [class.overlapping-event]="event.columns > 1" [class.milestone-event]="event.milestone" [style.top.%]="event.displayStart / 1440 * 100" [style.height.%]="(event.displayEnd - event.displayStart) / 1440 * 100" [style.left.%]="event.column / event.columns * 100" [style.width.%]="100 / event.columns" [attr.title]="taskTitle(event.task)" [attr.aria-label]="taskTitle(event.task) + ' · ' + event.label" (click)="openEntry(event.task)" [class.external-event]="isExternal(event.task)" [attr.draggable]="!isExternal(event.task) && !savingMove()" [class.task-drag-source]="draggedTaskId() === event.task.id" (dragstart)="startDrag($event, event.task, {kind: 'time', day: day.key, minute: event.startMinute})" (dragend)="endDrag()">
+                <button class="timed-event" [orbitColor]="category(event.task.categoryId).color" [class.task-completed]="isDone(event.task)" [class.short-event]="event.displayEnd - event.displayStart < 60" [class.overlapping-event]="event.columns > 1" [class.milestone-event]="event.milestone" [style.top.%]="minutePosition(event.displayStart)" [style.height.%]="eventHeight(event.displayStart, event.displayEnd)" [style.left.%]="event.column / event.columns * 100" [style.width.%]="100 / event.columns" [attr.title]="taskTitle(event.task)" [attr.aria-label]="taskTitle(event.task) + ' · ' + event.label" (click)="openEntry(event.task)" [class.external-event]="isExternal(event.task)" [attr.draggable]="!isExternal(event.task) && !savingMove()" [class.task-drag-source]="draggedTaskId() === event.task.id" (dragstart)="startDrag($event, event.task, {kind: 'time', day: day.key, minute: event.displayStart})" (dragend)="endDrag()">
                   <strong>@if (isExternal(event.task)) {<span class="external-mark" aria-label="Google 唯讀活動">G · </span>}@if (isDone(event.task)) {<app-icon name="check" />}{{ event.task.title }}</strong>
                   <small>{{ event.label }}</small>
                   <span class="timed-category">{{ category(event.task.categoryId).name }}</span>
                   @if (event.continuesBefore || event.continuesAfter) {<span class="event-continuation">{{ event.continuesBefore ? '接續前一天' : '' }}{{ event.continuesBefore && event.continuesAfter ? ' · ' : '' }}{{ event.continuesAfter ? '延續至隔天' : '' }}</span>}
                 </button>
               }
-              @if (dropPosition(); as position) {@if (position.kind === 'time' && position.day === day.key) {<div class="calendar-drop-time" [style.top.%]="(position.minute || 0) / 1440 * 100"><span>{{ dropTimeLabel() }}</span></div>}}
-              @if (day.today) {<div class="now-line" [style.top.%]="nowPosition()" [attr.title]="'目前時間 ' + now().toLocaleTimeString('zh-TW', {hour: '2-digit', minute: '2-digit', hour12: false})"><span></span></div>}
+              @if (dropPosition(); as position) {@if (position.kind === 'time' && position.day === day.key) {<div class="calendar-drop-time" [style.top.%]="minutePosition(position.minute || 0)"><span>{{ dropTimeLabel() }}</span></div>}}
+              @if (day.today && nowInRange()) {<div class="now-line" [style.top.%]="nowPosition()" [attr.title]="'目前時間 ' + now().toLocaleTimeString('zh-TW', {hour: '2-digit', minute: '2-digit', hour12: false})"><span></span></div>}
             </section>
           }
         </div>
@@ -75,7 +76,7 @@
             @for (task of day.visibleTasks; track task.id) {
               <button class="calendar-task" [orbitColor]="category(task.categoryId).color" [class.month-all-day]="isAllDay(task, day.key)" [class.month-timed]="!isAllDay(task, day.key)" [class.task-completed]="isDone(task)" [attr.title]="taskTitle(task) + ' · ' + scheduleLabel(task, day.key)" [attr.aria-label]="taskTitle(task) + ' · ' + scheduleLabel(task, day.key)" (click)="openEntry(task)" [class.external-event]="isExternal(task)" [attr.draggable]="!isExternal(task) && !savingMove()" [class.task-drag-source]="draggedTaskId() === task.id" (dragstart)="startDrag($event, task, {kind: 'month', day: day.key})" (dragend)="endDrag()">
                 <span class="calendar-task-title">@if (isExternal(task)) {<span class="external-mark" aria-label="Google 唯讀活動">G</span>} @else if (!isAllDay(task, day.key)) {<i class="month-task-dot" aria-hidden="true"></i>}@if (isDone(task)) {<app-icon name="check" />}<span>{{ task.title }}</span></span>
-                <small>{{ monthScheduleLabel(task, day.key) }}</small>
+                <small><span class="month-time-full">{{ monthScheduleLabel(task, day.key) }}</span><span class="month-time-compact" aria-hidden="true">{{ compactMonthScheduleLabel(task, day.key) }}</span></small>
               </button>
             }
             @if (day.tasks.length > monthPreviewLimit) {<button class="more-tasks" [attr.aria-expanded]="dayExpanded(day.key)" (click)="toggleDay(day.key)">{{ dayExpanded(day.key) ? '收合活動' : '+' + (day.tasks.length - monthPreviewLimit) + ' 個活動' }}</button>}
@@ -84,6 +85,9 @@
       }
     </div>
     </div>
+  }
+  @if (mode() === 'week' && outsideWeekEvents().length) {
+    <section class="unscheduled-tasks outside-hours" aria-label="時段外安排"><div class="unscheduled-heading"><h3><app-icon name="clock" />時段外安排<span>{{ outsideWeekEvents().length }}</span></h3><p>可直接開啟，或按「顯示全天時段」查看位置。</p></div><div class="unscheduled-list">@for (entry of outsideWeekEvents(); track entry.day.key + entry.event.task.id) {<button [orbitColor]="category(entry.event.task.categoryId).color" (click)="openEntry(entry.event.task)"><i></i>{{ entry.day.label }} · {{ entry.event.label }} · {{ entry.event.task.title }}</button>}</div></section>
   }
   @if (moveNotice() || savingMove()) {<p class="calendar-move-notice" role="status">{{ savingMove() ? '正在儲存任務時程…' : moveNotice() }}</p>}
   @if (moveError()) {<p class="calendar-move-error" role="alert">{{ moveError() }}</p>}

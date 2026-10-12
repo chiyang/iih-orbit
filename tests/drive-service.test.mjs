@@ -1005,3 +1005,67 @@ test('重新授權與換帳號期間舊清單不變成有效結果，找不到�
     assert.equal(f.service.runtime().link, undefined); assert.equal(panel.showCreateForm(), true);
   } finally {f.close();}
 });
+
+test('即時同步只在目前內容與雲端基準一致時回報完成；稍後新修改清除完成提示', async () => {
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync');
+    assert.equal(await f.service.sync(), 'complete'); assert.ok(f.service.lastSyncAt());
+    await f.store.saveTask({...f.store.tasks()[0], title: '斷網前的新修改'}); await settle();
+    assert.equal(f.service.lastSyncAt(), '');
+    assert.equal(await f.service.sync(), 'complete'); assert.ok(f.service.lastSyncAt());
+    assert.match(f.service.message(), /已完成/);
+  } finally {f.close();}
+});
+
+test('上傳完成後又有本機修改時回報待同步，不讓斷網前按鈕顯示完成', async () => {
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync');
+    await f.store.saveTask({...f.store.tasks()[0], title: '本次準備同步'});
+    const organize = f.api.organize;
+    f.api.organize = async (...args) => {await f.store.saveTask({...f.store.tasks()[0], title: '同步尾聲才加入的新修改'}); return organize(...args);};
+    assert.equal(await f.service.sync(), 'pending');
+    assert.equal(f.service.lastSyncAt(), ''); assert.match(f.service.message(), /再次同步/);
+    assert.equal(f.store.tasks()[0].title, '同步尾聲才加入的新修改');
+    f.api.organize = organize; assert.equal(await f.service.sync(), 'complete');
+  } finally {f.close();}
+});
+
+test('雲端仍須整份選擇、上傳失敗與離線均不回報同步完成', async () => {
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync');
+    const base = [...f.documents.values()][0], alternate = structuredClone(base);
+    alternate.preferences.accent = '#888888';
+    const remote = await createDriveDocument(alternate, base.cloud.datasetId, [base.cloud.versionId], 'sync');
+    f.documents.set('other-device', remote);
+    await f.store.updateAppearance({accent: '#999999'});
+    assert.equal(await f.service.sync(), 'conflict'); assert.match(f.service.message(), /待選擇/);
+    assert.equal(f.service.lastSyncAt(), '');
+    f.navigator.onLine = false; await f.event('offline'); assert.equal(await f.service.sync(), 'skipped');
+  } finally {f.close();}
+});
+
+test('完成核對時無法讀取目前內容，回報未完成並保留本機及雲端資料', async () => {
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync');
+    const snapshot = f.store.driveSnapshot.bind(f.store); let calls = 0;
+    f.store.driveSnapshot = async (...args) => {if (++calls === 2) throw new Error('完成核對失敗'); return snapshot(...args);};
+    assert.equal(await f.service.sync(), 'failed'); assert.equal(f.service.lastSyncAt(), '');
+    assert.match(f.service.error(), /完成核對失敗/); assert.equal(f.store.tasks().length, 1); assert.equal(f.documents.size, 1);
+  } finally {f.close();}
+});
+
+test('完成核對期間仍維持同步中，第二次同步不插隊；核對完成才解除停用', async () => {
+  const f = await fixture(); let release;
+  try {
+    await f.service.start('full', [], 'sync');
+    const snapshot = f.store.driveSnapshot.bind(f.store); let calls = 0;
+    f.store.driveSnapshot = async (...args) => {const value = await snapshot(...args); if (++calls === 2) await new Promise(resolve => {release = resolve;}); return value;};
+    const running = f.service.sync(); await settle();
+    assert.equal(f.service.syncing(), true); assert.equal(await f.service.sync(), 'skipped');
+    release(); assert.equal(await running, 'complete'); assert.equal(f.service.syncing(), false);
+  } finally {release?.(); f.close();}
+});

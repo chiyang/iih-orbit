@@ -21,6 +21,7 @@ interface SessionCallbacks {
   pendingNonce(): string;
   busy(): boolean;
   receive(session: GoogleSession, shared: boolean): void;
+  expired?(session: GoogleSession): void;
   clear(message: string): void;
   warning(message: string): void;
 }
@@ -76,6 +77,11 @@ export class GoogleSessionBridge {
     catch { this.warn(); }
     const restored = this.valid(stored);
     if (restored) { this.callbacks.receive(restored, false); this.remember(restored, false); return; }
+    // Recover only expiry metadata from a previously valid credential, never its token.
+    if (stored && Number.isSafeInteger(stored.expiresAt) && stored.expiresAt <= Date.now()) {
+      const expired = this.valid(stored, stored.expiresAt - 1);
+      if (expired) this.callbacks.expired?.(expired);
+    }
     this.forget();
     this.requestPeers();
   }
@@ -90,8 +96,8 @@ export class GoogleSessionBridge {
     } catch { this.warn(); }
     return '';
   }
-  private valid(value: unknown): GoogleSession | undefined {
-    return this.context ? readGoogleSession(value, this.context, this.marker(), Date.now(), this.options.scope) : undefined;
+  private valid(value: unknown, now = Date.now()): GoogleSession | undefined {
+    return this.context ? readGoogleSession(value, this.context, this.marker(), now, this.options.scope) : undefined;
   }
   currentNonce(): string { return this.marker(true); }
   isCurrent(nonce: string): boolean { return !!nonce && this.marker() === nonce; }

@@ -13,8 +13,8 @@ import { JSDOM } from 'jsdom';
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/gmail-test-')), output = resolve(directory, 'gmail.mjs');
-await build({stdin: {contents: "export {GoogleHttpError, readGoogleHttpError} from './src/app/google-api.ts'; export {GmailReadQueue} from './src/app/gmail-requests.ts'; export * from './src/app/gmail-data.ts'; export * from './src/app/schedule-controls.ts'; export * from './src/app/schedule-time.ts'; export * from './src/app/gmail-api.ts'; export * from './src/app/gmail-content.ts'; export {MailReader} from './src/app/mail-reader.ts'; export {GmailPanel} from './src/app/gmail-panel.ts'; export {GmailSettings} from './src/app/gmail-settings.ts'; export {Settings} from './src/app/settings.ts'; export {MailPreview as MailPreviewDialog} from './src/app/mail-preview.ts'; export {GmailAuth} from './src/app/gmail-auth.ts'; export {GmailService} from './src/app/gmail-service.ts'; export {MailTasks} from './src/app/mail-tasks.ts'; export {BoardStore} from './src/app/board-store.ts'; export {Calendar} from './src/app/calendar.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {UiPreferences} from './src/app/ui-preferences.ts'; export {App} from './src/app/app.ts'; export {GoogleConnection} from './src/app/google-connection.ts'; export {GoogleCombinedAuth} from './src/app/google-combined-auth.ts'; export {CalendarWriteAuth} from './src/app/calendar-write-auth.ts'; export {DriveService} from './src/app/drive-service.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const {GoogleHttpError, readGoogleHttpError, GmailReadQueue, mapMailRequests, GoogleConnection, GoogleCombinedAuth, CalendarWriteAuth, DriveService, GmailPanel, GmailSettings, Settings, ScheduleTime, DatePickerTrigger, adjacentHour, readMailLabels, fetchMailContent, readMailContent, MailReader, MailPreviewDialog, GmailApi, GmailAuth, GmailService, MailTasks, BoardStore, Calendar, GoogleCalendarService, UiPreferences, App, readMailPreview, decodeMailHeader, gmailMessageLink, mailTask, newMailCursor, mailHasMore, GMAIL_SCOPE, GMAIL_MIME} = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {GoogleHttpError, readGoogleHttpError} from './src/app/google-api.ts'; export {GmailReadQueue} from './src/app/gmail-requests.ts'; export * from './src/app/gmail-data.ts'; export * from './src/app/schedule-controls.ts'; export * from './src/app/schedule-time.ts'; export * from './src/app/gmail-api.ts'; export * from './src/app/gmail-content.ts'; export {MailReader} from './src/app/mail-reader.ts'; export {GmailPanel} from './src/app/gmail-panel.ts'; export {GmailSettings} from './src/app/gmail-settings.ts'; export {Settings} from './src/app/settings.ts'; export {MailPreview as MailPreviewDialog} from './src/app/mail-preview.ts'; export {GmailAuth} from './src/app/gmail-auth.ts'; export {GmailService} from './src/app/gmail-service.ts'; export {GmailNotifications} from './src/app/gmail-notifications.ts'; export {MailTasks} from './src/app/mail-tasks.ts'; export {BoardStore} from './src/app/board-store.ts'; export {Calendar} from './src/app/calendar.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {UiPreferences} from './src/app/ui-preferences.ts'; export {App} from './src/app/app.ts'; export {GoogleConnection} from './src/app/google-connection.ts'; export {GoogleConnections} from './src/app/google-connections.ts'; export {GoogleCombinedAuth} from './src/app/google-combined-auth.ts'; export {CalendarWriteAuth} from './src/app/calendar-write-auth.ts'; export {DriveService} from './src/app/drive-service.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const {GoogleHttpError, readGoogleHttpError, GmailReadQueue, mapMailRequests, GoogleConnection, GoogleConnections, GoogleCombinedAuth, CalendarWriteAuth, DriveService, GmailPanel, GmailSettings, Settings, ScheduleTime, DatePickerTrigger, adjacentHour, readMailLabels, fetchMailContent, readMailContent, MailReader, MailPreviewDialog, GmailApi, GmailAuth, GmailService, GmailNotifications, MailTasks, BoardStore, Calendar, GoogleCalendarService, UiPreferences, App, readMailPreview, decodeMailHeader, gmailMessageLink, mailTask, newMailCursor, mailHasMore, GMAIL_SCOPE, GMAIL_MIME} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 const base = {id: 'new', title: '', description: '', categoryId: '', projectId: 'project', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: []};
 const raw = (id, date = 1000, labels = ['INBOX']) => ({id, threadId: 'thread-' + id, internalDate: String(date), labelIds: labels, snippet: '會議預覽 10/15 14:00', payload: {headers: [{name: 'From', value: '王小明 <sender@example.test>'}, {name: 'Subject', value: '會議邀請'}, {name: 'Message-ID', value: '<' + id + '@example.test>'}], body: {data: 'DO-NOT-COPY'}, parts: [{filename: 'private.pdf'}]}});
@@ -39,12 +39,13 @@ function fixture(saved = []) {
   const auth = {connected: signal(false), authorizing: signal(false), ready: signal(false), preparing: signal(false), account: signal(null), connectionVersion: signal(0), cancelRequests() {}, useSession(context) {this.context = context;}, disconnect() {this.connected.set(false); this.account.set(null); this.connectionVersion.update(n => n + 1);}, api: async () => {throw new Error('未設定模擬 API');}};
   const injector = createEnvironmentInjector([{provide: BoardStore, useValue: store}, {provide: GmailAuth, useValue: auth}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   const gmail = runInInjectionContext(injector, () => new GmailService());
-  const child = createEnvironmentInjector([{provide: GmailService, useValue: gmail}, {provide: BoardStore, useValue: store}, MailTasks, MailReader], injector);
+  const panelViews = [], notifications = {acknowledgeCurrent(identity) {panelViews.push(identity); return true;}};
+  const child = createEnvironmentInjector([{provide: GmailService, useValue: gmail}, {provide: GmailNotifications, useValue: notifications}, {provide: BoardStore, useValue: store}, MailTasks, MailReader], injector);
   const tasks = child.get(MailTasks), reader = child.get(MailReader);
   const flush = () => {for (let round = 0; round < 30 && [...effects].some(effect => effect.dirty); round++) for (const effect of effects) if (effect.dirty) effect.run();};
   gmail.preferences.set({generation: store.generation(), clientId: '123-example.apps.googleusercontent.com', accountId: 'account', email: 'me@example.test', selected: ['INBOX']});
   auth.connected.set(true); auth.account.set({id: 'account', email: 'me@example.test'}); flush();
-  return {store, gmail, auth, tasks, reader, values, child, flush, close() {child.destroy(); gmail.ngOnDestroy(); injector.destroy();}};
+  return {store, gmail, auth, tasks, reader, panelViews, values, child, flush, close() {child.destroy(); gmail.ngOnDestroy(); injector.destroy();}};
 }
 const event = () => {const data = new Map(); return {dataTransfer: {types: [], effectAllowed: '', dropEffect: '', setData(type, value) {data.set(type, value); this.types.push(type);}, getData: type => data.get(type) ?? ''}, prevented: false, stopped: false, preventDefault() {this.prevented = true;}, stopPropagation() {this.stopped = true;}};};
 
@@ -614,6 +615,58 @@ test('右側欄切換不改動工作區視圖，郵件建立按鈕填入獨立�
     app.closeModal(); assert.equal(app.mailOpen(), true); app.escape(); assert.equal(app.panelOpen(), false);
   } finally {child.destroy(); f.close();}
 });
+
+test('Gmail 側欄載入後整批查看一次；更新、後續到信、焦點返回及關閉郵件預覽不再次收起通知', async () => {
+  const f = fixture(); let panel;
+  try {
+    panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(true); panel.visible = signal(true); panel.visit = signal(0); f.flush();
+    assert.equal(f.panelViews.length, 0);
+    f.gmail.messages.set([preview]); f.gmail.updatedAt.set(1000); f.flush();
+    assert.equal(f.panelViews.length, 1); assert.equal(f.gmail.messages().length, 1);
+    f.gmail.newThreadIds.set(new Set(['thread-later'])); f.gmail.messages.set([preview, readMailPreview(raw('later', 2000, ['INBOX', 'UNREAD']))]); f.gmail.updatedAt.set(2000); f.flush();
+    assert.equal(f.panelViews.length, 1);
+    globalThis.document.visibilityState = 'hidden'; panel.visibilityChanged(); f.flush();
+    globalThis.document.visibilityState = 'visible'; panel.visibilityChanged(); f.flush(); assert.equal(f.panelViews.length, 1);
+    panel.visible.set(false); f.flush(); f.gmail.updatedAt.set(3000); panel.visible.set(true); f.flush(); assert.equal(f.panelViews.length, 1);
+    f.auth.api = async path => path === 'labels' ? {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]} : path === 'messages' ? {messages: [{id: 'mail', threadId: preview.threadId}]} : path.startsWith('threads/') ? {id: preview.threadId, messages: [raw('mail')]} : raw('mail');
+    panel.visit.set(1); f.flush(); await new Promise(resolve => setImmediate(resolve)); f.flush(); assert.equal(f.panelViews.length, 2);
+    panel.active.set(false); f.flush(); panel.active.set(true); f.flush(); await new Promise(resolve => setImmediate(resolve)); f.flush(); assert.equal(f.panelViews.length, 3);
+  } finally {panel?.ngOnDestroy(); f.close();}
+});
+
+test('Gmail 側欄隱藏或頁面在背景時不視為已查看；真正顯示這次開啟的列表才收起通知', () => {
+  const f = fixture(); let panel;
+  try {
+    globalThis.document.visibilityState = 'hidden'; f.gmail.messages.set([preview]);
+    panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(true); panel.visible = signal(false); f.flush();
+    assert.equal(f.panelViews.length, 0);
+    globalThis.document.visibilityState = 'visible'; panel.visibilityChanged(); f.flush(); assert.equal(f.panelViews.length, 0);
+    panel.visible.set(true); f.flush(); assert.equal(f.panelViews.length, 1);
+    assert.equal(f.panelViews[0], f.gmail.previewIdentity());
+  } finally {panel?.ngOnDestroy(); f.close();}
+});
+
+test('側欄已開啟 Gmail 時點擊新郵件徽章，更新後查看下一批通知；失敗保留通知，預覽單封不另行查看通知', async () => {
+  const f = fixture(), child = createEnvironmentInjector([{provide: UiPreferences, useValue: {textSize: () => 'standard'}}], f.child); let panel;
+  try {
+    f.gmail.messages.set([preview]);
+    f.auth.api = async path => path === 'labels' ? {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]} : path === 'messages' ? {messages: [{id: 'mail', threadId: preview.threadId}]} : path.startsWith('threads/') ? {id: preview.threadId, messages: [raw('mail')]} : raw('mail');
+    const app = runInInjectionContext(child, () => new App()); app.openMail();
+    panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(true); panel.visible = signal(true); panel.visit = app.mailVisit; f.flush();
+    await new Promise(resolve => setImmediate(resolve)); f.flush();
+    const visits = f.panelViews.length;
+    f.auth.api = async () => {throw new Error('network');};
+    app.activatePanel({target: 'gmail'}); f.flush(); await new Promise(resolve => setImmediate(resolve)); f.flush();
+    assert.equal(f.panelViews.length, visits); assert.equal(app.mailOpen(), true);
+    f.auth.api = async path => path === 'labels' ? {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]} : path === 'messages' ? {messages: [{id: 'mail', threadId: preview.threadId}]} : path.startsWith('threads/') ? {id: preview.threadId, messages: [raw('mail')]} : raw('mail');
+    app.activatePanel({target: 'gmail'}); f.flush();
+    assert.equal(f.panelViews.length, visits);
+    await new Promise(resolve => setImmediate(resolve)); f.flush();
+    assert.equal(app.mailOpen(), true); assert.equal(app.panelTab(), 'gmail'); assert.equal(f.panelViews.length, visits + 1);
+    app.openMailPreview(preview); assert.equal(app.modal(), 'mail-preview'); assert.equal(f.panelViews.length, visits + 1);
+    app.closeModal(); app.activatePanel({target: 'toggle'}); assert.equal(app.panelOpen(), false);
+  } finally {panel?.ngOnDestroy(); child.destroy(); f.close();}
+});
 test('月／週拖放郵件沿用座標與十五分鐘對齊，建立副本而不移動既有任務', () => {
   const f = fixture(), google = {store: f.store, events: signal([]), visibleSources: signal([]), setMonthRange() {}};
   const child = createEnvironmentInjector([{provide: GoogleCalendarService, useValue: google}, {provide: UiPreferences, useValue: {scale: () => 1}}], f.child);
@@ -621,8 +674,8 @@ test('月／週拖放郵件沿用座標與十五分鐘對齊，建立副本而�
   try {
     calendar = runInInjectionContext(child, () => new Calendar()); calendar.mailDragging = signal(true); calendar.mode = signal('week'); calendar.tasks = signal([]); calendar.categories = signal([]);
     const drag = event(); drag.clientX = 0; drag.clientY = calendar.hourHeight() / 2; drag.currentTarget = {getBoundingClientRect: () => ({top: 0})}; drag.dataTransfer.setData(GMAIL_MIME, 'token');
-    let dropped; calendar.mailDrop.subscribe(value => {dropped = value;}); calendar.timeDragOver(drag, '2026-10-10'); assert.equal(calendar.dropPosition().minute, 30); assert.equal(drag.dataTransfer.dropEffect, 'copy');
-    calendar.timeDrop(drag, '2026-10-10'); assert.equal(dropped.position.kind, 'time'); assert.equal(dropped.position.minute, 30); assert.equal(calendar.savingMove(), false);
+    let dropped; calendar.mailDrop.subscribe(value => {dropped = value;}); calendar.timeDragOver(drag, '2026-10-10'); assert.equal(calendar.dropPosition().minute, 510); assert.equal(drag.dataTransfer.dropEffect, 'copy');
+    calendar.timeDrop(drag, '2026-10-10'); assert.equal(dropped.position.kind, 'time'); assert.equal(dropped.position.minute, 510); assert.equal(calendar.savingMove(), false);
     calendar.drop(drag, {kind: 'month', day: '2026-10-11'}); assert.equal(dropped.position.kind, 'month');
     calendar.drop(drag, {kind: 'all-day', day: '2026-10-12'}); assert.equal(dropped.position.kind, 'all-day');
   } finally {calendar?.endDrag(); delete globalThis.ngServerMode; child.destroy(); f.close();}
@@ -960,6 +1013,7 @@ test('Google 連線頁集中保存 ID 與各服務入口，待上傳的 Drive �
   const child = createEnvironmentInjector([
     {provide: GoogleCalendarService, useValue: {auth: calendarAuth}}, {provide: CalendarWriteAuth, useValue: write},
     {provide: GoogleCombinedAuth, useValue: makeAuth()},
+    {provide: GoogleConnections, useValue: {preparing: signal(false), connectingAll: signal(false), error: signal(''), message: signal(''), async prepare() {await Promise.all([calendarAuth.prepare(), driveAuth.prepare(), f.auth.prepare()]);}}},
     {provide: DriveService, useValue: {auth: driveAuth, busy: signal(false), runtime: pending}},
     {provide: DOCUMENT, useValue: {defaultView: {location: {origin: 'https://chiyang.github.io'}}}}
   ], f.child);

@@ -12,6 +12,7 @@ import type { ReminderPreferences } from './reminder-data';
 import { DrivePanel } from './drive-panel';
 import { GmailSettings } from './gmail-settings';
 import { GoogleConnection } from './google-connection';
+import { DEFAULT_WEEK_RANGE } from './calendar-display';
 
 export type SettingsTab = 'appearance' | 'reminders' | 'google' | 'calendar' | 'gmail' | 'drive' | 'data' | 'reset';
 export const SETTINGS_TABS: {id: SettingsTab; label: string}[] = [
@@ -30,6 +31,10 @@ export class Settings {
   readonly duePresets = DUE_DAY_PRESETS;
   readonly leadPresets = START_LEAD_PRESETS;
   readonly modes: {id: ThemeMode; label: string}[] = [{id: 'light', label: '淺色'}, {id: 'dark', label: '深色'}, {id: 'system', label: '跟隨系統'}];
+  readonly weekRangeDraft = linkedSignal(() => ({...(this.preferences.weekRange?.() ?? DEFAULT_WEEK_RANGE)}));
+  readonly weekStartHours = Array.from({length: 24}, (_, hour) => hour);
+  readonly weekEndHours = Array.from({length: 24}, (_, hour) => hour + 1);
+  readonly weekRangeFeedback = signal('');
   readonly resetDone = output<void>();
   readonly resetMode = signal<'work' | 'all' | null>(null);
   readonly message = signal('');
@@ -40,6 +45,15 @@ export class Settings {
   readonly deviceError = signal(false);
   confirmation = '';
   private confirmedRevision = '';
+
+  changeWeekRange(boundary: 'startHour' | 'endHour', value: string): void {
+    this.weekRangeDraft.update(range => ({...range, [boundary]: Number(value)})); this.weekRangeFeedback.set('');
+  }
+  saveWeekRange(): void {
+    const saved = this.preferences.setWeekRange(this.weekRangeDraft());
+    this.weekRangeFeedback.set(saved && !this.preferences.weekRangeWarning() ? '已保存週視圖時間範圍。' : '');
+  }
+  hourLabel(hour: number): string {return String(hour).padStart(2, '0') + ':00';}
 
   saveDeviceName(): void {
     const result = this.store.setDeviceName(this.deviceName);

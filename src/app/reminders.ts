@@ -6,6 +6,7 @@ import { ReminderDelivery } from './reminder-delivery';
 import { itemsForReminderTab, reminderItems, startPopupCandidates } from './reminder-items';
 import type { PopupCandidate, ReminderItem } from './reminder-items';
 import { withStorageLock } from './storage-coordinator';
+import { MAX_SEEN_REMINDERS, REMINDER_SEEN_KEY, readSeenReminders, reminderNoticeKey } from './reminder-attention';
 
 @Injectable({providedIn: 'root'})
 export class Reminders implements OnDestroy {
@@ -17,8 +18,14 @@ export class Reminders implements OnDestroy {
   readonly blocked = signal(false);
   readonly warning = signal('');
   readonly items = computed(() => reminderItems(this.store.currentWorkspace(), this.store.generation(), this.google.reminderEvents()));
-  readonly summaryCount = computed(() => new Set((['today', 'tomorrow', 'this-week', 'next-week', 'due-soon', 'overdue'] as const).flatMap(tab =>
-    itemsForReminderTab(this.items(), tab, this.now(), this.store.reminders().dueSoonDays, this.store.currentWorkspace()).map(item => item.id))).size);
+  readonly summaryItems = computed(() => [...new Map((['today', 'tomorrow', 'this-week', 'next-week', 'due-soon', 'overdue'] as const).flatMap(tab =>
+    itemsForReminderTab(this.items(), tab, this.now(), this.store.reminders().dueSoonDays, this.store.currentWorkspace()).map(item => [item.id, item] as const))).values()]);
+  readonly summaryCount = computed(() => this.summaryItems().length);
+  private readonly seen = signal(this.loadSeen());
+  readonly attentionWarning = signal('');
+  readonly summaryNotices = computed(() => this.summaryItems().map(item => ({item, key: reminderNoticeKey(item, this.now(), this.store.reminders().dueSoonDays, this.store.currentWorkspace())})));
+  readonly unseenItems = computed(() => this.summaryNotices().filter(notice => !this.seen().has(notice.key)).map(notice => notice.item));
+  readonly unseenCount = computed(() => this.unseenItems().length);
   readonly candidates = computed(() => startPopupCandidates(this.items(), this.now(), this.store.reminders()));
   readonly popups = signal<PopupCandidate[]>([]);
   private readonly delivery = new ReminderDelivery({getItem: key => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value)}, withStorageLock);
@@ -26,7 +33,8 @@ export class Reminders implements OnDestroy {
   private running = false;
   private destroyed = false;
   private context = '';
-  private readonly wake = () => { this.now.set(new Date()); this.active.set(this.isActive()); };
+  private readonly wake = () => { this.now.set(new Date()); this.active.set(this.isActive()); this.refreshSeen(); };
+  private readonly seenChanged = (event: StorageEvent) => {if (!event.key || event.key === REMINDER_SEEN_KEY) this.refreshSeen();};
   private readonly timer: ReturnType<typeof setInterval>;
 
   constructor() {
@@ -45,6 +53,27 @@ export class Reminders implements OnDestroy {
     this.document.addEventListener('visibilitychange', this.wake);
     this.document.defaultView?.addEventListener('focus', this.wake);
     this.document.defaultView?.addEventListener('blur', this.wake);
+    this.document.defaultView?.addEventListener('storage', this.seenChanged);
+  }
+
+  private loadSeen(): Set<string> {
+    try {return readSeenReminders(JSON.parse(localStorage.getItem(REMINDER_SEEN_KEY) ?? 'null'));}
+    catch {return new Set();}
+  }
+  private refreshSeen(): void {
+    const saved = this.loadSeen();
+    this.seen.update(current => new Set([...current, ...saved].slice(-MAX_SEEN_REMINDERS)));
+  }
+  markViewed(): void {
+    const keys = this.summaryNotices().map(notice => notice.key);
+    if (keys.every(key => this.seen().has(key))) return;
+    this.seen.update(current => new Set([...current, ...keys].slice(-MAX_SEEN_REMINDERS)));
+    void withStorageLock(() => {
+      if (this.destroyed) return;
+      const merged = new Set([...this.loadSeen(), ...this.seen()].slice(-MAX_SEEN_REMINDERS));
+      localStorage.setItem(REMINDER_SEEN_KEY, JSON.stringify({version: 1, keys: [...merged]}));
+      this.seen.set(merged); this.attentionWarning.set('');
+    }).catch(() => this.attentionWarning.set('已在此分頁收起提醒徽章，但瀏覽器無法保存查看紀錄。'));
   }
 
   private isActive(): boolean { return this.document.visibilityState === 'visible' && this.document.hasFocus(); }
@@ -79,5 +108,6 @@ export class Reminders implements OnDestroy {
     this.document.removeEventListener('visibilitychange', this.wake);
     this.document.defaultView?.removeEventListener('focus', this.wake);
     this.document.defaultView?.removeEventListener('blur', this.wake);
+    this.document.defaultView?.removeEventListener('storage', this.seenChanged);
   }
 }

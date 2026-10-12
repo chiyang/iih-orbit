@@ -25,5 +25,7 @@
     </div>
     @if (activeTab() === 'today' || activeTab() === 'tomorrow' || activeTab() === 'next-week') {<p class="reminder-help">依開始日期整理，包含全天安排；跨日項目只在開始日列入。Google 活動為唯讀。</p>}
     @if (activeTab() === 'this-week') {<p class="reminder-help">包含排程與本週重疊的待完成任務及 Google 活動。</p>}
+    <p class="reminder-help">開啟此側欄後收起現有提醒徽章，安排仍保留在清單中。新增、改期或進入今日／逾期時會再提示。</p>
     @if (reminders.warning()) {<p class="reminder-warning" role="status">{{ reminders.warning() }}</p>}
+    @if (reminders.attentionWarning()) {<p class="reminder-warning" role="status">{{ reminders.attentionWarning() }}</p>}
   </div>

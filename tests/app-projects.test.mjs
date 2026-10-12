@@ -67,6 +67,37 @@ test('垃圾桶排除任務視圖、專案進度與側欄來源，還原及復�
   } finally {f.close();}
 });
 
+test('編輯內容拖曳選取到遮罩不關閉，只有遮罩上的完整短按會關閉', () => {
+  const f = application(), backdrop = {}, content = {};
+  const event = (target = backdrop, patch = {}) => ({target, currentTarget: backdrop, pointerId: 1, button: 0, isPrimary: true, clientX: 20, clientY: 20, ...patch});
+  try {
+    const app = f.app; app.openTask('todo', task); app.draft.description = '尚未儲存的描述';
+    app.startBackdropClick(event(content)); app.finishBackdropClick(event()); app.closeFromBackdrop(event());
+    assert.equal(app.modal(), 'task'); assert.equal(app.draft.description, '尚未儲存的描述');
+    app.startBackdropClick(event()); app.finishBackdropClick(event(content)); app.closeFromBackdrop(event()); assert.equal(app.modal(), 'task');
+    app.startBackdropClick(event()); app.finishBackdropClick(event(backdrop, {clientX: 100})); app.closeFromBackdrop(event()); assert.equal(app.modal(), 'task');
+    app.startBackdropClick(event(backdrop, {button: 2})); app.finishBackdropClick(event()); app.closeFromBackdrop(event()); assert.equal(app.modal(), 'task');
+    app.startBackdropClick(event()); app.finishBackdropClick(event(backdrop, {pointerId: 2})); app.closeFromBackdrop(event()); assert.equal(app.modal(), 'task');
+    app.startBackdropClick(event()); app.cancelBackdropClick(); app.finishBackdropClick(event()); app.closeFromBackdrop(event()); assert.equal(app.modal(), 'task');
+    app.startBackdropClick(event()); app.finishBackdropClick(event(backdrop, {clientX: 22})); app.closeFromBackdrop(event()); assert.equal(app.modal(), null);
+  } finally {f.close();}
+});
+
+test('週視圖範圍設定驗證起訖、只保存本機，重新開啟仍可讀取', async () => {
+  const f = application(), preferences = f.settings.preferences;
+  try {
+    preferences.weekRange = signal({startHour: 8, endHour: 19}); preferences.weekRangeWarning = signal('');
+    preferences.setWeekRange = range => UiPreferences.prototype.setWeekRange.call(preferences, range);
+    f.settings.changeWeekRange('startHour', '6'); f.settings.changeWeekRange('endHour', '21'); f.settings.saveWeekRange();
+    assert.deepEqual(preferences.weekRange(), {startHour: 6, endHour: 21}); assert.match(f.settings.weekRangeFeedback(), /已保存/);
+    assert.deepEqual(JSON.parse(f.values.get('iih-orbit-calendar-display-v1')).range, {startHour: 6, endHour: 21});
+    const backup = await f.store.backupForExport('full'); assert.equal(JSON.stringify(backup).includes('startHour'), false);
+    f.settings.changeWeekRange('startHour', '22'); f.settings.saveWeekRange(); assert.match(preferences.weekRangeWarning(), /結束時間需晚於開始時間/);
+    assert.deepEqual(preferences.weekRange(), {startHour: 6, endHour: 21}); assert.equal(f.settings.weekRangeFeedback(), '');
+    preferences.setWeekRange({startHour: 0, endHour: 24}); assert.deepEqual(preferences.weekRange(), {startHour: 0, endHour: 24});
+  } finally {f.close();}
+});
+
 test('復原與重做快捷鍵保護表單及原生文字操作，只有工作區未忙碌時才攔截', async () => {
   const f = application();
   try {
@@ -758,4 +789,20 @@ test('清單空白處或列上 Enter 開啟任務，欄位控制與其鍵盤事�
     app.openListTask({type: 'keydown', target: row, currentTarget: row, preventDefault() {prevented = true;}}, current);
     assert.equal(prevented, true); assert.equal(app.modal(), 'task');
   } finally { close(); }
+});
+
+test('多功能側欄入口切到提示對應內容，同頁可關閉；新郵件清除搜尋並顯示收件匣', () => {
+  const f = application(), calls = [];
+  try {
+    const {app} = f;
+    Object.defineProperty(app, 'mailTasks', {value: {gmail: {search: value => calls.push(['search', value]), applyLabels: value => calls.push(['labels', value])}}});
+    app.query.set('主畫面篩選'); app.openMail(); app.activatePanel({target: 'tasks'});
+    assert.equal(app.mailOpen(), false); assert.equal(app.tasksOpen(), true);
+    app.activatePanel({target: 'tasks'}); assert.equal(app.panelOpen(), false);
+    app.activatePanel({target: 'toggle'}); assert.equal(app.tasksOpen(), true);
+    app.activatePanel({target: 'reminders', tab: 'overdue'}); assert.equal(app.tasksOpen(), false); assert.equal(app.remindersOpen(), true); assert.equal(app.reminderTab(), 'overdue');
+    app.activatePanel({target: 'gmail'}); assert.equal(app.mailOpen(), true); assert.equal(app.remindersOpen(), false);
+    assert.deepEqual(calls, [['search', ''], ['labels', ['INBOX']]]); assert.equal(app.query(), '主畫面篩選');
+    app.modal.set('task'); app.activatePanel({target: 'tasks'}); assert.equal(app.mailOpen(), true);
+  } finally {f.close();}
 });

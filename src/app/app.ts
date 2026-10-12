@@ -24,7 +24,6 @@ import { ExternalEventDetails } from './external-event-details';
 import { ExternalEvent } from './google-data';
 import { currentWeekRange, DeadlineFilter, deadlineState, DUE_DAY_PRESETS, taskInWeek } from './reminder-data';
 import { ReminderCenter } from './reminder-center';
-import { ReminderBadge } from './reminder-badge';
 import { ReminderPopups } from './reminder-popups';
 import type { ReminderItem, ReminderTab } from './reminder-items';
 import { TaskCell } from './task-cell';
@@ -47,13 +46,16 @@ import { TaskPanel } from './task-panel';
 import { recentlyEdited } from './task-activity-data';
 import { TrashView } from './trash-view';
 import { TaskConflictEditor, TaskConflictContext } from './task-conflict-editor';
+import { GoogleRenewalButton } from './google-renewal-button';
+import { DriveSyncButton } from './drive-sync-button';
+import { PanelButton, type PanelActivation } from './panel-button';
 
 type Modal = 'intro' | 'task' | 'task-conflict' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'empty-trash' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderBadge, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView, TaskConflictEditor],
+  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView, TaskConflictEditor, GoogleRenewalButton, DriveSyncButton, PanelButton],
   templateUrl: './app.html',
   styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css', './startup.css', './task-shortcuts.css', './workspace-controls.css']
 })
@@ -67,6 +69,7 @@ export class App {
   readonly mailOpen = signal(this.savedBrowse.panel === 'gmail');
   readonly tasksOpen = signal(this.savedBrowse.panel === 'tasks');
   readonly panelTab = signal(this.savedBrowse.panelTab);
+  readonly mailVisit = signal(0);
   readonly panelOpen = computed(() => this.mailOpen() || this.remindersOpen() || this.tasksOpen());
   readonly panelOverlay = signal(window.innerWidth <= 700);
   readonly narrowPanelViewport = signal(window.innerWidth <= 1100);
@@ -74,7 +77,7 @@ export class App {
   readonly panelWidth = signal(this.readPanelWidth());
   private resizingPanel = false;
   private readPanelWidth(): number { try { return Math.min(520, Math.max(300, Number(localStorage.getItem('orbit-side-panel-width-v1')) || 360)); } catch { return 360; } }
-  openMail(): void { if (!this.modal()) { this.sidebarOpen.set(false); this.tasksOpen.set(false); this.remindersOpen.set(false); this.mailOpen.set(true); this.panelTab.set('gmail'); } }
+  openMail(): void { if (!this.modal()) { this.sidebarOpen.set(false); this.tasksOpen.set(false); this.remindersOpen.set(false); this.mailOpen.set(true); this.panelTab.set('gmail'); this.mailVisit.update(visit => visit + 1); } }
   toggleMail(): void { if (this.mailOpen()) this.closePanel(); else this.openMail(); }
   closePanel(): void { this.mailOpen.set(false); this.remindersOpen.set(false); this.tasksOpen.set(false); }
   openTaskPanel(): void {
@@ -87,6 +90,16 @@ export class App {
     else if (this.panelTab() === 'gmail') this.openMail();
     else if (this.panelTab() === 'reminders') this.openReminders(this.reminderTab());
     else this.openTaskPanel();
+  }
+  activatePanel(entry: PanelActivation): void {
+    if (this.modal()) return;
+    if (entry.target === 'toggle') {this.togglePanel(); return;}
+    if (entry.target !== 'gmail' && this.panelOpen() && this.panelTab() === entry.target) {this.closePanel(); return;}
+    if (entry.target === 'tasks') this.openTaskPanel();
+    else if (entry.target === 'reminders') this.openReminders(entry.tab);
+    else {
+      this.mailTasks.gmail.search(''); this.mailTasks.gmail.applyLabels(['INBOX']); this.openMail();
+    }
   }
   openPanelTask(task: Task): void {
     if (this.modal()) return;
@@ -256,6 +269,7 @@ export class App {
   readonly sidebarOpen = signal(false);
   readonly mobileViewport = signal(window.innerWidth <= 700);
   readonly modal = signal<Modal>(null);
+  private backdropClick?: {pointerId: number; x: number; y: number; released: boolean};
   readonly editing = signal(false);
   readonly descriptionFocused = signal(false);
   readonly formError = signal('');
@@ -819,6 +833,7 @@ export class App {
     this.openTask(task.status, task);
   }
   inlineSaved(message: string): void { this.notify(message); }
+  googleAuthorizationResult(message: string): void {this.notify(message);}
 
   openCategories(): void {
     this.rememberFormContext();
@@ -1121,11 +1136,28 @@ export class App {
     this.notifySaved(project.archived ? '專案已還原，重新計入所有專案進度' : '專案已封存，任務保留並排除於所有專案進度');
   }
 
+  startBackdropClick(event: PointerEvent): void {
+    this.backdropClick = event.target === event.currentTarget && event.button === 0 && event.isPrimary !== false
+      ? {pointerId: event.pointerId, x: event.clientX, y: event.clientY, released: false} : undefined;
+  }
+  finishBackdropClick(event: PointerEvent): void {
+    const start = this.backdropClick;
+    if (!start || start.pointerId !== event.pointerId || event.target !== event.currentTarget || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) this.backdropClick = undefined;
+    else start.released = true;
+  }
+  cancelBackdropClick(): void {this.backdropClick = undefined;}
+  closeFromBackdrop(event: MouseEvent): void {
+    const close = this.backdropClick?.released && event.target === event.currentTarget;
+    this.cancelBackdropClick();
+    if (close) this.closeModal();
+  }
+
   closeModal(): void {
     if (this.introSaving() || this.workspaceSaving() || this.conflictSaving()) return;
     if (this.modal() === 'intro' && this.introFirstUse() && this.store.onboarding() === 'guide') { void this.finishIntroduction(); return; }
     if (this.calendarPublishing()) return;
     if (this.modal() === 'settings' && this.store.pendingWrites() > 0) return;
+    this.cancelBackdropClick();
     this.modal.set(null);
     this.conflictContext.set(null);
     this.introFirstUse.set(false);

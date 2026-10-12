@@ -12,16 +12,21 @@ Orbit 是瀏覽器端的單人任務管理工具，沒有自建後端。核心�
 | 字體大小（與外觀一起本機保存） | localStorage：`orbit-workspaces-v2` | 不匯出／同步；匯入及同步保留本機字級 |
 | 當前工作空間 | 每個分頁的 sessionStorage：`orbit-active-workspace-v1` | 不匯出 |
 | 視圖、日期、篩選、排序、來源開關、捲動、右側欄及垃圾桶入口 | localStorage：`iih-orbit-browse-state-v1` | 不匯出 |
+| 週視圖顯示時間範圍（預設 08:00–19:00） | localStorage：`iih-orbit-calendar-display-v1` | 不匯出／同步；同瀏覽器分頁可接續 |
+| 提醒徽章的查看紀錄（項目、時程與提醒狀態識別，不含標題或描述） | localStorage：`iih-orbit-reminder-seen-v1` | 不匯出／同步；最多保留 5000 份識別，隔離工作空間及資料世代 |
 | 最近 50 步工作資料操作的復原與重做紀錄 | 目前分頁記憶體 | 不匯出；重新整理後清除 |
 | Calendar 活動、來源版本與同步游標 | IndexedDB：`iih-orbit-calendar-v1` | 不匯出／同步 |
-| Calendar 未過期憑證 | sessionStorage：`iih-orbit-google-session-v1` | 不匯出 |
+| Calendar 未過期讀取憑證 | localStorage：`iih-orbit-google-session-v1` | 不匯出／同步 |
+| Calendar 未過期移轉／寫入憑證 | localStorage：`iih-orbit-calendar-write-session-v1` | 不匯出／同步 |
 | Gmail 未過期憑證 | localStorage：`iih-orbit-gmail-session-v1` | 不匯出 |
 | Gmail 偏好與郵件預覽 | localStorage；整串預覽及本文暫存於分頁記憶體 | 不匯出 |
-| Drive 未過期憑證 | sessionStorage：`iih-orbit-drive-session-v1` | 不匯出 |
+| Gmail 新郵件提示游標、信件／討論串 ID 與整批通知查看紀錄（不保存本文） | localStorage：`iih-orbit-gmail-arrivals-v1` | 不匯出／同步；綁定目前 Client ID、帳號與資料世代，不修改 Gmail 未讀狀態 |
+| Drive 未過期憑證 | localStorage：`iih-orbit-drive-session-v1` | 不匯出／同步 |
+| Google 各服務的授權到期提示紀錄（不含憑證） | localStorage：各服務 session key 後接 `:authorization-history` | 不匯出／同步；只辨識目前 Client ID、帳號與資料世代 |
 | Drive 待上傳 JSON、固定檔案 ID、同步基準及整併基準快照 | IndexedDB：`iih-orbit-drive-v1` | 不匯出 |
 | 不支援 Web Locks 時的工作資料寫入協調 | 獨立 IndexedDB 交易 | 只保存協調資料，不是任務副本 |
 
-Gmail 快取上限、期限與限流規則見 [Gmail 設計](gmail-design.md)。所有憑證啟動時檢查帳號、Client ID、資料世代、權限與原到期時間；不延長期限。另有不含憑證的失效識別，讓未收到即時通知的分頁也拒絕舊連線。
+Gmail 快取上限、期限與限流規則見 [Gmail 設計](gmail-design.md)。所有服務在目前瀏覽器保存未過期憑證，關閉後重開仍可接續；有效的舊版 sessionStorage 憑證驗證後遷移。啟動時檢查帳號、Client ID、資料世代、權限與原到期時間，不延長期限；離線或請求逾時不清除憑證。另有不含憑證的失效識別，讓未收到即時通知的分頁也拒絕舊連線；舊分頁不得清掉其他分頁重新授權的新憑證。
 
 ## 工作資料的跨分頁寫入
 

@@ -10,11 +10,12 @@ interface OAuthApi {
   hasGrantedAllScopes(response: TokenResponse, ...scopes: string[]): boolean;
 }
 export interface GoogleAccount {id: string; email: string}
+interface AuthorizationHistory extends GoogleSessionContext {version: 1; expiresAt: number; nonce: string}
 
 @Injectable({providedIn: 'root'})
 export class GoogleAuth implements OnDestroy {
   protected get sessionOptions(): SessionOptions { return {scope: CALENDAR_SCOPE, storageKey: GOOGLE_SESSION_KEY, controlPrefix: 'iih-orbit-google-session-control-v1:'}; }
-  protected get sessionPersistence(): 'tab' | 'browser' | 'memory' { return 'tab'; }
+  protected get sessionPersistence(): 'tab' | 'browser' | 'memory' { return 'browser'; }
   protected get sessionChannel(): string { return 'iih-orbit-google-session'; }
   protected get permissionMessage(): string { return '尚未取得月曆讀取權限，請重新連線並允許讀取月曆。'; }
   protected get networkMessage(): string { return '網路中斷或 Google 讀取逾時，已保留原有月曆資料。'; }
@@ -25,6 +26,7 @@ export class GoogleAuth implements OnDestroy {
   readonly ready = signal(false);
   readonly preparing = signal(false);
   readonly connected = signal(false);
+  readonly expired = signal(false);
   readonly authorizing = signal(false);
   readonly connectionVersion = signal(0);
   readonly account = signal<GoogleAccount | null>(null);
@@ -36,6 +38,9 @@ export class GoogleAuth implements OnDestroy {
   private expiresAt = 0;
   private epoch = 0;
   private expiryTimer?: ReturnType<typeof setTimeout>;
+  private historyTimer?: ReturnType<typeof setTimeout>;
+  private historyStorage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+  private history?: AuthorizationHistory;
   private pendingReject?: (reason: Error) => void;
   private readonly controllers = new Set<AbortController>();
   private session?: GoogleSession;
@@ -43,14 +48,14 @@ export class GoogleAuth implements OnDestroy {
   private authorizationNonce = '';
   private approvedScopes = new Set<string>();
   private readonly bridge: GoogleSessionBridge;
-  private readonly wake = () => this.bridge.verify();
-  private readonly storageChanged = (event: StorageEvent) => { if (!event.key || event.key.startsWith(this.sessionOptions.controlPrefix)) this.bridge.verify(); };
+  private readonly wake = () => {this.bridge.verify(); this.refreshHistory();};
+  private readonly storageChanged = (event: StorageEvent) => { if (!event.key || event.key.startsWith(this.sessionOptions.controlPrefix) || event.key === this.historyKey()) this.wake(); };
 
   constructor() {
     const window = this.document.defaultView as (Window & {BroadcastChannel?: typeof BroadcastChannel}) | null;
     let storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined, control: Storage | undefined, channel: SessionChannel | undefined;
     try {
-      control = window?.localStorage;
+      control = window?.localStorage; this.historyStorage = control;
       if (this.sessionPersistence === 'browser' && control) {
         const browserStorage = control;
         storage = {
@@ -67,8 +72,9 @@ export class GoogleAuth implements OnDestroy {
     this.bridge = new GoogleSessionBridge(storage, control, channel, {
       current: () => this.session, pendingNonce: () => this.authorizationNonce, busy: () => this.authorizing(),
       receive: (session, shared) => this.adopt(session, shared ? '已接續其他分頁的 Google 連線' : '已恢復 Google 連線'),
+      expired: session => this.rememberHistory(session),
       clear: message => this.clearLocal(message), warning: message => this.sessionWarning.set(message)
-    }, this.sessionOptions);
+    }, {...this.sessionOptions, sharedStorage: this.sessionPersistence === 'browser'});
     window?.addEventListener?.('focus', this.wake);
     window?.addEventListener?.('storage', this.storageChanged);
     this.document.addEventListener?.('visibilitychange', this.wake);
@@ -77,6 +83,7 @@ export class GoogleAuth implements OnDestroy {
   useSession(context: GoogleSessionContext): void {
     this.sessionContext = {...context};
     this.bridge.activate(context);
+    this.refreshHistory();
   }
 
   authorizationMarker(): string { return this.bridge.currentNonce(); }
@@ -94,7 +101,7 @@ export class GoogleAuth implements OnDestroy {
       || target.sessionContext.accountId !== context.accountId || nonce && !target.bridge.isCurrent(nonce)) {
       throw new Error('Google 授權或連線設定已變更，請重新連線。');
     }
-    target.disconnect();
+    target.disconnect(undefined, 'renew');
     const session = {...source, id: crypto.randomUUID(), scope: target.sessionOptions.scope, nonce: target.bridge.currentNonce()};
     target.approvedScopes = new Set(target.sessionOptions.scope.split(' '));
     target.adopt(session, 'Google 已連線'); target.bridge.remember(session);
@@ -107,7 +114,31 @@ export class GoogleAuth implements OnDestroy {
     this.controllers.clear();
     this.session = session; this.token = session.token; this.expiresAt = session.expiresAt; this.authorizationNonce = '';
     this.account.set(session.account); this.connected.set(true); this.authorizing.set(false); this.message.set(message);
-    this.expiryTimer = setTimeout(() => { if (this.session?.id === session.id) this.disconnect('Google 授權已到期，請重新連線。'); }, Math.max(0, session.expiresAt - Date.now()));
+    this.rememberHistory(session);
+    this.expiryTimer = setTimeout(() => { if (this.session?.id === session.id) this.disconnect('Google 授權已到期，請重新連線。', 'expired'); }, Math.max(0, session.expiresAt - Date.now()));
+  }
+
+  private historyKey(): string {return this.sessionOptions.storageKey + ':authorization-history';}
+  private historyMatches(history: AuthorizationHistory | undefined): boolean {
+    const context = this.sessionContext;
+    return !!history && !!context?.accountId && history.version === 1 && history.clientId === context.clientId && history.generation === context.generation
+      && history.accountId === context.accountId && Number.isSafeInteger(history.expiresAt) && history.expiresAt >= 0 && history.expiresAt <= Date.now() + 86400000 && typeof history.nonce === 'string';
+  }
+  private refreshHistory(): void {
+    clearTimeout(this.historyTimer);
+    if (this.sessionPersistence === 'memory') return;
+    try {if (this.historyStorage) this.history = JSON.parse(this.historyStorage.getItem(this.historyKey()) ?? 'null') ?? undefined;}
+    catch { /* Keep the in-memory indication when browser storage is unavailable. */ }
+    const history = this.historyMatches(this.history) ? this.history : undefined;
+    this.expired.set(!this.connected() && !!history && history.expiresAt <= Date.now());
+    if (!this.connected() && history && history.expiresAt > Date.now()) this.historyTimer = setTimeout(() => this.refreshHistory(), history.expiresAt - Date.now());
+  }
+  private rememberHistory(session: GoogleSession, expiresAt = session.expiresAt): void {
+    if (this.sessionPersistence === 'memory') return;
+    this.history = {version: 1, clientId: session.clientId, generation: session.generation, accountId: session.account.id, expiresAt, nonce: session.nonce};
+    try {this.historyStorage?.setItem(this.historyKey(), JSON.stringify(this.history));}
+    catch { /* Expiry is a local UI hint, not a saved credential. */ }
+    this.refreshHistory();
   }
 
   prepare(): Promise<void> {
@@ -136,7 +167,7 @@ export class GoogleAuth implements OnDestroy {
   authorize(clientId: string): Promise<GoogleAccount> {
     if (!this.oauth || this.authorizing()) return Promise.reject(new Error('請等待 Google 授權元件載入完成。'));
     if (this.sessionContext && clientId !== this.sessionContext.clientId) return Promise.reject(new Error('Client ID 已變更，請使用目前設定重新連線。'));
-    this.disconnect();
+    this.disconnect(undefined, 'renew');
     const epoch = this.epoch;
     const nonce = this.bridge.currentNonce();
     this.authorizationNonce = nonce;
@@ -210,7 +241,7 @@ export class GoogleAuth implements OnDestroy {
     if (!['https://www.googleapis.com', 'https://openidconnect.googleapis.com'].includes(target.origin) || target.username || target.password) throw new Error('Google API 位址不合法。');
     this.bridge.verify(false);
     if (!this.token) throw new GoogleHttpError(401);
-    if (Date.now() >= this.expiresAt) { this.disconnect('Google 授權已到期，請重新連線。'); throw new GoogleHttpError(401); }
+    if (Date.now() >= this.expiresAt) { this.disconnect('Google 授權已到期，請重新連線。', 'expired'); throw new GoogleHttpError(401); }
     const epoch = this.epoch;
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -223,7 +254,7 @@ export class GoogleAuth implements OnDestroy {
       const response = await fetch(url, {...options, method: options.method ?? 'GET', headers: {...Object.fromEntries(headers), Authorization: 'Bearer ' + this.token}, signal: controller.signal, credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer'});
       if (!response.ok) {
         const error = await readGoogleHttpError(response, this.resourceName);
-        if (response.status === 401 && epoch === this.epoch && !controller.signal.aborted) this.disconnect('Google 授權已到期，請重新連線。');
+        if (response.status === 401 && epoch === this.epoch && !controller.signal.aborted) this.disconnect('Google 授權已到期，請重新連線。', 'expired');
         throw error;
       }
       if (epoch !== this.epoch || controller.signal.aborted) throw new Error('Google 連線已變更，已取消這次操作。');
@@ -237,7 +268,13 @@ export class GoogleAuth implements OnDestroy {
     } finally { clearTimeout(timer); this.controllers.delete(controller); options.signal?.removeEventListener('abort', cancel); }
   }
 
-  disconnect(message = '尚未連線 Google'): void {
+  disconnect(message = '尚未連線 Google', reason: 'manual' | 'expired' | 'renew' = 'manual'): void {
+    this.refreshHistory();
+    if (reason === 'expired' && this.session && (!this.history || this.history.nonce === this.session.nonce)) this.rememberHistory(this.session, 0);
+    else if (reason === 'manual' && this.historyMatches(this.history)) {
+      this.history = undefined;
+      try {this.historyStorage?.removeItem(this.historyKey());} catch { /* Keep manual disconnection in this page. */ }
+    }
     this.bridge.invalidate(message, this.session?.nonce || this.authorizationNonce || undefined);
     this.clearLocal(message);
   }
@@ -251,6 +288,7 @@ export class GoogleAuth implements OnDestroy {
     this.controllers.clear();
     this.pendingReject?.(new Error('Google 連線已取消。')); this.pendingReject = undefined;
     this.connected.set(false); this.authorizing.set(false); this.account.set(null); this.message.set(message);
+    this.refreshHistory();
   }
   ngOnDestroy(): void {
     this.bridge.close();
@@ -258,5 +296,6 @@ export class GoogleAuth implements OnDestroy {
     this.document.defaultView?.removeEventListener?.('storage', this.storageChanged);
     this.document.removeEventListener?.('visibilitychange', this.wake);
     this.clearLocal('Google 連線已關閉');
+    clearTimeout(this.historyTimer);
   }
 }

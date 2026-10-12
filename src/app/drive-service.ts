@@ -5,13 +5,14 @@ import { CalendarSyncCoordinator } from './calendar-sync';
 import { DriveApi } from './drive-api';
 import { DriveAuth } from './drive-auth';
 import type { GoogleAccount } from './google-auth';
-import { canonical, DriveCollectionDeleted, DriveDeletePlan, DriveDocument, DriveFile, DriveRuntime, versionGraph } from './drive-data';
+import { backupHash, canonical, DriveCollectionDeleted, DriveDeletePlan, DriveDocument, DriveFile, DriveRuntime, syncHash, versionGraph } from './drive-data';
 import { DriveEngine } from './drive-engine';
 import { fileScope } from './drive-catalog';
 import { IndexedDriveRepository } from './drive-repository';
 import { withStorageLock } from './storage-coordinator';
 
 const SYNC_PREFIX = 'iih-orbit-drive-sync-v1:';
+export type DriveSyncResult = 'complete' | 'pending' | 'conflict' | 'failed' | 'skipped';
 export interface DriveRemovalReview extends DriveDeletePlan {
   context: string; connection: number; settings: string; generation: string;
   currentCollection: boolean; pendingVersion: string;
@@ -41,6 +42,8 @@ export class DriveService implements OnDestroy {
   private readonly missingCollection = signal('');
   readonly error = signal('');
   readonly message = signal('');
+  readonly lastSyncAt = signal('');
+  readonly syncing = signal(false);
   readonly active = signal(false);
   readonly online = signal(typeof navigator === 'undefined' || navigator.onLine !== false);
   private readonly localBusy = signal(false);
@@ -96,12 +99,13 @@ export class DriveService implements OnDestroy {
           const reset = generation !== this.generation; this.generation = generation;
           this.context = context; this.epoch++; this.auth.cancelRequests(); this.runtimeReady.set(false); this.runtime.set({}); this.files.set([]); this.removals.set([]); this.missingCollection.set(''); this.error.set('');
           this.catalogState.set('idle'); this.catalogConnection.set(''); this.catalogError.set(''); this.cleanupError.set(''); this.catalogCheckedAt.set('');
+          this.lastSyncAt.set('');
           this.coordinator.activate(context);
           void (reset ? this.repository.clear() : Promise.resolve()).then(() => this.loadRuntime()).catch(error => this.error.set(this.describe(error)));
         }
       });
     });
-    effect(() => { this.store.revision(); this.auth.connected(); untracked(() => this.schedule()); });
+    effect(() => { this.store.revision(); this.auth.connected(); untracked(() => {this.lastSyncAt.set(''); this.schedule();}); });
     this.timer = setInterval(() => { void this.loadRuntime(); this.poll(); }, 30000);
     window.addEventListener('online', this.wake); window.addEventListener('offline', this.wake); window.addEventListener('focus', this.wake);
     window.addEventListener('storage', this.storage); window.addEventListener('pagehide', this.hide); window.addEventListener('pageshow', this.show);
@@ -262,17 +266,39 @@ export class DriveService implements OnDestroy {
     }
     return completed;
   }
-  async sync(manual = true): Promise<void> {
-    if (!this.autoReady() || this.busy() || (!manual && this.runtime().conflict)) return;
+  async sync(manual = true): Promise<DriveSyncResult> {
+    if (!this.autoReady() || this.busy() || this.syncing() || (!manual && this.runtime().conflict)) return 'skipped';
     const settings = this.store.drive(), link = this.runtime().link;
-    if (!link) return;
-    if (link.kind !== settings.kind || JSON.stringify([...link.workspaceIds].sort()) !== JSON.stringify([...settings.workspaceIds].sort())) { this.error.set('要儲存的工作空間已變更，請在「儲存設定與更多操作」重新設定保存範圍。'); return; }
-    this.lastPoll = Date.now();
-    const previousVersion = this.runtime().link?.baseVersionId;
-    if (await this.run(engine => engine.synchronize(settings.mode as 'backup' | 'sync'), manual ? '已完成本次雲端更新。' : '')) {
-      if (previousVersion !== this.runtime().link?.baseVersionId) await this.refreshCatalog(link.datasetId);
-      else if (this.runtime().conflict || manual) await this.list();
-    }
+    if (!link) return 'skipped';
+    if (link.kind !== settings.kind || JSON.stringify([...link.workspaceIds].sort()) !== JSON.stringify([...settings.workspaceIds].sort())) { this.error.set('要儲存的工作空間已變更，請在「儲存設定與更多操作」重新設定保存範圍。'); return 'failed'; }
+    this.syncing.set(true); if (manual) this.message.set('');
+    try {
+      clearTimeout(this.debounce);
+      const context = this.context, generation = this.store.generation();
+      this.lastPoll = Date.now();
+      const previousVersion = this.runtime().link?.baseVersionId;
+      if (await this.run(engine => engine.synchronize(settings.mode as 'backup' | 'sync'))) {
+        if (previousVersion !== this.runtime().link?.baseVersionId) await this.refreshCatalog(link.datasetId);
+        else if (this.runtime().conflict || manual) await this.list();
+        if (context !== this.context || generation !== this.store.generation() || this.error()) return 'failed';
+        if (this.runtime().conflict?.length) {if (manual) this.message.set('雲端仍有不同內容待選擇，請先處理。'); return 'conflict';}
+        try {
+          const saved = this.runtime().link;
+          if (!saved) return 'failed';
+          const snapshot = await this.store.driveSnapshot(saved.kind, saved.workspaceIds);
+          const hash = settings.mode === 'backup' ? await backupHash(snapshot.backup) : await syncHash(snapshot.backup);
+          if (context !== this.context || generation !== this.store.generation()) return 'failed';
+          if (this.runtime().pending || hash !== (settings.mode === 'backup' ? saved.baseBackupHash : saved.baseHash) || snapshot.revision !== this.store.revision() || this.store.hasUnsavedChanges()) {
+            if (manual) this.message.set('仍有新的修改等待同步，請再次同步後再斷網。');
+            this.schedule(); return 'pending';
+          }
+          this.lastSyncAt.set(new Date().toISOString());
+          if (manual) this.message.set('已完成本次雲端更新。');
+          return 'complete';
+        } catch (error) {if (context === this.context && generation === this.store.generation()) this.error.set(this.describe(error)); return 'failed';}
+      }
+      return 'failed';
+    } finally {this.syncing.set(false);}
   }
   async resolve(heads: string[], choice?: DriveFile, revision?: string): Promise<void> {
     if (await this.run(engine => engine.resolve(heads, choice, revision, this.store.drive().mode === 'backup' ? 'backup' : 'sync'), '已使用選定內容並保留可安全整併的修改，之前的備份仍保留。')) await this.refreshCatalog(this.runtime().link?.datasetId);

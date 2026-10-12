@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, linkedSignal, output } from '@angular/core';
+import { Component, computed, effect, inject, input, linkedSignal, output, untracked } from '@angular/core';
 import { Icon } from './icon';
 import { DUE_DAY_PRESETS } from './reminder-data';
 import { itemsForReminderTab, startWindow } from './reminder-items';
@@ -13,6 +13,7 @@ interface ReminderListFilters {source: ReminderSource; excludedCalendars: string
 export class ReminderCenter {
   readonly reminders = inject(Reminders);
   readonly initialTab = input<ReminderTab>('today');
+  readonly visible = input(true);
   readonly activeTab = linkedSignal(() => this.initialTab());
   readonly dueDays = linkedSignal(() => this.reminders.store.reminders().dueSoonDays);
   readonly presets = DUE_DAY_PRESETS;
@@ -62,6 +63,14 @@ export class ReminderCenter {
       : tab === 'overdue' ? '待完成且已超過截止時間，依截止時間排序。'
       : startWindow(this.reminders.now(), tab).label;
   });
+
+  constructor() {
+    effect(() => {
+      if (!this.visible() || !this.reminders.active()) return;
+      this.reminders.summaryNotices();
+      untracked(() => this.reminders.markViewed());
+    });
+  }
 
   private entries(tab: ReminderTab): ReminderItem[] {
     return itemsForReminderTab(this.reminders.items(), tab, this.reminders.now(), this.dueDays(), this.reminders.store.currentWorkspace());

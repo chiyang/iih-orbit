@@ -43,7 +43,7 @@
 1. **先完成本機備份與同步，再接 Google。** 即使沒有 Google 帳號、沒有網路，任務管理仍可正常使用。
 2. **Google Calendar 活動獨立保存，疊加到月曆與週視圖。** 使用「外部月曆」來源分組，不把每個活動轉成一般任務或任務分類。
 3. **Google Drive 使用可見的 `IIH Orbit` 資料夾保存版本。** 使用者能在 Drive 查看備份；程式只管理自己建立或使用者授權的檔案。
-4. **設定頁保存 OAuth Client ID，不保存 Client Secret。** 初期 Calendar／Drive 的未過期授權憑證暫存至分頁 sessionStorage，重新整理驗證後恢復，同來源分頁可接續。1.7.0 的 Gmail 依後續需求改用目前瀏覽器 localStorage 接續未過期授權；所有服務均不延長原期限，憑證不進匯出檔或 Drive。目前規則見 [Google 連線設定](google-setup.md)。
+4. **設定頁保存 OAuth Client ID，不保存 Client Secret。** 初期 Calendar／Drive 的未過期授權憑證暫存至分頁 sessionStorage，重新整理驗證後恢復，同來源分頁可接續。1.7.0 依後續需求，Gmail、Calendar 讀取／移轉及 Drive 現在都改用目前瀏覽器 localStorage，支援關閉重開與斷網重連；有效的舊分頁憑證驗證後遷移。所有服務均不延長原期限，憑證不進匯出檔或 Drive。目前規則見 [Google 連線設定](google-setup.md)。
 5. **雲端同時修改時保留來源並自動整併安全修改。** 任務衝突保留為右側欄待選版本，不新增重複任務；設定或無法安全判斷的資料仍提供雲端內容選擇與複製工作空間。
 
 Google 的瀏覽器授權流程使用 Client ID；Client Secret 是伺服器端流程才需要的資料。Client ID 可以隨備份攜帶，但匯入後仍須重新授權。[Google Client ID 說明](https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid)
@@ -181,9 +181,9 @@ Client ID 是瀏覽器授權流程使用的公開識別，不必當成密碼隱�
 
 本專案儲存庫為 `https://github.com/chiyang/iih-orbit.git`，GitHub Pages 部署網址為 `https://chiyang.github.io/iih-orbit/`，授權來源填 `https://chiyang.github.io`，不含 `/iih-orbit/`。同一帳號網域底下的其他專案也屬於同一 origin；若要隔離這個工具，可考慮專用的自訂網域。這是依 origin 不包含路徑的規則做出的部署建議。[Google origin 規則](https://developers.google.com/identity/protocols/oauth2/javascript-implicit-flow#javascript-origin-validation-rules)
 
-Origin 限制不會把 Access Token 綁定到該網站；Google API 的 Access Token 仍是 Bearer Token，取得它的人可能在有效期內使用。使用者選擇在 sessionStorage 暫存未過期憑證以延續重新整理後的操作；這個儲存仍可被同源 JavaScript 讀取。程式按需取得最小權限、不將憑證寫入長期資料或備份，並避免把活動描述當成可執行 HTML。[Google 憑證保護說明](https://developers.google.com/identity/protocols/oauth2/resources/best-practices)
+Origin 限制不會把 Access Token 綁定到該網站；Google API 的 Access Token 仍是 Bearer Token，取得它的人可能在有效期內使用。使用者選擇在 localStorage 保存未過期憑證，支援關閉網頁後重開與斷網重連；這個儲存仍可被同源 JavaScript 讀取。程式按需取得最小權限、不將憑證寫入工作資料或備份，並避免把活動描述當成可執行 HTML。[Google 憑證保護說明](https://developers.google.com/identity/protocols/oauth2/resources/best-practices)
 
-分頁連線以 Client ID、帳號、資料世代及公開失效識別檢查；同來源新分頁透過 BroadcastChannel 請求有效憑證並保存至自己的 sessionStorage。解除連線或重新授權更新不含憑證的公開失效識別，避免未收到通知、延遲回覆或恢復舊分頁時復活舊授權。重置及全部匯入改變世代，舊憑證拒絕恢復。sessionStorage 可以跨重新整理保留，但正常新分頁不直接共享；瀏覽器還原分頁時也必須重新驗證期限。[sessionStorage](https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage)、[BroadcastChannel](https://developer.mozilla.org/en-US/docs/Web/API/Broadcast_Channel_API)
+分頁連線以 Client ID、帳號、資料世代及公開失效識別檢查；同來源新分頁驗證 localStorage 的有效憑證，也可透過 BroadcastChannel 接續其他分頁。解除連線或重新授權更新不含憑證的公開失效識別，避免未收到通知、延遲回覆或恢復舊分頁時復活舊授權；舊分頁不能清掉新的共用憑證。重置及全部匯入改變世代，舊憑證拒絕恢復。有效的舊 sessionStorage 憑證驗證後遷移，localStorage 保存不延長 Google 的原期限。[localStorage](https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage)、[BroadcastChannel](https://developer.mozilla.org/en-US/docs/Web/API/Broadcast_Channel_API)
 
 若未來改用需伺服器交換授權碼與管理更新憑證的 Code Model，須另規劃伺服器端元件；GitHub Pages 的靜態前端不能替代該元件。[Google Code Model](https://developers.google.com/identity/oauth2/web/guides/use-code-model)
 
@@ -215,7 +215,7 @@ Origin 限制不會把 Access Token 綁定到該網站；Google API 的 Access T
 - 「重置整個 Orbit」清除 Orbit 舊版升級來源、備份及偏好鍵，保留一份新世代的空白狀態記錄，避免重載範例；不使用 `localStorage.clear()` 影響同一來源其他程式。月曆快取另行清空；不含工作資料的寫入協調鎖保持可用，未來雲端佇列加入時也需清理。
 - 重置前提供下載備份，要求明確確認，暫停同步並通知其他分頁。重置後不重新載入範例任務或偷偷還原舊版鍵。
 - 本機重置不刪除 Google Calendar 原始活動或 Drive 備份。重置後建立新的資料世代，雲端資料需手動選擇恢復或接續，避免自動同步立刻把資料帶回。
-- 「解除本機連線」停止同來源分頁的同步及清除記憶體／sessionStorage 憑證；另提供前往 Google 管理應用存取權的連結，清楚區分本機停用與 Google 端撤銷授權。
+- 「解除本機連線」停止同來源分頁的同步及清除記憶體／localStorage 的有效憑證與舊版分頁副本；另提供前往 Google 管理應用存取權的連結，清楚區分本機停用與 Google 端撤銷授權。
 
 ## 9. 實作順序與完成條件
 

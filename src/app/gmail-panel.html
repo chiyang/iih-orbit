@@ -22,6 +22,7 @@
   }
   @if (gmail.error()) {<p class="mail-error" role="alert">{{ gmail.error() }}<button type="button" [disabled]="gmail.busy() || !gmail.auth.connected() || !gmail.online()" (click)="gmail.load(true)">重試</button></p>}
   @if (gmail.warning() || gmail.auth.sessionWarning()) {<p class="mail-help" role="status">{{ gmail.warning() || gmail.auth.sessionWarning() }}</p>}
+  @if (gmail.arrivalWarning()) {<p class="mail-help" role="status">{{ gmail.arrivalWarning() }}</p>}
   @if (mailTasks.notice()) {<div class="mail-inline-notice" role="status"><span>{{ mailTasks.notice() }}</span><div class="mail-actions">@if (mailTasks.undoContext()) {<button type="button" [disabled]="mailTasks.busy()" (click)="mailTasks.undo()">撤銷建立</button>}<button type="button" (click)="mailTasks.dismiss()">關閉</button></div></div>}
 </div>
 <div class="mail-list" [attr.aria-busy]="gmail.busy()" aria-label="Gmail 郵件列表">
@@ -45,7 +46,7 @@
   <article class="mail-card" [class.unread]="unread" [attr.draggable]="!mailTasks.busy()" (dragstart)="mailTasks.start($event, mail)" (dragend)="mailTasks.end()">
     <div class="mail-sender"><strong>{{ mail.senderName || '寄件人' }}</strong><div class="mail-card-meta"><time>{{ date(mail) }}</time><span class="mail-read-marker" [class.is-unread]="unread" role="img" [attr.aria-label]="unread ? '有未讀郵件' : '已讀郵件'" [attr.title]="unread ? '有未讀郵件' : '已讀郵件'"></span></div></div>
     <p class="sender-email">{{ mail.senderEmail || mail.from || '未提供寄件人地址' }}</p>
-    <button type="button" class="mail-preview-button" (click)="previewMail.emit(mail)" [attr.aria-label]="'預覽郵件：' + mail.subject"><span class="mail-subject">{{ mail.subject }}</span><span class="mail-snippet">{{ mail.snippet || '（沒有預覽文字）' }}</span></button>
+    <button type="button" class="mail-preview-button" (click)="previewMail.emit(mail)" [attr.aria-label]="'預覽郵件：' + mail.subject"><span class="mail-subject">{{ mail.subject }}@if (gmail.newThreadIds().has(mail.threadId)) {<small class="new-mail-tag">新郵件</small>}</span><span class="mail-snippet">{{ mail.snippet || '（沒有預覽文字）' }}</span></button>
     <div class="mail-card-details"><div class="mail-tags">@for (label of labels(mail); track label.id) {<span>{{ labelName(label) }}</span>}</div>@if (count > 1) {<button type="button" class="mail-thread-count" (click)="toggleThread(mail)" [attr.aria-expanded]="expanded().has(mail.threadId)" [attr.aria-controls]="'mail-replies-' + mail.threadId" [attr.aria-label]="(expanded().has(mail.threadId) ? '收合' : '展開') + '討論串，共 ' + count + ' 封郵件'"><app-icon name="mail" />{{ count }} 封<app-icon name="down" [class.expanded]="expanded().has(mail.threadId)" /></button>}</div>
     <div class="mail-card-actions"><a [href]="link(mail)" target="_blank" rel="noopener noreferrer" draggable="false">在 Gmail 開啟 ↗</a><button [disabled]="mailTasks.busy()" (click)="createTask.emit(mail)"><app-icon name="plus" />建立任務</button></div>
   </article>

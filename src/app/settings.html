@@ -14,6 +14,14 @@
     <fieldset class="accent-swatches"><legend>主題色</legend>@for (accent of accents; track accent.color) {<button type="button" [style.--swatch]="accent.color" [class.selected]="preferences.accent() === accent.color" [attr.aria-label]="'主題色：' + accent.label" [attr.aria-pressed]="preferences.accent() === accent.color" (click)="setAccent(accent.color)">@if (preferences.accent() === accent.color) {<app-icon name="check" />}</button>}</fieldset>
     <div class="custom-color"><label>自訂主題色<input type="color" aria-label="選擇主題色" [value]="preferences.accent()" (change)="setAccent($any($event.target).value)"></label><label>HEX 色碼<input type="text" aria-label="主題色 HEX 色碼" maxlength="7" spellcheck="false" [value]="preferences.accent()" (change)="setAccent($any($event.target).value)" placeholder="#31584b"></label></div>
     <p class="setting-note">文字與按鈕會依主題調整對比。分類與看板狀態可在各自的管理視窗選擇顏色，不受主題色影響。</p>
+    <h3>週視圖時間範圍</h3>
+    <p>預設顯示 08:00–19:00。可依這個裝置的使用習慣調整；時段外的安排仍可在週視圖展開查看。</p>
+    <label class="setting-field">開始時間<select aria-label="週視圖開始時間" [ngModel]="weekRangeDraft().startHour" (ngModelChange)="changeWeekRange('startHour', $event)">@for (hour of weekStartHours; track hour) {<option [value]="hour">{{ hourLabel(hour) }}</option>}</select></label>
+    <label class="setting-field">結束時間<select aria-label="週視圖結束時間" [ngModel]="weekRangeDraft().endHour" (ngModelChange)="changeWeekRange('endHour', $event)">@for (hour of weekEndHours; track hour) {<option [value]="hour">{{ hourLabel(hour) }}</option>}</select></label>
+    <button type="button" class="setting-button" (click)="saveWeekRange()">儲存時間範圍</button>
+    <p class="setting-note">只保存在目前瀏覽器，不包含在備份或遠端同步中。</p>
+    @if (weekRangeFeedback()) {<p role="status">{{ weekRangeFeedback() }}</p>}
+    @if (preferences.weekRangeWarning()) {<p class="form-error" role="alert">{{ preferences.weekRangeWarning() }}</p>}
   </section>
     <section class="settings-section settings-panel" role="tabpanel" id="settings-panel-reminders" aria-labelledby="settings-tab-reminders" [hidden]="activeTab() !== 'reminders'" tabindex="0">
       <h3 id="reminders-title">截止日期提醒</h3><p>在工作區篩選已逾期或即將到期的任務。只計入待完成任務，已完成與封存不列入提醒。</p>

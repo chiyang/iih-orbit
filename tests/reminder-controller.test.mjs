@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { COLUMNS } from '../src/app/models.ts';
 import { REMINDER_DELIVERY_KEY } from '../src/app/reminder-delivery.ts';
+import { REMINDER_SEEN_KEY } from '../src/app/reminder-attention.ts';
 import { externalEvent } from '../src/app/google-data.ts';
 
 const require = createRequire(import.meta.url);
@@ -46,6 +47,60 @@ function controller() {
   return {store, reminders, center, popups, google, anchors, flush, close: () => { child.destroy(); reminders.ngOnDestroy(); injector.destroy(); }};
 }
 const settle = async () => { for (let tick = 0; tick < 4; tick++) await new Promise(resolve => setImmediate(resolve)); };
+
+test('提醒徽章只計算未查看項目，開啟側欄後收起，隱藏及背景時不誤標已查看', async () => {
+  const memory = storage(), f = controller(); let reopened;
+  try {
+    f.center.visible = signal(false); f.flush(); await settle();
+    assert.equal(f.reminders.summaryCount(), 1); assert.equal(f.reminders.unseenCount(), 1); assert.equal(memory.values.has(REMINDER_SEEN_KEY), false);
+    f.center.visible.set(true); f.reminders.active.set(false); f.flush(); await settle(); assert.equal(f.reminders.unseenCount(), 1);
+    f.reminders.active.set(true); f.flush(); await settle();
+    assert.equal(f.reminders.unseenCount(), 0); assert.equal(f.reminders.summaryCount(), 1); assert.equal(f.center.visibleItems().length, 1);
+    const saved = JSON.parse(memory.values.get(REMINDER_SEEN_KEY)); assert.equal(saved.keys.length, 1); assert.equal(JSON.stringify(saved).includes(task.title), false);
+    reopened = controller(); reopened.center.visible = signal(false); reopened.flush(); await settle();
+    assert.equal(reopened.reminders.unseenCount(), 0); assert.equal(reopened.reminders.summaryCount(), 1);
+    const backup = await f.store.backupForExport('full'); assert.equal(JSON.stringify(backup).includes('reminder-seen'), false);
+  } finally {reopened?.close(); f.close();}
+});
+
+test('查看後改標題不再提醒，改期或變成逾期時提示一次，側欄收起仍能提示新安排', async () => {
+  storage(); const f = controller();
+  try {
+    f.flush(); await settle(); assert.equal(f.reminders.unseenCount(), 0);
+    f.center.visible = signal(false);
+    await f.store.saveTask({...task, title: '新的標題'}); f.flush(); assert.equal(f.reminders.unseenCount(), 0);
+    await f.store.saveTask({...task, title: '新的標題', startTime: '11:15'}); f.flush(); assert.equal(f.reminders.unseenCount(), 1);
+    f.reminders.markViewed(); await settle(); assert.equal(f.reminders.unseenCount(), 0);
+    f.reminders.now.set(new Date(2026, 9, 9, 12, 30)); f.flush(); assert.equal(f.reminders.unseenCount(), 1);
+    f.reminders.markViewed(); await settle(); f.reminders.now.set(new Date(2026, 9, 9, 13)); f.flush(); assert.equal(f.reminders.unseenCount(), 0);
+    await f.store.saveTask({...task, id: 'new', startTime: '14:00', dueTime: '15:00'}); f.flush(); assert.equal(f.reminders.unseenCount(), 1);
+    f.center.visible.set(true); f.flush(); await settle(); assert.equal(f.reminders.unseenCount(), 0); assert.equal(f.reminders.summaryCount(), 2);
+  } finally {f.close();}
+});
+
+test('同瀏覽器分頁接續查看紀錄，新工作空間及重置世代不借用舊提醒狀態', async () => {
+  storage(); const first = controller(), second = controller();
+  try {
+    first.center.visible = signal(false); second.center.visible = signal(false);
+    first.flush(); second.flush(); await settle(); assert.equal(second.reminders.unseenCount(), 1);
+    first.reminders.markViewed(); await settle(); second.reminders.seenChanged({key: REMINDER_SEEN_KEY}); assert.equal(second.reminders.unseenCount(), 0);
+    await second.store.saveWorkspace('', '另一個工作空間'); await second.store.saveTask(task); second.flush(); assert.equal(second.reminders.unseenCount(), 1);
+    second.reminders.markViewed(); await settle(); first.reminders.seenChanged({key: REMINDER_SEEN_KEY}); assert.equal(first.reminders.unseenCount(), 0);
+    first.store.refreshFromStorage(); assert.equal((await first.store.resetData(false, first.store.revision())).ok, true);
+    await first.store.saveTask(task); first.flush(); assert.equal(first.reminders.unseenCount(), 1);
+  } finally {second.close(); first.close();}
+});
+
+test('查看紀錄寫入失敗仍收起當前徽章並提示，提醒清單保留', async () => {
+  const memory = storage(), f = controller();
+  try {
+    f.center.visible = signal(false); f.reminders.blocked.set(true); f.flush(); await settle();
+    memory.fail(); f.center.visible.set(true); f.flush(); await settle();
+    assert.equal(f.reminders.unseenCount(), 0); assert.equal(f.reminders.summaryCount(), 1); assert.equal(f.center.visibleItems().length, 1);
+    assert.match(f.reminders.attentionWarning(), /無法保存查看紀錄/); assert.equal(memory.values.has(REMINDER_SEEN_KEY), false);
+    f.reminders.seenChanged({key: REMINDER_SEEN_KEY}); assert.equal(f.reminders.unseenCount(), 0);
+  } finally {f.close();}
+});
 
 test('右下角提示只在前景且未編輯時顯示，點選可開啟最新任務且關閉不再重複', async () => {
   const {values} = storage(); const fixture = controller();

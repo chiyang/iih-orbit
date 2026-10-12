@@ -31,3 +31,4 @@ summary {cursor: pointer; overflow-wrap: anywhere; line-height: 1.6;} input {wid
 .mail-thread-replies > p {padding: var(--sp8) 0; margin: 0;}
 .mail-thread-count app-icon:last-child {width: 12px; height: 12px;}
 .mail-thread-count app-icon.expanded {transform: rotate(180deg);}
+.new-mail-tag {display: inline-block; margin-left: var(--sp6); padding: 1px var(--sp4); border-radius: 4px; color: var(--danger-text); background: var(--warning-bg); font-size: var(--font-8); font-weight: 600;}

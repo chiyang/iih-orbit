@@ -163,3 +163,15 @@ export function layoutOverlaps(events: readonly TimedEvent[]): TimedEvent[] {
   finishGroup();
   return sorted;
 }
+
+/** Keep original times for labels and edits; clip only the visible part of the clock. */
+export function timedEventsInRange(events: readonly TimedEvent[], start: number, end: number): TimedEvent[] {
+  const visible = events.flatMap(event => {
+    const actualEnd = event.endMinute > event.startMinute ? event.endMinute : event.displayEnd;
+    const inside = event.milestone ? event.startMinute >= start && event.startMinute < end : event.startMinute < end && actualEnd > start;
+    if (!inside) return [];
+    const displayStart = Math.max(start, Math.min(event.displayStart, end - 30));
+    return [{...event, displayStart, displayEnd: Math.min(end, Math.max(event.displayEnd, displayStart + 30))}];
+  });
+  return layoutOverlaps(visible);
+}

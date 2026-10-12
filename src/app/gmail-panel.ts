@@ -2,6 +2,7 @@ import { NgTemplateOutlet } from '@angular/common';
 import { Component, computed, effect, inject, input, linkedSignal, output, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { GmailService } from './gmail-service';
+import { GmailNotifications } from './gmail-notifications';
 import { MailTasks } from './mail-tasks';
 import { gmailMessageLink, mailLabelName, MailLabel, MailPreview } from './gmail-data';
 import { Icon } from './icon';
@@ -11,8 +12,11 @@ interface ThreadView {messages: MailPreview[]; busy: boolean; error: string}
 @Component({selector: 'app-gmail-panel', imports: [FormsModule, Icon, NgTemplateOutlet], templateUrl: './gmail-panel.html', styleUrl: './gmail-panel.css'})
 export class GmailPanel {
   readonly gmail = inject(GmailService);
+  readonly notifications = inject(GmailNotifications);
   readonly mailTasks = inject(MailTasks);
   readonly active = input(true);
+  readonly visible = input(true);
+  readonly visit = input(0);
   readonly createTask = output<MailPreview>();
   readonly previewMail = output<MailPreview>();
   readonly configure = output<void>();
@@ -28,9 +32,28 @@ export class GmailPanel {
   readonly refreshing = signal(false);
   private readonly context = computed(() => JSON.stringify([this.gmail.previewIdentity(), [...this.gmail.selected()].sort(), this.gmail.query()]));
   private previousContext = '';
+  private viewedVisit = '';
+  private refreshedVisit = '';
+  private readonly foreground = signal(this.isForeground());
+  private readonly visibilityChanged = () => this.foreground.set(this.isForeground());
   private destroyed = false;
   constructor() {
     effect(() => { const active = this.active(); untracked(() => this.gmail.active.set(active)); });
+    effect(() => {
+      const active = this.active(), visible = this.visible(), foreground = this.foreground(), visit = this.visit();
+      const identity = this.gmail.previewIdentity(), context = JSON.stringify([this.gmail.store.generation(), this.gmail.clientId(), this.gmail.preferences().accountId, visit]);
+      const loaded = !this.gmail.busy() && !this.gmail.error() && !this.gmail.showingPrevious() && (this.gmail.updatedAt() > 0 || this.gmail.messages().length > 0);
+      untracked(() => {
+        if (!active) {this.viewedVisit = ''; this.refreshedVisit = ''; return;}
+        if (!visible || !foreground) return;
+        if (visit > 0 && this.refreshedVisit !== context) {this.refreshedVisit = context; void this.gmail.load(true);}
+        if (!loaded || this.gmail.busy() || this.gmail.error() || this.viewedVisit === context) return;
+        // A visit acknowledges one batch. Later arrivals remain new while this panel stays open.
+        if (this.notifications.acknowledgeCurrent(identity)) this.viewedVisit = context;
+      });
+    });
+    document.addEventListener('visibilitychange', this.visibilityChanged);
+    window.addEventListener('focus', this.visibilityChanged); window.addEventListener('blur', this.visibilityChanged);
     effect(() => {
       const context = this.context(), ids = new Set(this.gmail.threads().filter(thread => thread.count > 1).map(thread => thread.mail.threadId));
       untracked(() => {
@@ -40,6 +63,7 @@ export class GmailPanel {
       });
     });
   }
+  private isForeground(): boolean {return document.visibilityState === 'visible' && (document.hasFocus?.() ?? true);}
   toggleLabel(id: string): void {
     if (!this.gmail.labelIndex().has(id)) return;
     this.labelDraft.update(ids => ids.includes(id) ? ids.filter(label => label !== id) : [...ids, id]);
@@ -87,5 +111,9 @@ export class GmailPanel {
     const details = (event.currentTarget as HTMLElement).closest('details');
     if (event.key === 'Escape' && details?.open) { event.preventDefault(); event.stopPropagation(); details.open = false; details.querySelector('summary')?.focus(); }
   }
-  ngOnDestroy(): void { this.destroyed = true; this.gmail.active.set(false); this.gmail.expandedMessages.set([]); this.mailTasks.end(); }
+  ngOnDestroy(): void {
+    this.destroyed = true; this.gmail.active.set(false); this.gmail.expandedMessages.set([]); this.mailTasks.end();
+    document.removeEventListener('visibilitychange', this.visibilityChanged);
+    window.removeEventListener('focus', this.visibilityChanged); window.removeEventListener('blur', this.visibilityChanged);
+  }
 }

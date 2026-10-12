@@ -1,11 +1,27 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { layoutAllDayTasks, minuteLabel, timedEventsOnDay } from '../src/app/week-layout.ts';
+import { layoutAllDayTasks, minuteLabel, timedEventsInRange, timedEventsOnDay } from '../src/app/week-layout.ts';
 
 const days = ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10', '2026-10-11'];
 function task(overrides = {}) {
   return {id: 'task', title: '任務', description: '', categoryId: '', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: [], ...overrides};
 }
+
+test('限制週時段只裁切顯示，保留原始時間，邊界點事件及很短的時段外安排不誤入', () => {
+  const day = days[0], tasks = [
+    task({id: 'before', startDate: day, dueDate: day, startTime: '07:50', dueTime: '07:55'}),
+    task({id: 'before-point', dueDate: day, dueTime: '07:50'}),
+    task({id: 'first', startDate: day, startTime: '08:00'}),
+    task({id: 'cross', startDate: day, dueDate: day, startTime: '07:00', dueTime: '20:00'}),
+    task({id: 'last', dueDate: day, dueTime: '18:59'}),
+    task({id: 'after-point', dueDate: day, dueTime: '19:00'})
+  ];
+  const events = timedEventsOnDay(tasks, day), visible = timedEventsInRange(events, 480, 1140);
+  assert.deepEqual(new Set(visible.map(event => event.task.id)), new Set(['first', 'cross', 'last']));
+  const cross = visible.find(event => event.task.id === 'cross'); assert.equal(cross.displayStart, 480); assert.equal(cross.displayEnd, 1140); assert.equal(cross.startMinute, 420); assert.equal(cross.endMinute, 1200); assert.equal(cross.label, '07:00 – 20:00');
+  assert.equal(visible.find(event => event.task.id === 'last').displayEnd, 1140); assert.equal(visible.every(event => event.displayEnd - event.displayStart >= 30), true);
+  assert.deepEqual(timedEventsInRange(events, 0, 1440), events); assert.equal(events.find(event => event.task.id === 'cross').displayStart, 420);
+});
 
 test('全天任務跨日期排成橫條，超出週範圍會裁切，衝突分列', () => {
   const items = [

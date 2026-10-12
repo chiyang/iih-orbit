@@ -3,7 +3,8 @@ import { BoardStatus, Category, COLUMNS, Task } from './models';
 import { Icon } from './icon';
 import { ThemeColor } from './theme-color';
 import { dateKey, monthDates, parseDate, taskDateRange, validDate, weekDates } from './task-schedule';
-import { allDayRange, HOUR_HEIGHT, layoutAllDayTasks, minuteLabel, timedEventsOnDay } from './week-layout';
+import { allDayRange, HOUR_HEIGHT, layoutAllDayTasks, minuteLabel, timedEventsInRange, timedEventsOnDay } from './week-layout';
+import { DEFAULT_WEEK_RANGE } from './calendar-display';
 import { UiPreferences } from './ui-preferences';
 import { GoogleCalendarService } from './google-calendar';
 import { ExternalEvent, externalOccursOn } from './google-data';
@@ -61,11 +62,21 @@ export class Calendar {
   readonly now = signal(new Date());
   readonly today = computed(() => dateKey(this.now()));
   readonly weekScroller = viewChild<ElementRef<HTMLDivElement>>('weekScroller');
+  readonly fullDayHours = signal(false);
+  readonly weekRange = computed(() => this.fullDayHours() ? {startHour: 0, endHour: 24} : this.preferences.weekRange?.() ?? DEFAULT_WEEK_RANGE);
+  readonly startMinute = computed(() => this.weekRange().startHour * 60);
+  readonly endMinute = computed(() => this.weekRange().endHour * 60);
+  readonly rangeMinutes = computed(() => this.endMinute() - this.startMinute());
+  readonly weekRangeLabel = computed(() => `${minuteLabel(this.startMinute())}–${minuteLabel(this.endMinute())}`);
+  readonly weekEndLabel = computed(() => minuteLabel(this.endMinute()));
   readonly hourHeight = computed(() => HOUR_HEIGHT * this.preferences.scale());
-  readonly timelineHeight = computed(() => this.hourHeight() * 24);
-  readonly hours = Array.from({length: 24}, (_, hour) => ({hour, label: minuteLabel(hour * 60)}));
-  readonly slots = Array.from({length: 48}, (_, index) => ({minute: index * 30, label: minuteLabel(index * 30)}));
-  readonly nowPosition = computed(() => (this.now().getHours() * 60 + this.now().getMinutes()) / 1440 * 100);
+  readonly timelineHeight = computed(() => this.hourHeight() * this.rangeMinutes() / 60);
+  readonly hours = computed(() => Array.from({length: this.weekRange().endHour - this.weekRange().startHour}, (_, index) => ({hour: this.weekRange().startHour + index, label: minuteLabel(this.startMinute() + index * 60)})));
+  readonly slots = computed(() => Array.from({length: this.rangeMinutes() / 30}, (_, index) => ({minute: this.startMinute() + index * 30, label: minuteLabel(this.startMinute() + index * 30)})));
+  readonly firstFocusMinute = computed(() => Math.max(this.startMinute(), Math.min(540, this.endMinute() - 30)));
+  readonly nowMinute = computed(() => this.now().getHours() * 60 + this.now().getMinutes());
+  readonly nowInRange = computed(() => this.nowMinute() >= this.startMinute() && this.nowMinute() < this.endMinute());
+  readonly nowPosition = computed(() => this.minutePosition(this.nowMinute()));
   readonly externalEntries = computed(() => new Map(this.google.events().map(entry => [entry.task.id, entry])));
   readonly combinedTasks = computed(() => [
     ...(this.showOrbit() ? this.tasks() : []),
@@ -115,18 +126,23 @@ export class Calendar {
     const endYear = start.getFullYear() !== end.getFullYear() ? `${end.getFullYear()} 年 ` : '';
     return `${start.getFullYear()} 年 ${start.getMonth() + 1} 月 ${start.getDate()} 日 — ${endYear}${end.getMonth() + 1} 月 ${end.getDate()} 日`;
   });
-  readonly weekDays = computed(() => this.days().map((day, index) => ({...day, weekday: this.weekdays[index]})));
+  readonly weekDays = computed(() => this.days().map((day, index) => ({...day, weekday: this.weekdays[index], timedEvents: timedEventsInRange(day.timedEvents, this.startMinute(), this.endMinute())})));
+  readonly outsideWeekEvents = computed(() => this.days().flatMap((day, index) => {
+    const visible = new Set(this.weekDays()[index].timedEvents.map(event => event.task.id));
+    return day.timedEvents.filter(event => !visible.has(event.task.id)).map(event => ({day, event}));
+  }));
   readonly allDayEvents = computed(() => layoutAllDayTasks(this.combinedTasks(), this.days().map(day => day.key)));
   readonly allDayRows = computed(() => Math.max(1, ...this.allDayEvents().map(event => event.row + 1)));
   readonly periodIds = computed(() => new Set(this.mode() === 'week'
-    ? [...this.allDayEvents().map(event => event.task.id), ...this.weekDays().flatMap(day => day.timedEvents.map(event => event.task.id))]
+    ? [...this.allDayEvents().map(event => event.task.id), ...this.days().flatMap(day => day.timedEvents.map(event => event.task.id))]
     : this.days().flatMap(day => day.tasks.map(task => task.id))));
   readonly periodTaskCount = computed(() => [...this.periodIds()].filter(id => !this.externalEntries().has(id)).length);
   readonly periodExternalCount = computed(() => [...this.periodIds()].filter(id => this.externalEntries().has(id)).length);
   private previousScroller?: HTMLDivElement;
   private previousAnchor?: Date;
   private previousHourHeight = HOUR_HEIGHT;
-  private scrollHour = 7.75;
+  private previousStartHour = DEFAULT_WEEK_RANGE.startHour;
+  private scrollHour = DEFAULT_WEEK_RANGE.startHour;
   private drag?: {task: Task; context: TaskEditContext; origin: CalendarPosition; pointerOffset: number};
   private pointer?: {x: number; y: number; timeDay?: HTMLElement};
   private dragScrollTimer?: ReturnType<typeof setInterval>;
@@ -151,24 +167,26 @@ export class Calendar {
     afterRenderEffect(() => {
       const anchor = this.anchor();
       const hourHeight = this.hourHeight();
+      const startHour = this.weekRange().startHour;
       const scroller = this.weekScroller()?.nativeElement;
       if (scroller) {
         const samePeriod = this.previousScroller === scroller && this.previousAnchor === anchor;
-        const initialHour = this.previousScroller === scroller ? 7.75 : untracked(() => this.savedScrollHour());
-        scroller.scrollTop = (samePeriod ? this.scrollHour : initialHour) * hourHeight;
-        this.scrollHour = scroller.scrollTop / hourHeight;
+        const initialHour = this.previousScroller === scroller ? startHour : untracked(() => this.savedScrollHour());
+        scroller.scrollTop = Math.max(0, (samePeriod ? this.scrollHour : initialHour) - startHour) * hourHeight;
+        this.scrollHour = startHour + scroller.scrollTop / hourHeight;
         untracked(() => this.scrollHourChange.emit(this.scrollHour));
       }
       this.previousScroller = scroller;
       this.previousAnchor = anchor;
       this.previousHourHeight = hourHeight;
+      this.previousStartHour = startHour;
     });
   }
 
   rememberScroll(): void {
     const scroller = this.weekScroller()?.nativeElement;
-    if (scroller && this.hourHeight() === this.previousHourHeight) {
-      this.scrollHour = scroller.scrollTop / this.previousHourHeight;
+    if (scroller && this.hourHeight() === this.previousHourHeight && this.weekRange().startHour === this.previousStartHour) {
+      this.scrollHour = this.previousStartHour + scroller.scrollTop / this.previousHourHeight;
       this.scrollHourChange.emit(this.scrollHour);
     }
   }
@@ -196,7 +214,7 @@ export class Calendar {
     if (!offset) return;
     event.preventDefault();
     const nextDay = Math.min(6, Math.max(0, day + offset[0]));
-    const nextMinute = Math.min(1410, Math.max(0, minute + offset[1]));
+    const nextMinute = Math.min(this.endMinute() - 30, Math.max(this.startMinute(), minute + offset[1]));
     this.weekScroller()?.nativeElement.querySelector<HTMLButtonElement>(`[data-day="${nextDay}"][data-minute="${nextMinute}"]`)?.focus();
   }
 
@@ -245,6 +263,9 @@ export class Calendar {
   toggleAllDays(): void { const expand = !this.allDaysExpanded(); this.expandedDays.set(new Set()); this.expandAll.set(expand); }
   toggleOrbit(): void { this.endDrag(); this.orbitVisibilityChange.emit(!this.showOrbit()); }
   toggleGoogle(): void { if (!this.deadlineFiltered()) this.googleVisibilityChange.emit(!this.showGoogle()); }
+  toggleWeekHours(): void {this.endDrag(); this.fullDayHours.update(value => !value);}
+  minutePosition(minute: number): number {return (minute - this.startMinute()) / this.rangeMinutes() * 100;}
+  eventHeight(start: number, end: number): number {return (end - start) / this.rangeMinutes() * 100;}
 
   startDrag(event: DragEvent, task: Task, origin: CalendarPosition): void {
     if (this.isExternal(task) || this.savingMove() || !event.dataTransfer) { event.preventDefault(); return; }
@@ -266,7 +287,8 @@ export class Calendar {
     return [...container.querySelectorAll<HTMLElement>('.all-day-cell')].find(cell => { const rect = cell.getBoundingClientRect(); return x >= rect.left && x < rect.right; })?.dataset['date'] ?? '';
   }
   private timePosition(day: string, element: HTMLElement, y: number): CalendarPosition {
-    return {kind: 'time', day, minute: snapCalendarMinute((y - element.getBoundingClientRect().top) / this.hourHeight() * 60 - (this.drag?.pointerOffset ?? 0))};
+    const minute = snapCalendarMinute(this.startMinute() + (y - element.getBoundingClientRect().top) / this.hourHeight() * 60 - (this.drag?.pointerOffset ?? 0));
+    return {kind: 'time', day, minute: Math.max(this.startMinute(), Math.min(this.endMinute() - 15, minute))};
   }
   dragOver(event: DragEvent, position: CalendarPosition): void {
     if (this.mailDragging() && event.dataTransfer?.types.includes(GMAIL_MIME)) {
@@ -359,6 +381,12 @@ export class Calendar {
     if (!event) return '';
     if (event.milestone && (!task.startTime || !task.dueTime)) return minuteLabel(Math.floor(event.startMinute)) + (task.startDate === day && task.startTime ? ' 開始' : ' 截止');
     return `${minuteLabel(Math.floor(event.startMinute))} – ${minuteLabel(Math.floor(event.endMinute))}${event.label.includes('（時區轉換）') ? '（時區轉換）' : ''}`;
+  }
+
+  compactMonthScheduleLabel(task: Task, day: string): string {
+    if (this.isAllDay(task, day)) return this.monthScheduleLabel(task, day);
+    const event = this.days().find(date => date.key === day)?.timedEvents.find(event => event.task.id === task.id);
+    return event ? minuteLabel(Math.floor(event.startMinute)) : '';
   }
 
   scheduleLabel(task: Task, day: string): string {

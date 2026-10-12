@@ -18,8 +18,8 @@ const { build } = createRequire(require.resolve('@angular/build/package.json'))(
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/google-test-'));
 const output = resolve(directory, 'google.mjs');
-await build({stdin: {contents: "export {GoogleAuth} from './src/app/google-auth.ts'; export {DriveAuth} from './src/app/drive-auth.ts'; export {CalendarWriteAuth} from './src/app/calendar-write-auth.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {CalendarSources} from './src/app/calendar-sources.ts'; export {CalendarCache} from './src/app/calendar-cache.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const { GoogleAuth, DriveAuth, CalendarWriteAuth, GoogleCalendarService, CalendarSources, CalendarCache, BoardStore } = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {GoogleAuth} from './src/app/google-auth.ts'; export {GmailAuth} from './src/app/gmail-auth.ts'; export {DriveAuth} from './src/app/drive-auth.ts'; export {CalendarWriteAuth} from './src/app/calendar-write-auth.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {CalendarSources} from './src/app/calendar-sources.ts'; export {CalendarCache} from './src/app/calendar-cache.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const { GoogleAuth, GmailAuth, DriveAuth, CalendarWriteAuth, GoogleCalendarService, CalendarSources, CalendarCache, BoardStore } = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 
 function storage() {
@@ -49,7 +49,8 @@ test('Calendar 寫入授權分開保存並逐項檢查範圍，缺少寫入權�
     assert.ok(checked.includes(CALENDAR_SCOPE)); assert.ok(checked.includes('https://www.googleapis.com/auth/calendar.events'));
     allowWrite = true; const accepted = auth.authorize(sessionContext.clientId); await options.callback({access_token: 'synthetic-token', expires_in: 3600}); await accepted;
     assert.equal(auth.connected(), true); assert.equal(sessions.getItem(GOOGLE_SESSION_KEY), null);
-    assert.ok(sessions.getItem('iih-orbit-calendar-write-session-v1'));
+    assert.ok(globalThis.localStorage.getItem('iih-orbit-calendar-write-session-v1'));
+    assert.equal(sessions.getItem('iih-orbit-calendar-write-session-v1'), null);
     const restored = runInInjectionContext(injector, () => new CalendarWriteAuth()); restored.useSession(sessionContext); assert.equal(restored.connected(), true); restored.ngOnDestroy();
   } finally { globalThis.fetch = originalFetch; auth.ngOnDestroy(); injector.destroy(); }
 });
@@ -67,15 +68,16 @@ test('Drive token model 獨立請求最小權限、保存與恢復，Drive 401 �
     await options.callback({access_token: 'drive-token', expires_in: 3600}); await promise;
     await drive.api('files', {}, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
     assert.equal(requests.at(-1).config.headers.Authorization, 'Bearer drive-token'); assert.equal(requests.at(-1).config.method, 'POST'); assert.equal(requests.at(-1).config.headers['content-type'], 'application/json');
-    assert.equal(JSON.parse(sessions.getItem(DRIVE_SESSION_KEY)).token, 'drive-token'); assert.equal(JSON.parse(sessions.getItem(GOOGLE_SESSION_KEY)).token, 'calendar-token');
+    assert.equal(JSON.parse(globalThis.localStorage.getItem(DRIVE_SESSION_KEY)).token, 'drive-token'); assert.equal(JSON.parse(globalThis.localStorage.getItem(GOOGLE_SESSION_KEY)).token, 'calendar-token');
+    assert.equal(sessions.getItem(DRIVE_SESSION_KEY), null); assert.equal(sessions.getItem(GOOGLE_SESSION_KEY), null);
     const restored = runInInjectionContext(injector, () => new DriveAuth()); restored.useSession(sessionContext); assert.equal(restored.connected(), true); restored.ngOnDestroy();
     const count = requests.length; assert.throws(() => drive.upload('https://example.com/upload', {method: 'POST'}), /位址不合法/); assert.equal(requests.length, count);
     globalThis.fetch = async () => new Response(null, {status: 401}); await assert.rejects(drive.api('files'), /到期/);
-    assert.equal(drive.connected(), false); assert.equal(calendar.connected(), true); assert.equal(sessions.getItem(DRIVE_SESSION_KEY), null); assert.ok(sessions.getItem(GOOGLE_SESSION_KEY));
+    assert.equal(drive.connected(), false); assert.equal(calendar.connected(), true); assert.equal(globalThis.localStorage.getItem(DRIVE_SESSION_KEY), null); assert.ok(globalThis.localStorage.getItem(GOOGLE_SESSION_KEY));
   } finally {globalThis.fetch = originalFetch; drive.ngOnDestroy(); calendar.ngOnDestroy(); injector.destroy();}
 });
 
-test('Token Model 只申請讀取及帳號識別，憑證只存 sessionStorage，過期後清除', async () => {
+test('Token Model 只申請讀取及帳號識別，憑證保存於 localStorage，過期後清除', async () => {
   const values = storage();
   const sessions = tabStorage();
   let options, requested, callback;
@@ -91,36 +93,103 @@ test('Token Model 只申請讀取及帳號識別，憑證只存 sessionStorage�
   try {
     await auth.prepare();
     const connected = auth.authorize('123-example.apps.googleusercontent.com');
-    await callback({access_token: 'memory-only-token', expires_in: 3600});
+    await callback({access_token: 'short-lived-token', expires_in: 3600});
     assert.deepEqual(await connected, {id: 'account', email: 'a@example.com'});
     assert.ok(options.scope.includes(CALENDAR_SCOPE));
     assert.equal(options.scope.includes('drive'), false);
     assert.equal(options.include_granted_scopes, false);
     assert.equal(requested.config.method, 'GET');
-    assert.equal(requested.config.headers.Authorization, 'Bearer memory-only-token');
-    assert.equal([...values.values()].join('').includes('token'), false);
-    assert.equal(JSON.parse(sessions.getItem(GOOGLE_SESSION_KEY)).token, 'memory-only-token');
+    assert.equal(requested.config.headers.Authorization, 'Bearer short-lived-token');
+    assert.equal(JSON.parse(values.get(GOOGLE_SESSION_KEY)).token, 'short-lived-token');
+    assert.equal(sessions.getItem(GOOGLE_SESSION_KEY), null);
     Date.now = () => originalNow() + 3600000;
     await assert.rejects(auth.request('users/me/calendarList', {}), /到期/);
     assert.equal(auth.connected(), false);
     assert.equal(auth.token, '');
-    assert.equal(sessions.getItem(GOOGLE_SESSION_KEY), null);
+    assert.equal(values.has(GOOGLE_SESSION_KEY), false);
   } finally { Date.now = originalNow; globalThis.fetch = originalFetch; auth.ngOnDestroy(); injector.destroy(); }
 });
 
-function authController(sessions = tabStorage(), control = tabStorage()) {
-  let options, closed = false;
-  const oauth = {initTokenClient: config => { options = config; return {requestAccessToken: () => {}}; }, hasGrantedAllScopes: () => true};
+function authController(sessions = tabStorage(), control = tabStorage(), Type = GoogleAuth) {
+  let options, closed = false, authorizationRequests = 0;
+  const oauth = {initTokenClient: config => { options = config; return {requestAccessToken: () => {authorizationRequests++;}}; }, hasGrantedAllScopes: () => true};
   const injector = createEnvironmentInjector([{provide: DOCUMENT, useValue: {defaultView: {google: {accounts: {oauth2: oauth}}, sessionStorage: sessions, localStorage: control}}}]);
-  const auth = runInInjectionContext(injector, () => new GoogleAuth());
+  const auth = runInInjectionContext(injector, () => new Type());
   auth.useSession(sessionContext);
-  return {auth, sessions, control, callback: () => options.callback, close: () => { if (!closed) { closed = true; auth.ngOnDestroy(); injector.destroy(); } }};
+  return {auth, sessions, control, authorizationRequests: () => authorizationRequests, callback: () => options.callback, close: () => { if (!closed) { closed = true; auth.ngOnDestroy(); injector.destroy(); } }};
 }
 async function authorizeController(fixture, token = 'session-token') {
   await fixture.auth.prepare();
   const connection = fixture.auth.authorize(sessionContext.clientId);
   await fixture.callback()({access_token: token, expires_in: 3600});
   await connection;
+}
+
+const serviceSessions = [
+  {name: 'Calendar 讀取', Type: GoogleAuth, key: GOOGLE_SESSION_KEY, read: auth => auth.request('users/me/calendarList', {})},
+  {name: 'Calendar 寫入', Type: CalendarWriteAuth, key: 'iih-orbit-calendar-write-session-v1', read: auth => auth.api('users/me/calendarList')},
+  {name: 'Drive', Type: DriveAuth, key: DRIVE_SESSION_KEY, read: auth => auth.api('files')},
+  {name: 'Gmail', Type: GmailAuth, key: 'iih-orbit-gmail-session-v1', read: auth => auth.api('labels')}
+];
+for (const {name, Type, key, read} of serviceSessions) {
+  test(`${name} 關閉所有分頁後可離線恢復，網路重新連線沿用原憑證，不重新授權`, async () => {
+    const first = authController(tabStorage(), tabStorage(), Type), originalFetch = globalThis.fetch;
+    let reopened, calls = 0;
+    globalThis.fetch = async () => {calls++; return Response.json({sub: 'account', email: 'a@example.com'});};
+    try {
+      await authorizeController(first, 'persisted-token');
+      const saved = first.control.getItem(key), expiresAt = JSON.parse(saved).expiresAt;
+      first.close();
+      globalThis.fetch = async () => {calls++; throw new TypeError('offline');};
+      reopened = authController(tabStorage(), first.control, Type);
+      assert.equal(reopened.auth.connected(), true); assert.equal(reopened.auth.expiresAt, expiresAt);
+      assert.equal(reopened.auth.ready(), false); assert.equal(reopened.authorizationRequests(), 0); assert.equal(calls, 1);
+      await assert.rejects(read(reopened.auth), /中斷/);
+      assert.equal(reopened.auth.connected(), true); assert.equal(first.control.getItem(key), saved);
+      globalThis.fetch = async (url, options) => {assert.equal(options.headers.Authorization, 'Bearer persisted-token'); return Response.json({items: []});};
+      await read(reopened.auth);
+      assert.equal(reopened.auth.connected(), true); assert.equal(first.control.getItem(key), saved);
+      assert.equal(reopened.authorizationRequests(), 0); assert.equal(reopened.sessions.getItem(key), null);
+      reopened.auth.disconnect(); reopened.close();
+      reopened = authController(tabStorage(), first.control, Type);
+      assert.equal(reopened.auth.connected(), false); assert.equal(first.control.getItem(key), null);
+    } finally {reopened?.close(); first.close(); globalThis.fetch = originalFetch;}
+  });
+
+  test(`${name} 舊版有效分頁憑證遷移至瀏覽器保存，維持原到期時間`, async () => {
+    const first = authController(tabStorage(), tabStorage(), Type), originalFetch = globalThis.fetch;
+    let migrated, reopened;
+    globalThis.fetch = async () => Response.json({sub: 'account', email: 'a@example.com'});
+    try {
+      await authorizeController(first);
+      const saved = first.control.getItem(key);
+      first.close(); first.control.removeItem(key);
+      const legacy = tabStorage(); legacy.setItem(key, saved);
+      globalThis.fetch = async () => {throw new Error('restoration must not use the network');};
+      migrated = authController(legacy, first.control, Type);
+      assert.equal(migrated.auth.connected(), true); assert.equal(legacy.getItem(key), null);
+      assert.equal(first.control.getItem(key), saved); assert.equal(migrated.authorizationRequests(), 0);
+      migrated.close(); reopened = authController(tabStorage(), first.control, Type);
+      assert.equal(reopened.auth.connected(), true); assert.equal(first.control.getItem(key), saved);
+    } finally {reopened?.close(); migrated?.close(); first.close(); globalThis.fetch = originalFetch;}
+  });
+
+  test(`${name} 不恢復或遷移過期、不同帳號、設定或失效識別的舊分頁憑證`, async () => {
+    const first = authController(tabStorage(), tabStorage(), Type), originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => Response.json({sub: 'account', email: 'a@example.com'});
+    try {
+      await authorizeController(first);
+      const saved = JSON.parse(first.control.getItem(key));
+      first.close(); first.control.removeItem(key);
+      const patches = [{expiresAt: Date.now() - 1}, {clientId: '456-other.apps.googleusercontent.com'}, {generation: 'other-generation'}, {account: {id: 'other-account', email: 'other@example.com'}}, {scope: 'other-scope'}, {nonce: crypto.randomUUID()}];
+      for (const patch of patches) {
+        const legacy = tabStorage(); legacy.setItem(key, JSON.stringify({...saved, ...patch}));
+        const rejected = authController(legacy, first.control, Type);
+        try {assert.equal(rejected.auth.connected(), false); assert.equal(first.control.getItem(key), null); assert.equal(rejected.authorizationRequests(), 0);}
+        finally {rejected.close();}
+      }
+    } finally {first.close(); globalThis.fetch = originalFetch;}
+  });
 }
 
 test('授權服務重新建立後恢復同一憑證及到期時間，不再要求授權或讀取帳號', async () => {
@@ -130,9 +199,9 @@ test('授權服務重新建立後恢復同一憑證及到期時間，不再要�
   globalThis.fetch = async () => { requests++; return {ok: true, json: async () => ({sub: 'account', email: 'a@example.com'})}; };
   try {
     await authorizeController(first);
-    const session = JSON.parse(first.sessions.getItem(GOOGLE_SESSION_KEY));
+    const session = JSON.parse(first.control.getItem(GOOGLE_SESSION_KEY));
     first.close();
-    second = authController(first.sessions, first.control);
+    second = authController(tabStorage(), first.control);
     assert.equal(second.auth.connected(), true);
     assert.equal(second.auth.token, session.token);
     assert.equal(second.auth.expiresAt, session.expiresAt);
@@ -140,27 +209,27 @@ test('授權服務重新建立後恢復同一憑證及到期時間，不再要�
     assert.equal(requests, 1);
     await second.auth.request('users/me/calendarList', {});
     assert.equal(requests, 2);
-    assert.equal(JSON.parse(first.sessions.getItem(GOOGLE_SESSION_KEY)).expiresAt, session.expiresAt);
+    assert.equal(JSON.parse(first.control.getItem(GOOGLE_SESSION_KEY)).expiresAt, session.expiresAt);
   } finally { second?.close(); first.close(); globalThis.fetch = originalFetch; }
 });
 
-test('Google 回覆 401 時清除分頁憑證並使未收到通知的舊副本失效', async () => {
+test('Google 回覆 401 時清除瀏覽器憑證並使未收到通知的舊分頁副本失效', async () => {
   const fixture = authController();
   const originalFetch = globalThis.fetch;
   let restored;
   globalThis.fetch = async () => ({ok: true, json: async () => ({sub: 'account', email: 'a@example.com'})});
   try {
     await authorizeController(fixture);
-    const oldSession = fixture.sessions.getItem(GOOGLE_SESSION_KEY);
+    const oldSession = fixture.control.getItem(GOOGLE_SESSION_KEY);
     globalThis.fetch = async () => ({ok: false, status: 401});
     await assert.rejects(fixture.auth.request('users/me/calendarList', {}), /到期/);
     assert.equal(fixture.auth.connected(), false);
-    assert.equal(fixture.sessions.getItem(GOOGLE_SESSION_KEY), null);
+    assert.equal(fixture.control.getItem(GOOGLE_SESSION_KEY), null);
     fixture.close();
     fixture.sessions.setItem(GOOGLE_SESSION_KEY, oldSession);
     restored = authController(fixture.sessions, fixture.control);
     assert.equal(restored.auth.connected(), false);
-    assert.equal(fixture.sessions.getItem(GOOGLE_SESSION_KEY), null);
+    assert.equal(fixture.sessions.getItem(GOOGLE_SESSION_KEY), null); assert.equal(fixture.control.getItem(GOOGLE_SESSION_KEY), null);
   } finally { restored?.close(); fixture.close(); globalThis.fetch = originalFetch; }
 });
 
@@ -177,7 +246,7 @@ test('舊請求延遲回覆 401 不會清掉重新授權取得的新憑證', asy
     release({ok: false, status: 401}); await failure;
     assert.equal(fixture.auth.connected(), true);
     assert.equal(fixture.auth.token, 'new-token');
-    assert.equal(JSON.parse(fixture.sessions.getItem(GOOGLE_SESSION_KEY)).token, 'new-token');
+    assert.equal(JSON.parse(fixture.control.getItem(GOOGLE_SESSION_KEY)).token, 'new-token');
   } finally { release?.({ok: false, status: 401}); fixture.close(); globalThis.fetch = originalFetch; }
 });
 
@@ -273,21 +342,21 @@ test('首次授權待帳號設定保存才暫存憑證，資料重置後不能�
     const connecting = service.connect();
     await authFixture.callback()({access_token: 'integration-token', expires_in: 3600});
     await connecting; await settle();
-    const saved = authFixture.sessions.getItem(GOOGLE_SESSION_KEY);
+    const saved = authFixture.control.getItem(GOOGLE_SESSION_KEY);
     assert.equal(JSON.parse(saved).generation, store.generation());
     assert.equal(JSON.parse(saved).account.id, store.google().accountId);
-    assert.equal([...values.values()].join('').includes('integration-token'), false);
+    assert.equal(values.get('orbit-workspaces-v2').includes('integration-token'), false);
     await service.bind(service.available()[0], store.currentWorkspace().id, true); await settle();
     await service.refresh();
     assert.equal(service.events().length, 1);
     await store.resetData(false, store.revision()); await settle();
     assert.equal(authFixture.auth.connected(), false);
-    assert.equal(authFixture.sessions.getItem(GOOGLE_SESSION_KEY), null);
+    assert.equal(authFixture.control.getItem(GOOGLE_SESSION_KEY), null);
     authFixture.sessions.setItem(GOOGLE_SESSION_KEY, saved);
     restored = authController(authFixture.sessions, globalThis.localStorage);
     restored.auth.useSession({clientId: store.google().clientId, generation: store.generation(), accountId: store.google().accountId});
     assert.equal(restored.auth.connected(), false);
-    assert.equal(authFixture.sessions.getItem(GOOGLE_SESSION_KEY), null);
+    assert.equal(authFixture.control.getItem(GOOGLE_SESSION_KEY), null);
     assert.equal(service.events().length, 0);
   } finally { restored?.close(); service.ngOnDestroy(); injector.destroy(); authFixture.close(); globalThis.fetch = originalFetch; }
 });
@@ -763,12 +832,70 @@ test('取消頁面內的網路請求不清除有效憑證，取消後到達的 4
   try {
     globalThis.fetch = async () => ({ok: true, json: async () => ({sub: 'account', email: 'a@example.com'})});
     await authorizeController(fixture);
-    const saved = fixture.sessions.getItem(GOOGLE_SESSION_KEY);
+    const saved = fixture.control.getItem(GOOGLE_SESSION_KEY);
     let requestSignal;
     globalThis.fetch = async (url, options) => { requestSignal = options.signal; return new Promise(resolve => { release = resolve; }); };
     const reading = fixture.auth.request('calendars/calendar/events', {});
     fixture.auth.cancelRequests(); assert.equal(requestSignal.aborted, true);
     release({ok: false, status: 401}); await assert.rejects(reading, error => error.status === 401);
-    assert.equal(fixture.auth.connected(), true); assert.equal(fixture.sessions.getItem(GOOGLE_SESSION_KEY), saved);
+    assert.equal(fixture.auth.connected(), true); assert.equal(fixture.control.getItem(GOOGLE_SESSION_KEY), saved);
   } finally { release?.({ok: false, status: 401}); globalThis.fetch = originalFetch; fixture.close(); }
+});
+
+test('到期提醒只來自實際授權紀錄，關閉瀏覽器後保留；解除連線與更換設定不提示過期', async () => {
+  const first = authController(), originalFetch = globalThis.fetch, originalNow = Date.now;
+  let restored;
+  globalThis.fetch = async () => Response.json({sub: 'account', email: 'account@example.test'});
+  try {
+    assert.equal(first.auth.expired(), false);
+    await authorizeController(first);
+    const session = JSON.parse(first.control.getItem(GOOGLE_SESSION_KEY));
+    first.close();
+    Date.now = () => session.expiresAt + 1;
+    restored = authController(tabStorage(), first.control);
+    assert.equal(restored.auth.connected(), false); assert.equal(restored.auth.expired(), true);
+    restored.auth.useSession({...sessionContext, clientId: '456-other.apps.googleusercontent.com'});
+    assert.equal(restored.auth.expired(), false);
+    restored.auth.useSession({...sessionContext, generation: 'new-generation'});
+    assert.equal(restored.auth.expired(), false);
+    restored.auth.useSession({...sessionContext, accountId: 'different-account'});
+    assert.equal(restored.auth.expired(), false);
+    restored.auth.useSession(sessionContext); assert.equal(restored.auth.expired(), true);
+    restored.auth.disconnect(); assert.equal(restored.auth.expired(), false);
+    assert.equal(first.control.getItem(GOOGLE_SESSION_KEY + ':authorization-history'), null);
+  } finally {Date.now = originalNow; globalThis.fetch = originalFetch; restored?.close(); first.close();}
+});
+
+test('舊的已過期憑證可辨識先前授權，移除憑證後只保存到期提示；不接收其他帳號的紀錄', async () => {
+  const first = authController(), originalFetch = globalThis.fetch, originalNow = Date.now;
+  let restored, different;
+  globalThis.fetch = async () => Response.json({sub: 'account', email: 'account@example.test'});
+  try {
+    await authorizeController(first);
+    const session = JSON.parse(first.control.getItem(GOOGLE_SESSION_KEY));
+    first.close(); first.control.removeItem(GOOGLE_SESSION_KEY + ':authorization-history');
+    Date.now = () => session.expiresAt + 1;
+    restored = authController(first.sessions, first.control);
+    assert.equal(restored.auth.expired(), true); assert.equal(restored.auth.connected(), false);
+    assert.equal(first.control.getItem(GOOGLE_SESSION_KEY), null);
+    const metadata = JSON.parse(first.control.getItem(GOOGLE_SESSION_KEY + ':authorization-history'));
+    assert.equal(metadata.expiresAt, session.expiresAt); assert.equal('token' in metadata, false);
+    different = authController(tabStorage(), first.control);
+    different.auth.useSession({...sessionContext, accountId: 'never-authorized'});
+    assert.equal(different.auth.expired(), false);
+  } finally {Date.now = originalNow; globalThis.fetch = originalFetch; different?.close(); restored?.close(); first.close();}
+});
+
+test('舊分頁的到期事件不能覆蓋另一分頁重新授權的有效紀錄', async () => {
+  const first = authController(), second = authController(tabStorage(), first.control), originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({sub: 'account', email: 'account@example.test'});
+  try {
+    await authorizeController(first, 'old-token'); await authorizeController(second, 'new-token');
+    const history = first.control.getItem(GOOGLE_SESSION_KEY + ':authorization-history');
+    first.auth.disconnect('Google 授權已到期，請重新連線。', 'expired');
+    assert.equal(first.control.getItem(GOOGLE_SESSION_KEY + ':authorization-history'), history);
+    assert.equal(JSON.parse(first.control.getItem(GOOGLE_SESSION_KEY)).token, 'new-token');
+    assert.equal(first.auth.expired(), false); assert.equal(second.auth.connected(), true);
+    assert.equal(second.auth.expired(), false);
+  } finally {globalThis.fetch = originalFetch; second.close(); first.close();}
 });

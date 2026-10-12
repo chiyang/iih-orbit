@@ -20,7 +20,7 @@ export class GmailAuth extends GoogleAuth {
     super.useSession(context);
   }
   api(path: string, parameters: Record<string, string> = {}, signal?: AbortSignal): Promise<unknown> {
-    if (!/^(labels|threads(?:\/[A-Za-z0-9_-]{1,200})?|messages(?:\/[A-Za-z0-9_-]{1,200}(?:\/attachments\/[A-Za-z0-9_-]{1,1000})?)?)$/.test(path)) throw new Error('Gmail 讀取位址不正確。');
+    if (!/^(profile|history|labels|threads(?:\/[A-Za-z0-9_-]{1,200})?|messages(?:\/[A-Za-z0-9_-]{1,200}(?:\/attachments\/[A-Za-z0-9_-]{1,1000})?)?)$/.test(path)) throw new Error('Gmail 讀取位址不正確。');
     // metadataHeaders is a repeated query parameter, not a comma-separated header name.
     const query = new URLSearchParams(parameters); query.delete('metadataHeaders');
     if (parameters['metadataHeaders']) for (const name of parameters['metadataHeaders'].split(',')) query.append('metadataHeaders', name);
