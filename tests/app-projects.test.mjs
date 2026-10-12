@@ -83,6 +83,18 @@ test('編輯內容拖曳選取到遮罩不關閉，只有遮罩上的完整短�
   } finally {f.close();}
 });
 
+test('登出開啟確認視窗不改資料，取消可關閉；同步登出期間遮罩與 Escape 不能關閉', () => {
+  const f = application(), backdrop = {}, event = {target: backdrop, currentTarget: backdrop, pointerId: 1, button: 0, isPrimary: true, clientX: 20, clientY: 20};
+  try {
+    const before = structuredClone(f.store.workspaces()); f.app.openLogout();
+    assert.equal(f.app.modal(), 'logout'); assert.deepEqual(f.store.workspaces(), before);
+    f.app.closeModal(); assert.equal(f.app.modal(), null); assert.deepEqual(f.store.workspaces(), before);
+    f.app.openLogout(); f.app.logoutSaving.set(true); f.app.escape(); assert.equal(f.app.modal(), 'logout');
+    f.app.startBackdropClick(event); f.app.finishBackdropClick(event); f.app.closeFromBackdrop(event); assert.equal(f.app.modal(), 'logout');
+    f.app.logoutSaving.set(false); f.app.escape(); assert.equal(f.app.modal(), null);
+  } finally {f.close();}
+});
+
 test('週視圖範圍設定驗證起訖、只保存本機，重新開啟仍可讀取', async () => {
   const f = application(), preferences = f.settings.preferences;
   try {

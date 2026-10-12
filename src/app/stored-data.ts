@@ -19,6 +19,8 @@ export interface StoredWorkspaceData {
   state: WorkspaceState;
   /** Local startup progress; excluded from exported workspaces and backups. */
   onboarding?: OnboardingPhase;
+  /** Local login destination; never exported or synchronized. */
+  cloudResume?: {datasetId: string; cleanupPending?: true};
   preferences?: AppearancePreferences;
   google?: GoogleSettings;
   reminders?: ReminderPreferences;
@@ -41,5 +43,7 @@ export function readStoredData(value: unknown): StoredWorkspaceData | null {
   const drive = source.drive === undefined ? undefined : readDriveSettings(source.drive, state.workspaces.map(workspace => workspace.id));
   if (drive === null) return null;
   const onboarding = source.onboarding === 'guide' || source.onboarding === 'workspace' ? source.onboarding : undefined;
-  return {formatVersion: 2, generation: source.generation, revision: source.revision, updatedAt: source.updatedAt, state, ...(onboarding ? {onboarding} : {}), ...(preferences ? {preferences} : {}), ...(google ? {google} : {}), ...(reminders ? {reminders} : {}), ...(drive ? {drive} : {})};
+  const cloudResume = source.cloudResume;
+  if (cloudResume !== undefined && (!cloudResume || typeof cloudResume.datasetId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cloudResume.datasetId) || !google?.clientId || cloudResume.cleanupPending !== undefined && cloudResume.cleanupPending !== true)) return null;
+  return {formatVersion: 2, generation: source.generation, revision: source.revision, updatedAt: source.updatedAt, state, ...(onboarding ? {onboarding} : {}), ...(cloudResume ? {cloudResume: {datasetId: cloudResume.datasetId, ...(cloudResume.cleanupPending ? {cleanupPending: true as const} : {})}} : {}), ...(preferences ? {preferences} : {}), ...(google ? {google} : {}), ...(reminders ? {reminders} : {}), ...(drive ? {drive} : {})};
 }

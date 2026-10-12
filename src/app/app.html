@@ -40,20 +40,22 @@
 
   <main class="main" [attr.inert]="modal() || (panelOverlay() && panelOpen()) || (compactNavigation() && sidebarOpen()) ? '' : null">
     <header class="topbar">
-      <div class="breadcrumb"><button class="icon-button mobile-menu" aria-label="開啟側邊欄" (click)="sidebarOpen.set(true)"><app-icon name="menu" /></button><span class="mobile-wordmark" aria-label="TMU IIh Orbit"><app-brand-mark /><span class="mobile-brand-text"><span>TMU</span><strong>IIh Orbit</strong></span></span><span class="desktop-crumb workspace-crumb">{{ store.currentWorkspace().name }}</span><app-icon class="desktop-crumb" name="chevron" /><strong class="desktop-crumb navigation-crumb" [title]="navigationTitle()">{{ navigationTitle() }}</strong></div>
+      <div class="breadcrumb"><button class="icon-button mobile-menu" aria-label="開啟側邊欄" appTooltip="開啟側邊欄" (click)="sidebarOpen.set(true)"><app-icon name="menu" /></button><span class="mobile-wordmark" aria-label="TMU IIh Orbit"><app-brand-mark /><span class="mobile-brand-text"><span>TMU</span><strong>IIh Orbit</strong></span></span><span class="desktop-crumb workspace-crumb">{{ store.currentWorkspace().name }}</span><app-icon class="desktop-crumb" name="chevron" /><strong class="desktop-crumb navigation-crumb" [title]="navigationTitle()">{{ navigationTitle() }}</strong></div>
       <div class="topbar-right">
         <div class="topbar-tools">
           @defer (on idle) {<app-google-renewal-button (result)="googleAuthorizationResult($event)" />}
           @defer (on idle) {<app-drive-sync-button (configure)="openSettings('drive')" (result)="googleAuthorizationResult($event)" />}
-          <button type="button" class="toolbar-icon-entry help-entry" aria-label="開啟操作引導" title="操作引導" (click)="openIntroduction()"><app-icon name="help" /></button>
-          <button type="button" class="toolbar-icon-entry optional-toolbar-control" [attr.aria-label]="'切換主題，目前為' + preferences.themeLabel()" [title]="'主題：' + preferences.themeLabel()" (click)="preferences.cycleTheme()"><app-icon [name]="preferences.themeIcon()" /></button>
-          <label class="text-size-control optional-toolbar-control" title="字體大小"><span class="font-symbol" aria-hidden="true">Aa</span><select aria-label="字體大小" [ngModel]="preferences.textSize()" (ngModelChange)="preferences.setTextSize($event)">@for (option of preferences.options; track option.id) {<option [value]="option.id">{{ option.label }}</option>}</select></label>
-          <button type="button" class="settings-entry" aria-label="開啟設定" title="設定" (click)="openSettings()"><app-icon name="settings" /></button>
-          @defer (on idle) {<app-panel-button [opened]="panelOpen()" [activeTab]="panelTab()" (activate)="activatePanel($event)" />} @placeholder {<button type="button" class="toolbar-icon-entry panel-entry" [attr.aria-label]="panelOpen() ? '關閉右側欄' : '開啟右側欄'" (click)="togglePanel()"><app-icon name="panelRight" /></button>}
+          @defer (on idle) {<app-cloud-logout-button (request)="openLogout()" />}
+          <button type="button" class="toolbar-icon-entry help-entry" aria-label="開啟操作引導" appTooltip="操作引導" (click)="openIntroduction()"><app-icon name="help" /></button>
+          <button type="button" class="toolbar-icon-entry optional-toolbar-control" [attr.aria-label]="'切換主題，目前為' + preferences.themeLabel()" [appTooltip]="'切換主題，目前為' + preferences.themeLabel()" (click)="preferences.cycleTheme()"><app-icon [name]="preferences.themeIcon()" /></button>
+          <label class="text-size-control optional-toolbar-control"><span class="font-symbol" aria-hidden="true">Aa</span><select aria-label="字體大小" appTooltip="調整字體大小" [ngModel]="preferences.textSize()" (ngModelChange)="preferences.setTextSize($event)">@for (option of preferences.options; track option.id) {<option [value]="option.id">{{ option.label }}</option>}</select></label>
+          <button type="button" class="settings-entry" aria-label="開啟設定" appTooltip="設定" (click)="openSettings()"><app-icon name="settings" /></button>
+          @defer (on idle) {<app-panel-button [opened]="panelOpen()" [activeTab]="panelTab()" (activate)="activatePanel($event)" />} @placeholder {<button type="button" class="toolbar-icon-entry panel-entry" [attr.aria-label]="panelOpen() ? '關閉右側欄' : '開啟右側欄'" [appTooltip]="panelOpen() ? '關閉右側欄' : '開啟右側欄'" (click)="togglePanel()"><app-icon name="panelRight" /></button>}
         </div>
       </div>
     </header>
 
+    @defer (on idle) {<app-cloud-resume-notice />}
     <section class="project-header" [class.is-compact]="headerCompact()" aria-labelledby="project-title">
       @if (store.onboarding() === 'workspace') {
         <div class="first-workspace-notice"><div><strong>建立你的第一個工作空間</strong><p>取個名稱，從空白開始，或選擇適合你的樣板。</p></div><button type="button" class="button primary" (click)="openWorkspaces()">選擇工作空間</button></div>
@@ -175,8 +177,11 @@
 @if (modal()) {
   <div class="modal-backdrop" (pointerdown)="startBackdropClick($event)" (pointerup)="finishBackdropClick($event)" (pointercancel)="cancelBackdropClick()" (click)="closeFromBackdrop($event)">
     <section class="modal" [attr.data-modal]="modal()" [class.description-focused]="descriptionFocused()" [class.category-modal]="modal() === 'categories'" role="dialog" aria-modal="true" aria-labelledby="modal-title" cdkTrapFocus [cdkTrapFocusAutoCapture]="true" (click)="$event.stopPropagation()">
-      <div class="modal-header"><div><span class="modal-eyebrow">TMU IIh ORBIT</span><h2 id="modal-title">@switch (modal()) {@case ('intro') {{{ introFirstUse() ? '歡迎使用 IIh Orbit' : '操作引導' }}} @case ('task') {{{ editing() ? '編輯任務' : '建立新任務' }}} @case ('task-conflict') {比較與編輯衝突任務} @case ('calendar-publish') {移至 Google Calendar} @case ('categories') {管理任務分類} @case ('projects') {專案管理} @case ('statuses') {管理看板狀態} @case ('workspaces') {{{ firstWorkspaceDialog() ? '建立第一個工作空間' : '管理工作空間' }}} @case ('settings') {設定} @case ('external-event') {Google 活動明細} @case ('mail-preview') {郵件預覽} @case ('delete') {移至垃圾桶} @case ('empty-trash') {清空垃圾桶}}</h2></div><button class="icon-button" [attr.aria-label]="modal() === 'intro' ? (introFirstUse() ? '略過引導，選擇工作空間' : '關閉操作引導') : '關閉對話框'" [disabled]="introSaving() || workspaceSaving() || conflictSaving()" [attr.cdkFocusInitial]="modal() === 'statuses' || modal() === 'workspaces' || modal() === 'projects' || modal() === 'settings' || modal() === 'external-event' || modal() === 'mail-preview' ? '' : null" (click)="closeModal()"><app-icon name="close" /></button></div>
+      <div class="modal-header"><div><span class="modal-eyebrow">TMU IIh ORBIT</span><h2 id="modal-title">@switch (modal()) {@case ('intro') {{{ introFirstUse() ? '歡迎使用 IIh Orbit' : '操作引導' }}} @case ('task') {{{ editing() ? '編輯任務' : '建立新任務' }}} @case ('task-conflict') {比較與編輯衝突任務} @case ('calendar-publish') {移至 Google Calendar} @case ('categories') {管理任務分類} @case ('projects') {專案管理} @case ('statuses') {管理看板狀態} @case ('workspaces') {{{ firstWorkspaceDialog() ? '建立第一個工作空間' : '管理工作空間' }}} @case ('settings') {設定} @case ('external-event') {Google 活動明細} @case ('mail-preview') {郵件預覽} @case ('delete') {移至垃圾桶} @case ('empty-trash') {清空垃圾桶} @case ('logout') {確認同步並登出}}</h2></div><button class="icon-button" [attr.aria-label]="modal() === 'intro' ? (introFirstUse() ? '略過引導，選擇工作空間' : '關閉操作引導') : '關閉對話框'" [disabled]="introSaving() || workspaceSaving() || conflictSaving() || logoutSaving()" [attr.cdkFocusInitial]="modal() === 'statuses' || modal() === 'workspaces' || modal() === 'projects' || modal() === 'settings' || modal() === 'external-event' || modal() === 'mail-preview' ? '' : null" (click)="closeModal()"><app-icon name="close" /></button></div>
       @switch (modal()) {
+        @case ('logout') {
+          @defer (on immediate) {<app-cloud-logout-confirm (busyChange)="logoutSaving.set($event)" (close)="closeModal()" (result)="googleAuthorizationResult($event)" />} @placeholder {<p class="modal-body" role="status">準備登出確認…</p>} @error {<p class="modal-body" role="alert">登出確認無法載入，請關閉後重試。</p>}
+        }
         @case ('task-conflict') {
           @if (conflictContext(); as context) {@defer (on immediate) {<app-task-conflict-editor [context]="context" (busyChange)="conflictSaving.set($event)" (saved)="taskConflictSaved($event)" />} @placeholder {<p class="modal-body" role="status">開啟完整任務版本…</p>} @error {<p class="modal-body" role="alert">版本編輯器無法載入，請關閉後重試。</p>}}
         }

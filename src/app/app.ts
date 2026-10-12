@@ -48,14 +48,18 @@ import { TrashView } from './trash-view';
 import { TaskConflictEditor, TaskConflictContext } from './task-conflict-editor';
 import { GoogleRenewalButton } from './google-renewal-button';
 import { DriveSyncButton } from './drive-sync-button';
+import { CloudLogoutButton } from './cloud-logout-button';
+import { CloudResumeNotice } from './cloud-resume-notice';
+import { CloudLogoutConfirm } from './cloud-logout-confirm';
+import { Tooltip } from './tooltip';
 import { PanelButton, type PanelActivation } from './panel-button';
 
-type Modal = 'intro' | 'task' | 'task-conflict' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'empty-trash' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | null;
+type Modal = 'intro' | 'task' | 'task-conflict' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'empty-trash' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | 'logout' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView, TaskConflictEditor, GoogleRenewalButton, DriveSyncButton, PanelButton],
+  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView, TaskConflictEditor, GoogleRenewalButton, DriveSyncButton, CloudLogoutButton, CloudResumeNotice, CloudLogoutConfirm, Tooltip, PanelButton],
   templateUrl: './app.html',
   styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css', './startup.css', './task-shortcuts.css', './workspace-controls.css']
 })
@@ -269,6 +273,8 @@ export class App {
   readonly sidebarOpen = signal(false);
   readonly mobileViewport = signal(window.innerWidth <= 700);
   readonly modal = signal<Modal>(null);
+  readonly logoutSaving = signal(false);
+  openLogout(): void {if (!this.modal()) {this.sidebarOpen.set(false); this.modal.set('logout');}}
   private backdropClick?: {pointerId: number; x: number; y: number; released: boolean};
   readonly editing = signal(false);
   readonly descriptionFocused = signal(false);
@@ -1153,7 +1159,7 @@ export class App {
   }
 
   closeModal(): void {
-    if (this.introSaving() || this.workspaceSaving() || this.conflictSaving()) return;
+    if (this.introSaving() || this.workspaceSaving() || this.conflictSaving() || this.logoutSaving()) return;
     if (this.modal() === 'intro' && this.introFirstUse() && this.store.onboarding() === 'guide') { void this.finishIntroduction(); return; }
     if (this.calendarPublishing()) return;
     if (this.modal() === 'settings' && this.store.pendingWrites() > 0) return;

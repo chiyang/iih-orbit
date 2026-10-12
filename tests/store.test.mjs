@@ -8,6 +8,7 @@ import { resolve } from 'node:path';
 import { createBackup } from '../src/app/backup-data.ts';
 import { DEFAULT_REMINDERS } from '../src/app/reminder-data.ts';
 import { DEFAULT_DRIVE } from '../src/app/drive-data.ts';
+import { DEFAULT_APPEARANCE } from '../src/app/appearance-data.ts';
 
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -21,6 +22,39 @@ after(() => rm(directory, {recursive: true, force: true}));
 const task = {id: 'task', title: '既有任務', description: '保留內容', categoryId: '', projectId: '', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: []};
 const legacy = {version: 2, projectName: '原專案', categories: [], tasks: [task, {...task, id: 'done', status: 'done'}]};
 const migratedTasks = legacy.tasks.map(item => ({...item, projectId: 'project-legacy'}));
+
+test('登出只保留 Client ID 與雲端集合目的地並重置其他資料，舊分頁不能復活任務', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(); await store.updateGoogle({clientId: '123-example.apps.googleusercontent.com', accountId: 'old-account', email: 'old@example.test'});
+  await store.updateAppearance({theme: 'dark', accent: '#123456'}); await store.updateReminders({popupEnabled: false});
+  const old = new BoardStore(), generation = store.generation(), dataset = crypto.randomUUID();
+  const result = await store.logoutToCloud(store.google().clientId, dataset, store.revision(), generation);
+  assert.equal(result.ok, true); assert.notEqual(store.generation(), generation); assert.equal(store.tasks().length, 0);
+  assert.equal(store.google().clientId, '123-example.apps.googleusercontent.com'); assert.equal(store.google().accountId, ''); assert.equal(store.google().email, '');
+  assert.deepEqual(store.appearance(), DEFAULT_APPEARANCE); assert.deepEqual(store.reminders(), DEFAULT_REMINDERS); assert.equal(store.drive().accountId, '');
+  assert.deepEqual(new BoardStore().cloudResume(), {datasetId: dataset, cleanupPending: true}); assert.equal(store.onboarding(), null); assert.equal(store.canUndo(), false);
+  assert.equal(store.currentWorkspace().name, '空白工作空間');
+  assert.equal(store.projects().length, 0); assert.equal(store.categories().length, 0);
+  assert.equal((await store.finishLogoutCleanup(dataset, store.generation())).ok, true); assert.deepEqual(new BoardStore().cloudResume(), {datasetId: dataset});
+  assert.equal(Object.hasOwn(await store.backupForExport('full'), 'cloudResume'), false);
+  assert.equal((await old.saveTask({...old.tasks()[0], title: '舊分頁草稿'})).ok, false);
+  assert.equal(new BoardStore().tasks().length, 0);
+  assert.equal((await store.finishCloudLogin(crypto.randomUUID(), store.generation())).ok, false);
+  assert.equal((await store.finishCloudLogin(dataset, store.generation())).ok, true); assert.equal(new BoardStore().cloudResume(), undefined);
+});
+
+test('登出拒絕過期備份證明與儲存失敗，任務、Client ID、世代都保留', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(); await store.updateGoogle({clientId: '123-example.apps.googleusercontent.com'});
+  const revision = store.revision(), generation = store.generation(); await store.saveTask({...store.tasks()[0], title: '備份後的新修改'});
+  assert.equal((await store.logoutToCloud(store.google().clientId, crypto.randomUUID(), revision, generation)).ok, false);
+  const saved = localStorage.getItem('orbit-workspaces-v2'), write = localStorage.setItem;
+  localStorage.setItem = () => {throw new Error('模擬儲存失敗');};
+  const result = await store.logoutToCloud(store.google().clientId, crypto.randomUUID(), store.revision(), generation);
+  localStorage.setItem = write;
+  assert.equal(result.ok, false); assert.equal(localStorage.getItem('orbit-workspaces-v2'), saved); assert.equal(store.generation(), generation);
+  assert.equal(store.tasks()[0].title, '備份後的新修改'); assert.equal(store.cloudResume(), undefined);
+});
 
 test('裝置名稱在本機保存，跨分頁沿用身份，匯入及遠端資料不取代本機名稱', async () => {
   storage({'orbit-board-v1': JSON.stringify(legacy)});

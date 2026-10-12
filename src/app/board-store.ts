@@ -43,6 +43,7 @@ export class BoardStore implements OnDestroy {
   readonly google = signal<GoogleSettings>(this.snapshot.google ?? structuredClone(DEFAULT_GOOGLE));
   readonly reminders = signal<ReminderPreferences>(this.snapshot.reminders ?? {...DEFAULT_REMINDERS});
   readonly drive = signal<DriveSettings>(this.snapshot.drive ?? structuredClone(DEFAULT_DRIVE));
+  readonly cloudResume = signal(this.snapshot.cloudResume);
   readonly workspaceState = signal<WorkspaceState>(this.selectedState(this.snapshot.state));
   readonly workspaces = computed(() => this.workspaceState().workspaces);
   readonly currentWorkspace = computed(() => this.workspaces().find(workspace => workspace.id === this.workspaceState().activeWorkspaceId)!);
@@ -521,7 +522,7 @@ export class BoardStore implements OnDestroy {
     const workspace = emptyWorkspace(crypto.randomUUID(), '我的工作空間');
     return this.transact(data => {
       if (data.revision !== expectedRevision) throw new Error('確認期間資料或設定已更新，請重新查看後再重置。');
-      return {...data, generation: crypto.randomUUID(), preferences: all ? {...DEFAULT_APPEARANCE} : data.preferences,
+      return {...data, cloudResume: undefined, generation: crypto.randomUUID(), preferences: all ? {...DEFAULT_APPEARANCE} : data.preferences,
         reminders: all ? {...DEFAULT_REMINDERS} : data.reminders,
         drive: {...(all ? DEFAULT_DRIVE : data.drive ?? DEFAULT_DRIVE), mode: 'off', workspaceIds: []},
         google: all ? structuredClone(DEFAULT_GOOGLE) : {...data.google!, sources: []},
@@ -530,6 +531,32 @@ export class BoardStore implements OnDestroy {
       for (const key of ['orbit-workspaces-v1', 'orbit-board-v1', 'orbit-board-v1-backup', 'orbit-text-size-v1', 'orbit-reminder-delivery-v1']) localStorage.removeItem(key);
       this.selectionStorage?.removeItem(WORKSPACE_SELECTION_KEY);
     }});
+  }
+
+  logoutToCloud(clientId: string, datasetId: string, expectedRevision: string, generation: string): Promise<StoreResult> {
+    const workspace = {...emptyWorkspace(crypto.randomUUID(), '空白工作空間'), projects: []};
+    return this.transact(data => {
+      if (data.revision !== expectedRevision || data.google?.clientId !== clientId || this.hasUnsavedChanges()) throw new Error('備份後本機資料或設定又有變更，尚未登出，請再試一次。');
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(datasetId)) throw new Error('雲端集合識別不合法，尚未登出。');
+      return {formatVersion: 2, generation: crypto.randomUUID(), revision: data.revision, updatedAt: data.updatedAt,
+        cloudResume: {datasetId, cleanupPending: true}, google: {...structuredClone(DEFAULT_GOOGLE), clientId}, preferences: {...DEFAULT_APPEARANCE},
+        reminders: {...DEFAULT_REMINDERS}, drive: structuredClone(DEFAULT_DRIVE),
+        state: {version: 1, activeWorkspaceId: workspace.id, workspaces: [workspace]}};
+    }, {generation, requirePersistence: true, select: workspace.id, persistenceMessage: '瀏覽器無法保存登出資訊，尚未清除本機資料。'});
+  }
+
+  finishLogoutCleanup(datasetId: string, generation: string): Promise<StoreResult> {
+    return this.transact(data => {
+      if (data.cloudResume?.datasetId !== datasetId) throw new Error('登出資訊已變更，本次清理已停止。');
+      return {...data, cloudResume: {datasetId}};
+    }, {generation, requirePersistence: true});
+  }
+
+  finishCloudLogin(datasetId: string, generation: string): Promise<StoreResult> {
+    return this.transact(data => {
+      if (data.cloudResume?.datasetId !== datasetId) throw new Error('登入目的地已變更，請重新登入。');
+      return {...data, cloudResume: undefined};
+    }, {generation, requirePersistence: true});
   }
 
   importBackup(input: OrbitBackup, expectedRevision?: string, applyGoogle = false): Promise<StoreResult> {
@@ -639,6 +666,7 @@ export class BoardStore implements OnDestroy {
     this.google.set(data.google ?? structuredClone(DEFAULT_GOOGLE));
     this.reminders.set(data.reminders ?? {...DEFAULT_REMINDERS});
     this.drive.set(data.drive ?? structuredClone(DEFAULT_DRIVE));
+    this.cloudResume.set(data.cloudResume);
     if (saved) this.lastSavedRevision = data.revision;
     const active = select ?? this.workspaceState().activeWorkspaceId;
     const state = {...data.state, activeWorkspaceId: data.state.workspaces.some(workspace => workspace.id === active) ? active : data.state.activeWorkspaceId};

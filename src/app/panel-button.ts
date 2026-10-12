@@ -5,11 +5,12 @@ import { GmailNotifications } from './gmail-notifications';
 import { itemsForReminderTab, type ReminderTab } from './reminder-items';
 import { panelAttention } from './panel-attention';
 import { Icon } from './icon';
+import { Tooltip } from './tooltip';
 
 export interface PanelActivation {target: 'tasks' | 'reminders' | 'gmail' | 'toggle'; tab?: ReminderTab}
 @Component({
-  selector: 'app-panel-button', imports: [Icon], styleUrl: './toolbar-icon-button.css',
-  template: `<button type="button" [class.selected]="opened()" aria-controls="right-panel" [attr.aria-expanded]="opened()" [attr.aria-label]="label()" [title]="label()" (click)="activate.emit({target: attention().target, tab: reminderTab()})"><app-icon [name]="attention().icon" />@if (attention().count) {<span class="badge" aria-hidden="true">{{ attention().count > 99 ? '99+' : attention().count }}</span>}</button>`
+  selector: 'app-panel-button', imports: [Icon, Tooltip], styleUrl: './toolbar-icon-button.css',
+  template: `<button type="button" [class.selected]="opened()" aria-controls="right-panel" [attr.aria-expanded]="opened()" [attr.aria-label]="label()" [appTooltip]="label()" (click)="activate.emit({target: attention().target, tab: reminderTab()})"><app-icon [name]="attention().icon" />@if (attention().count) {<span class="badge" aria-hidden="true">{{ attention().count > 99 ? '99+' : attention().count }}</span>}</button>`
 })
 export class PanelButton {
   readonly store = inject(BoardStore);

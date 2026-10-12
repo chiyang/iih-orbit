@@ -15,6 +15,7 @@ export interface DriveBoard {
   snapshot(kind: BackupKind, ids: string[]): Promise<{backup: OrbitBackup; revision: string}>;
   apply(backup: OrbitBackup, revision: string, targets: string[]): Promise<void>;
 }
+export interface LogoutCheckpoint {datasetId: string; revision: string}
 /** The caller owns a cross-tab lock. All async completions are fenced against account/reset changes. */
 export class DriveEngine {
   private readonly api: DriveOperations;
@@ -64,6 +65,43 @@ export class DriveEngine {
     const {backup} = await this.board.snapshot(kind, ids); this.check();
     const document = await createDriveDocument(backup); this.check();
     const state = await this.state(); await this.queue(state, document); await this.flush();
+  }
+  async enableFullSync(requireEmpty = false): Promise<void> {
+    const before = await this.state();
+    if (!before.link) {await this.start('full', [], 'sync', requireEmpty); return;}
+    await this.synchronize('sync');
+    const state = await this.state();
+    if (state.pending || state.conflict?.length) throw new Error('雲端仍有待上傳或待選擇的內容，請先完成處理再啟用完整同步。');
+    if (state.link?.kind !== 'full') await this.start('full', [], 'sync');
+  }
+  async checkpointForLogout(mode: 'backup' | 'sync'): Promise<LogoutCheckpoint> {
+    const original = await this.state();
+    if (original.link?.kind !== 'full') throw new Error('全部工作空間的雲端備份尚未準備完成，本機資料保留，請重試同步。');
+    await this.synchronize(mode);
+    const state = await this.state(), link = state.link!;
+    if (state.pending || state.conflict?.length) throw new Error('雲端還有待上傳或待選擇的內容，請先完成同步再登出。');
+    const heads = versionGraph((await this.api.list()).filter(file => file.cloud.datasetId === link.datasetId)).heads; this.check();
+    if (heads.length !== 1 || heads[0].cloud.versionId !== link.baseVersionId) {
+      if (heads.length) {state.conflict = heads.map(file => file.cloud.versionId).sort(); await this.persist(state);}
+      throw new Error('雲端資料又有更新，請先到遠端同步選擇要使用的內容，再登出。');
+    }
+    const snapshot = await this.board.snapshot('full', []); this.check();
+    const document = await createDriveDocument(snapshot.backup, link.datasetId, [link.baseVersionId], mode); this.check();
+    await this.queue(state, document); await this.flush();
+    const saved = versionGraph((await this.api.list()).filter(file => file.cloud.datasetId === link.datasetId)).heads; this.check();
+    if (saved.length !== 1 || saved[0].cloud.versionId !== document.cloud.versionId) {
+      const latestState = await this.state();
+      if (saved.length) {latestState.conflict = saved.map(file => file.cloud.versionId).sort(); await this.persist(latestState);}
+      throw new Error('備份期間雲端又有更新，本機資料保留，請再同步一次。');
+    }
+    const verified = await this.api.read(saved[0]); this.check();
+    await this.api.assertAvailable(link.datasetId); this.check();
+    const expectedHash = await backupHash(snapshot.backup);
+    if (verified.kind !== 'full' || verified.cloud.datasetId !== link.datasetId || verified.cloud.versionId !== document.cloud.versionId || await backupHash(verified) !== expectedHash) throw new Error('無法確認完整雲端備份，尚未登出，本機資料保留。');
+    const latest = await this.board.snapshot('full', []); this.check();
+    if (latest.revision !== snapshot.revision || await backupHash(latest.backup) !== expectedHash) throw new Error('備份後本機資料又有變更，尚未登出，請再試一次。');
+    this.check();
+    return {datasetId: link.datasetId, revision: snapshot.revision};
   }
   async start(kind: BackupKind, ids: string[], mode: 'backup' | 'sync', requireEmpty = false): Promise<void> {
     await this.flush();

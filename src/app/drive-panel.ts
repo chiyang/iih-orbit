@@ -1,7 +1,7 @@
 import { DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, effect, ElementRef, inject, linkedSignal, output, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { BackupKind, readBackup } from './backup-data';
+import { readBackup } from './backup-data';
 import { downloadBackup } from './backup-file';
 import { DriveDocument, DriveFile, DriveSettings } from './drive-data';
 import { DriveService, type DriveRemovalReview } from './drive-service';
@@ -15,11 +15,7 @@ export class DrivePanel {
   readonly store = this.drive.store;
   readonly restored = output<void>();
   readonly configure = output<void>();
-  readonly kind = signal<BackupKind>('full');
-  readonly ids = signal<string[]>([this.store.currentWorkspace().id]);
-  readonly mode = signal<'backup' | 'sync'>('sync');
-  readonly editing = signal(false);
-  readonly creating = signal(false);
+  readonly creating = linkedSignal<string, boolean>({source: () => JSON.stringify([this.store.generation(), this.store.google().clientId, this.store.drive().accountId]), computation: (context, previous) => previous?.source === context ? previous.value : false});
   readonly saving = signal(false);
   readonly preview = signal<DriveDocument | null>(null);
   readonly previewFile = signal<DriveFile | null>(null);
@@ -48,14 +44,9 @@ export class DrivePanel {
   readonly canChooseCloud = computed(() => !!this.drive.runtime().conflict?.length && !!this.currentCollection()?.heads.length && !this.currentCollection()?.deleting && this.drive.catalogFresh() && this.drive.auth.connected() && this.drive.online() && !this.drive.busy() && !this.saving() && !this.importing() && !this.removing() && !this.drive.runtime().pending && !this.store.pendingWrites());
   readonly cloudCount = computed(() => this.catalog().collections.length + this.catalog().manual.length);
   readonly canCreate = computed(() => this.drive.runtimeReady() && this.drive.catalogFresh() && !this.drive.runtime().link && !this.drive.unavailable());
-  readonly showCreateForm = computed(() => this.editing() && !!this.drive.runtime().link || this.canCreate() && (!this.hasFiles() || this.creating()));
-  private readonly lastActiveMode = signal<'backup' | 'sync' | null>(null);
-  readonly resumeMode = computed(() => this.lastActiveMode() ?? (this.currentCollection()?.heads[0]?.cloud.purpose === 'backup' ? 'backup' : 'sync'));
+  readonly showCreateForm = computed(() => this.canCreate() && (!this.hasFiles() || this.creating()));
   readonly otherCollections = computed(() => this.catalog().collections.filter(group => !group.current));
-  readonly sameScope = computed(() => {
-    const link = this.drive.runtime().link;
-    return !!link && link.kind === this.kind() && (link.kind === 'full' || JSON.stringify([...link.workspaceIds].sort()) === JSON.stringify([...this.ids()].sort()));
-  });
+  readonly needsUpgrade = computed(() => !!this.drive.runtime().link && (this.drive.runtime().link?.kind !== 'full' || this.store.drive().kind !== 'full' || this.store.drive().mode === 'backup'));
   readonly currentWorkspaces = computed(() => {
     const link = this.drive.runtime().link;
     return this.store.workspaces().filter(workspace => link?.kind === 'full' || link?.workspaceIds.includes(workspace.id));
@@ -66,9 +57,9 @@ export class DrivePanel {
     return names.slice(0, 3).join('、') + (names.length > 3 ? `，另有 ${names.length - 3} 個` : '');
   });
   readonly currentSavedAt = computed(() => this.currentCollection()?.updatedAt ?? this.drive.runtime().lastSavedAt);
-  readonly canBackup = computed(() => this.drive.runtimeReady() && !this.drive.busy() && !this.saving() && !this.importing() && !this.removing() && this.drive.auth.connected() && this.drive.online() && !this.drive.runtime().pending && !this.store.pendingWrites() && (this.kind() === 'full' || !!this.ids().length && this.ids().every(id => this.store.workspaces().some(workspace => workspace.id === id))));
-  readonly canSave = computed(() => this.canBackup() && !this.drive.runtime().conflict && (this.sameScope() && !this.drive.unavailable() || this.drive.catalogFresh() && (this.editing() || this.creating() || this.canCreate() && !this.hasFiles())));
-  readonly startLabel = computed(() => this.drive.runtime().link && this.sameScope() && !this.drive.unavailable() ? '儲存設定' : this.drive.runtime().link || this.creating() ? '另建一份自動儲存' : '建立自動儲存');
+  readonly canBackup = computed(() => this.drive.runtimeReady() && !this.drive.busy() && !this.saving() && !this.importing() && !this.removing() && this.drive.auth.connected() && this.drive.online() && !this.drive.runtime().pending && !this.store.pendingWrites());
+  readonly canSave = computed(() => this.canBackup() && !this.drive.runtime().conflict && !this.drive.unavailable() && (!!this.drive.runtime().link || this.drive.catalogFresh() && (this.creating() || this.canCreate() && !this.hasFiles())));
+  readonly startLabel = computed(() => this.creating() ? '另建一份自動儲存' : '建立自動儲存');
   readonly fileScope = fileScope;
   readonly canJoin = computed(() => {
     const file = this.previewFile();
@@ -101,7 +92,6 @@ export class DrivePanel {
   });
   confirmation = '';
   removalConfirmation = '';
-  private modeContext = '';
   private loadedConnection = '';
   private readonly revision = signal('');
   private readonly useConnection = signal(-1);
@@ -119,18 +109,6 @@ export class DrivePanel {
       const key = JSON.stringify([this.store.google().clientId, this.store.generation(), this.store.drive().accountId, this.drive.auth.connectionVersion()]);
       if (this.drive.runtimeReady() && this.drive.auth.connected() && this.drive.online() && !this.drive.busy() && this.loadedConnection !== key) {
         untracked(() => {this.loadedConnection = key; if (!this.drive.catalogFresh()) void this.drive.list();});
-      }
-    });
-    effect(() => {
-      const settings = this.store.drive(), link = this.drive.runtime().link, editing = this.editing(), saving = this.saving();
-      const context = JSON.stringify([this.store.google().clientId, this.store.generation(), settings.accountId]);
-      const changed = context !== this.modeContext;
-      if (changed) {this.modeContext = context; this.lastActiveMode.set(null); this.editing.set(false); this.creating.set(false);}
-      if (settings.mode !== 'off') this.lastActiveMode.set(settings.mode);
-      if (!saving && (changed || link && !editing)) {
-        this.kind.set(link?.kind ?? settings.kind);
-        this.ids.set(link?.workspaceIds.length ? [...link.workspaceIds] : settings.workspaceIds.length ? [...settings.workspaceIds] : [this.store.currentWorkspace().id]);
-        this.mode.set(settings.mode === 'off' ? this.resumeMode() : settings.mode);
       }
     });
     effect(() => {
@@ -204,33 +182,26 @@ export class DrivePanel {
   showCloudData(): void {this.cloudList()?.nativeElement.scrollIntoView({block: 'start', behavior: 'smooth'}); this.cloudList()?.nativeElement.focus({preventScroll: true});}
   beginCreate(): void {
     if (!this.canCreate() || this.drive.busy()) return;
-    this.kind.set('full'); this.ids.set([this.store.currentWorkspace().id]); this.mode.set('sync'); this.creating.set(true); this.clearPreview();
+    this.creating.set(true); this.clearPreview();
   }
   async saveAutomatic(): Promise<void> {
     if (!this.canSave()) return;
-    const kind = this.kind(), ids = [...this.ids()], mode = this.mode();
     this.saving.set(true); this.error.set('');
     try {
-      if (this.sameScope() && !this.drive.unavailable()) {
-        const result = await this.store.updateDrive({mode});
-        if (!result.ok) {this.error.set(result.message); return;}
-        await this.drive.sync();
-      } else await this.drive.start(kind, ids, mode, !this.creating() && !this.editing() && !this.drive.runtime().link);
-      if (!this.drive.error() && this.drive.runtime().link && this.sameScope()) {this.editing.set(false); this.creating.set(false);}
+      if (await this.drive.enableAutomatic(!this.creating() && !this.drive.runtime().link)) this.creating.set(false);
+      else if (!this.drive.runtime().link) {const error = this.drive.error(); await this.drive.list(); this.drive.error.set(error);}
     } finally {this.saving.set(false);}
   }
   async resume(): Promise<void> {
     if (this.drive.unavailable()) return;
-    this.mode.set(this.resumeMode());
     await this.saveAutomatic();
   }
   async saveCopy(): Promise<void> {
     if (!this.canBackup()) return;
     this.saving.set(true);
-    try {await this.drive.manual(this.kind(), this.ids());} finally {this.saving.set(false);}
+    try {await this.drive.manual('full', []);} finally {this.saving.set(false);}
   }
-  toggle(id: string, selected: boolean): void { this.ids.update(ids => selected ? [...new Set([...ids, id])] : ids.filter(value => value !== id)); }
-  async options(patch: Partial<DriveSettings>): Promise<void> {
+  async options(patch: Pick<Partial<DriveSettings>, 'debounceSeconds' | 'pollMinutes' | 'mode'>): Promise<void> {
     this.error.set(''); const result = await this.store.updateDrive(patch); if (!result.ok) this.error.set(result.message);
   }
   async requestRemoval(target: string | DriveFile): Promise<void> {

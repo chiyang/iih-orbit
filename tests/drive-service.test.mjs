@@ -90,6 +90,20 @@ async function fixture() {
   return {service, create, panel, store, auth, api, stored, documents, retired, removed, navigator, async event(name) {for (const fn of listeners.get(name) ?? []) fn({}); await settle();}, close() {for (const s of services) s.ngOnDestroy(); for (const i of injectors) i.destroy(); store.ngOnDestroy(); for (const [key, descriptor] of originals) {if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];}}};
 }
 
+test('登出檢查點讀回驗證，離線保留資料；舊部分範圍升級完整備份後可登出', async () => {
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync'); const dataset = f.service.runtime().link.datasetId;
+    await f.store.saveTask({...f.store.tasks()[0], title: '登出前最新任務'});
+    const checkpoint = await f.service.checkpointForLogout();
+    assert.deepEqual(checkpoint, {datasetId: dataset, revision: f.store.revision()}); assert.equal(f.service.loggingOut(), false);
+    const file = versionGraph(await f.api.list()).heads[0]; assert.equal((await f.api.read(file)).data.workspaces[0].tasks[0].title, '登出前最新任務');
+    f.service.online.set(false); assert.equal(await f.service.checkpointForLogout(), null); assert.match(f.service.error(), /離線/);
+    f.service.online.set(true); await f.service.start('workspaces', [f.store.currentWorkspace().id], 'sync');
+    const upgraded = await f.service.checkpointForLogout(); assert.ok(upgraded); assert.equal(f.service.runtime().link.kind, 'full'); assert.equal(f.store.tasks()[0].title, '登出前最新任務');
+  } finally {f.close();}
+});
+
 test('自動同步有新版本才整理該集合並更新列表，整理失敗不重複上傳，使用者可單獨重試整理', async () => {
   const f = await fixture(), calls = [];
   try {
@@ -564,67 +578,112 @@ test('同帳號重新授權後也拒絕舊回覆，待上傳內容可用新的�
   } finally {f.close();}
 });
 
-test('自動儲存設定沿用目前的範圍；同範圍切換模式、暫停與恢復不多建雲端資料', async () => {
+test('舊版部分備份先接回原範圍更新，再改用完整同步，保留其他空間、原集合及間隔', async () => {
   const f = await fixture();
   try {
-    const id = f.store.currentWorkspace().id;
-    await f.service.start('workspaces', [id], 'backup');
+    const id = f.store.currentWorkspace().id; await f.store.saveWorkspace('', '課程安排');
+    await f.service.start('workspaces', [id], 'backup'); const dataset = f.service.runtime().link.datasetId;
+    await f.store.updateDrive({debounceSeconds: 30, pollMinutes: 15});
+    const root = [...f.documents.values()][0], changed = structuredClone(root); changed.data.workspaces[0].tasks[0].title = '接回原範圍的雲端更新';
+    f.documents.set('remote_update', await createDriveDocument(changed, dataset, [root.cloud.versionId], 'sync'));
+    const panel = f.panel(); await settle(); assert.equal(panel.needsUpgrade(), true);
+    await panel.saveAutomatic(); await settle(); const fullDataset = f.service.runtime().link.datasetId;
+    assert.notEqual(fullDataset, dataset); assert.equal(f.service.runtime().link.kind, 'full'); assert.equal(f.store.drive().mode, 'sync');
+    assert.equal(f.store.workspaces().length, 2); assert.equal(f.store.workspaces().find(workspace => workspace.id === id).tasks[0].title, '接回原範圍的雲端更新');
+    assert.equal(f.store.drive().debounceSeconds, 30); assert.equal(f.store.drive().pollMinutes, 15); assert.equal(panel.needsUpgrade(), false);
+    assert.ok([...f.documents.values()].some(document => document.cloud.datasetId === dataset));
+    await panel.options({mode: 'off'}); await panel.resume(); assert.equal(f.service.runtime().link.datasetId, fullDataset);
+    await panel.saveAutomatic(); assert.equal(new Set([...f.documents.values()].map(document => document.cloud.datasetId)).size, 2);
+  } finally {f.close();}
+});
+
+test('舊版全部資料備份改為雙向同步時沿用原集合，暫停恢復不另外建集合', async () => {
+  const f = await fixture();
+  try {
+    await f.store.saveWorkspace('', '課程安排'); await f.service.start('full', [], 'backup');
     const dataset = f.service.runtime().link.datasetId, panel = f.panel(); await settle();
-    assert.equal(panel.kind(), 'workspaces'); assert.deepEqual(panel.ids(), [id]); assert.equal(panel.mode(), 'backup');
-    assert.equal(panel.currentScope(), f.store.currentWorkspace().name); assert.equal(panel.otherCollections().length, 0);
-    panel.editing.set(true); panel.mode.set('sync'); await panel.saveAutomatic(); await settle();
-    assert.equal(f.service.runtime().link.datasetId, dataset); assert.equal(f.store.drive().mode, 'sync'); assert.equal(panel.editing(), false);
-    await panel.options({mode: 'off'}); await settle(); assert.equal(panel.resumeMode(), 'sync');
-    await panel.resume(); await settle(); assert.equal(f.store.drive().mode, 'sync'); assert.equal(f.service.runtime().link.datasetId, dataset);
-    await panel.saveAutomatic(); assert.equal(new Set([...f.documents.values()].map(document => document.cloud.datasetId)).size, 1);
-  } finally {f.close();}
-});
-
-test('更換儲存範圍才另存資料，舊資料移至其他清單；取消變更不影響既有儲存', async () => {
-  const f = await fixture();
-  try {
-    await f.store.saveWorkspace('', '課程安排');
-    await f.service.start('full', [], 'sync'); const old = f.service.runtime().link.datasetId, panel = f.panel(); await settle();
-    panel.editing.set(true); panel.kind.set('workspaces'); panel.ids.set([f.store.currentWorkspace().id]);
-    assert.equal(panel.sameScope(), false); assert.match(panel.startLabel(), /另建/);
-    panel.editing.set(false); await settle(); assert.equal(panel.kind(), 'full'); assert.equal(f.service.runtime().link.datasetId, old);
-    panel.editing.set(true); panel.kind.set('workspaces'); panel.ids.set([f.store.currentWorkspace().id]); await panel.saveAutomatic(); await settle();
-    assert.notEqual(f.service.runtime().link.datasetId, old); assert.equal(panel.kind(), 'workspaces'); assert.equal(panel.editing(), false);
-    assert.equal(panel.otherCollections().length, 1); assert.equal(panel.otherCollections()[0].id, old);
-    assert.equal(panel.catalog().collections.length, 2); assert.ok([...f.documents.values()].some(document => document.cloud.datasetId === old));
-  } finally {f.close();}
-});
-
-test('開始儲存防止連按、尚未讀取設定與未選範圍；失敗保留上傳內容供重試', async () => {
-  const f = await fixture(); let finish;
-  try {
-    const panel = f.panel(); await settle();
-    f.service.runtimeReady.set(false); await panel.saveAutomatic(); assert.equal(f.documents.size, 0);
-    f.service.runtimeReady.set(true); panel.kind.set('workspaces'); panel.ids.set([]); await panel.saveAutomatic(); assert.equal(f.documents.size, 0);
-    panel.kind.set('full'); const save = f.api.save;
-    f.api.save = async (document, id) => {await new Promise(resolve => {finish = resolve;}); return save(document, id);};
-    const started = panel.saveAutomatic(); while (!finish) await new Promise(resolve => setImmediate(resolve));
-    await panel.saveAutomatic(); assert.equal(panel.canSave(), false); finish(); await started; await settle();
-    assert.equal(f.documents.size, 1); assert.equal(panel.saving(), false);
-    await f.store.saveTask({...f.store.tasks()[0], title: '等待重新上傳'});
-    f.api.save = async () => {throw new Error('網路中斷');}; panel.editing.set(true); await panel.saveAutomatic();
-    assert.ok(f.service.runtime().pending); assert.equal(panel.editing(), true); assert.equal(panel.canSave(), false);
-    f.api.save = save; await f.service.retry(); await panel.saveAutomatic(); assert.equal(panel.editing(), false);
+    await panel.saveAutomatic(); assert.equal(f.store.drive().mode, 'sync'); assert.equal(f.store.drive().kind, 'full');
+    assert.equal(f.service.runtime().link.datasetId, dataset); assert.equal(panel.showCreateForm(), false);
+    await panel.options({mode: 'off'}); await panel.resume(); assert.equal(f.service.runtime().link.datasetId, dataset);
     assert.equal(new Set([...f.documents.values()].map(document => document.cloud.datasetId)).size, 1);
   } finally {f.close();}
 });
 
-test('另存一份備份沿用顯示的範圍，不切換目前自動儲存；預覽顯示可辨識的數量或名稱', async () => {
+test('舊部分範圍升級上傳失敗保留全部本機資料、原集合與待上傳完整備份，重試不重複建立', async () => {
   const f = await fixture();
   try {
-    await f.service.start('workspaces', [f.store.currentWorkspace().id], 'sync'); const panel = f.panel(); await settle();
-    const dataset = f.service.runtime().link.datasetId; await panel.saveCopy();
-    assert.equal(f.service.runtime().link.datasetId, dataset); assert.equal(f.store.drive().mode, 'sync');
-    const manual = panel.catalog().manual[0]; assert.equal(manual.kind, 'workspaces'); assert.equal(panel.scopeLabel(manual), f.store.currentWorkspace().name);
-    await f.service.manual('full', []); const full = panel.catalog().manual.find(file => file.kind === 'full');
-    assert.match(panel.scopeLabel(full), /所有工作空間（\d+ 個）/);
-    assert.equal(panel.scopeLabel({...manual, summary: undefined}), '選定的工作空間（預覽可查看名稱）');
-    await panel.inspect(manual); assert.equal(panel.preview().data.workspaces.length, 1); assert.equal(panel.canJoin(), false);
+    const id = f.store.currentWorkspace().id; await f.store.saveWorkspace('', '未包含的本機空間');
+    await f.service.start('workspaces', [id], 'backup'); const dataset = f.service.runtime().link.datasetId, before = structuredClone(f.store.workspaces()), save = f.api.save;
+    f.api.save = async () => {throw new Error('完整備份上傳失敗');};
+    assert.equal(await f.service.enableAutomatic(), false); assert.deepEqual(f.store.workspaces(), before);
+    assert.notEqual(f.service.runtime().link.datasetId, dataset); assert.equal(f.service.runtime().pending.document.kind, 'full');
+    assert.ok([...f.documents.values()].some(document => document.cloud.datasetId === dataset));
+    assert.equal(f.service.runtime().pending.document.data.workspaces.length, 2); assert.equal(f.store.drive().mode, 'backup');
+    f.api.save = save; await f.service.retry(); assert.equal(await f.service.enableAutomatic(), true);
+    assert.equal(f.service.runtime().link.kind, 'full'); assert.deepEqual(f.store.workspaces(), before);
+    assert.equal(new Set([...f.documents.values()].map(document => document.cloud.datasetId)).size, 2);
+  } finally {f.close();}
+});
+
+test('使用舊部分雲端資料保留其他本機空間，成功後改用完整同步並保留舊集合', async () => {
+  const f = await fixture();
+  try {
+    const id = f.store.currentWorkspace().id; await f.service.start('workspaces', [id], 'backup');
+    const old = f.service.files()[0], dataset = old.cloud.datasetId;
+    await f.store.saveWorkspace('', '個人本機空間'); const localId = f.store.currentWorkspace().id;
+    await f.store.saveTask({...f.store.workspaces().find(workspace => workspace.id === id).tasks[0], id: 'local-task', title: '另一個空間的任務'});
+    const local = structuredClone(f.store.currentWorkspace());
+    assert.equal(await f.service.join(old, f.store.revision()), true);
+    assert.equal(f.service.runtime().link.kind, 'full'); assert.notEqual(f.service.runtime().link.datasetId, dataset);
+    assert.equal(f.store.drive().mode, 'sync'); assert.equal(f.store.workspaces().length, 2);
+    assert.deepEqual(f.store.workspaces().find(workspace => workspace.id === localId), local);
+    assert.ok([...f.documents.values()].some(document => document.cloud.datasetId === dataset));
+    assert.equal(versionGraph(await f.api.list()).heads.find(file => file.kind === 'full').summary.tasks, 2);
+  } finally {f.close();}
+});
+
+test('手動整理資料夾不觸發歷史保留清理，即使超過八份也保留原內容', async () => {
+  const f = await fixture(); let pruning = 0;
+  try {
+    await f.service.start('full', [], 'sync'); let previous = [...f.documents.values()][0];
+    for (let index = 0; index < 10; index++) {
+      const source = structuredClone(previous); source.data.workspaces[0].tasks[0].title = '歷史版本 ' + index;
+      previous = await createDriveDocument(source, previous.cloud.datasetId, [previous.cloud.versionId], 'sync'); f.documents.set('history_' + index, previous);
+    }
+    const before = structuredClone([...f.documents]), prune = f.api.pruneHistory;
+    f.api.pruneHistory = async (...args) => {pruning++; return prune(...args);};
+    await f.service.organize(); assert.equal(pruning, 0); assert.deepEqual([...f.documents], before); assert.equal(f.documents.size, 11);
+    assert.equal(f.service.files().length, 11); assert.equal(f.retired.size, 0);
+  } finally {f.close();}
+});
+
+test('固定完整同步仍防止連按與尚未讀取清單，失敗保留待上傳內容供重試', async () => {
+  const f = await fixture(); let finish;
+  try {
+    const panel = f.panel(); await settle();
+    f.service.runtimeReady.set(false); await panel.saveAutomatic(); assert.equal(f.documents.size, 0);
+    f.service.runtimeReady.set(true); const save = f.api.save;
+    f.api.save = async (document, id) => {await new Promise(resolve => {finish = resolve;}); return save(document, id);};
+    const started = panel.saveAutomatic(); while (!finish) await new Promise(resolve => setImmediate(resolve));
+    await panel.saveAutomatic(); assert.equal(panel.canSave(), false); finish(); await started; await settle();
+    assert.equal(f.documents.size, 1); assert.equal(f.store.drive().mode, 'sync'); assert.equal([...f.documents.values()][0].kind, 'full');
+    await f.store.saveTask({...f.store.tasks()[0], title: '等待重新上傳'});
+    f.api.save = async () => {throw new Error('網路中斷');}; await panel.saveAutomatic(); assert.ok(f.service.runtime().pending); assert.equal(panel.canSave(), false);
+    f.api.save = save; await f.service.retry(); await panel.saveAutomatic(); assert.equal(f.service.runtime().pending, undefined);
+    assert.equal(new Set([...f.documents.values()].map(document => document.cloud.datasetId)).size, 1);
+  } finally {f.close();}
+});
+
+test('另存完整備份包含全部工作空間，不切換目前集合，舊部分備份仍能查看', async () => {
+  const f = await fixture();
+  try {
+    const id = f.store.currentWorkspace().id; await f.store.saveWorkspace('', '課程安排');
+    await f.service.start('workspaces', [id], 'sync'); const panel = f.panel(); await settle();
+    const dataset = f.service.runtime().link.datasetId; await panel.saveCopy(); assert.equal(f.service.runtime().link.datasetId, dataset);
+    const manual = panel.catalog().manual[0]; assert.equal(manual.kind, 'full'); assert.match(panel.scopeLabel(manual), /所有工作空間/);
+    await panel.inspect(manual); assert.equal(panel.preview().data.workspaces.length, 2); assert.equal(panel.canJoin(), false);
+    await f.service.manual('workspaces', [id]); const old = panel.catalog().manual.find(file => file.kind === 'workspaces');
+    assert.equal(panel.scopeLabel({...old, summary: undefined}), '選定的工作空間（預覽可查看名稱）');
   } finally {f.close();}
 });
 
@@ -657,20 +716,16 @@ test('開啟 Drive 面板自動載入雲端清單一次，變更設定或焦點�
   } finally {f.close();}
 });
 
-test('初次設定預設跨裝置同步，使用者選擇在開始前、上傳中與完成後都不被暫停狀態覆寫', async () => {
-  for (const mode of ['sync', 'backup']) {
-    const f = await fixture(); let finish;
-    try {
-      const panel = f.panel(); await settle(); assert.equal(panel.mode(), 'sync');
-      panel.mode.set(mode); await f.store.updateDrive({debounceSeconds: 30}); await settle(); assert.equal(panel.mode(), mode);
-      const save = f.api.save;
-      f.api.save = async (document, id) => {await new Promise(resolve => {finish = resolve;}); return save(document, id);};
-      const started = panel.saveAutomatic(); while (!finish) await new Promise(resolve => setImmediate(resolve));
-      await settle(); assert.equal(f.store.drive().mode, 'off'); assert.equal(panel.mode(), mode); assert.equal(panel.saving(), true);
-      finish(); await started; await settle(); assert.equal(f.store.drive().mode, mode); assert.equal(panel.mode(), mode);
-      assert.equal([...f.documents.values()][0].cloud.purpose, mode);
-    } finally {f.close();}
-  }
+test('建立自動儲存固定全部工作空間與雙向同步，上傳期間仍保持關閉，間隔保留', async () => {
+  const f = await fixture(); let finish;
+  try {
+    const panel = f.panel(); await settle(); await f.store.updateDrive({debounceSeconds: 30, pollMinutes: 15});
+    const save = f.api.save; f.api.save = async (document, id) => {await new Promise(resolve => {finish = resolve;}); return save(document, id);};
+    const started = panel.saveAutomatic(); while (!finish) await new Promise(resolve => setImmediate(resolve));
+    await settle(); assert.equal(f.store.drive().mode, 'off'); assert.equal(panel.saving(), true);
+    finish(); await started; await settle(); assert.equal(f.store.drive().mode, 'sync'); assert.equal(f.store.drive().kind, 'full');
+    assert.equal([...f.documents.values()][0].cloud.purpose, 'sync'); assert.equal(f.store.drive().debounceSeconds, 30); assert.equal(f.store.drive().pollMinutes, 15);
+  } finally {f.close();}
 });
 
 test('全部跨裝置同步接收只有設定的雲端更新，也套用外觀提醒與月曆顯示；保留登入且不回傳重複版本', async () => {
@@ -708,7 +763,7 @@ test('從雲端接續全部資料的預覽確認包含設定，確認後立即�
     const panel = f.panel(); await settle(); await panel.inspect(file); panel.prepare('join'); assert.equal(panel.confirmationPhrase(), '使用這份雲端資料');
     await panel.execute(); assert.equal(f.store.appearance().theme, 'light');
     panel.confirmation = panel.confirmationPhrase(); await panel.execute(); await settle();
-    assert.deepEqual(f.store.appearance(), {...expected.preferences, theme: 'light', textSize: 'standard'}); assert.deepEqual(f.store.reminders(), expected.reminders); assert.equal(panel.mode(), 'sync');
+    assert.deepEqual(f.store.appearance(), {...expected.preferences, theme: 'light', textSize: 'standard'}); assert.deepEqual(f.store.reminders(), expected.reminders); assert.equal(f.store.drive().mode, 'sync');
     const count = f.documents.size; await f.service.sync(); assert.equal(f.documents.size, count);
     await f.store.updateAppearance({accent: '#3264ad'}); await f.service.sync(); assert.equal(f.documents.size, count + 1);
     assert.equal([...f.documents.values()].at(-1).preferences.accent, '#3264ad');
@@ -816,8 +871,8 @@ test('刪除本機正在使用的分支後保留本機內容，按使用雲端�
       assert.equal(panel.preview(), null); assert.equal(panel.action(), null); assert.equal(panel.selectingCloud(), false);
       assert.equal(f.store.tasks()[0].title, '保留的雲端修改'); assert.equal(f.service.runtime().conflict, undefined);
       assert.equal(f.retired.get(localBranch.id).trashed, true); assert.equal(versionGraph(await f.api.list()).heads.length, 1);
-      assert.equal(versionGraph(await f.api.list()).heads[0].cloud.purpose, mode);
-      assert.equal(f.store.drive().mode, mode); assert.match(f.service.message(), /已套用雲端內容/);
+      assert.equal(versionGraph(await f.api.list()).heads[0].cloud.purpose, 'sync');
+      assert.equal(f.store.drive().mode, 'sync'); assert.match(f.service.message(), /已套用雲端內容/);
     } finally {f.close();}
   }
 });

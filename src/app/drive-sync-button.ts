@@ -1,19 +1,22 @@
 import { Component, computed, inject, output } from '@angular/core';
 import { DriveService } from './drive-service';
 import { Icon } from './icon';
+import { GoogleConnections } from './google-connections';
+import { Tooltip } from './tooltip';
 
 @Component({
-  selector: 'app-drive-sync-button', imports: [Icon], styleUrl: './toolbar-icon-button.css',
+  selector: 'app-drive-sync-button', imports: [Icon, Tooltip], styleUrl: './toolbar-icon-button.css',
   template: `@if (visible()) {
-    <button type="button" [disabled]="busy() || drive.store.pendingWrites() > 0 || (!drive.online() && !needsSettings())" [attr.aria-busy]="busy()" [attr.aria-label]="description()" [title]="description()" (click)="sync()"><app-icon [name]="drive.lastSyncAt() && !attention() && !busy() ? 'circleCheck' : 'sync'" [class.spinning]="busy()" />@if (attention()) {<span class="dot" aria-hidden="true"></span>}</button>
+    <button type="button" [disabled]="busy() || drive.store.pendingWrites() > 0 || (!drive.online() && !needsSettings())" [attr.aria-busy]="busy()" [attr.aria-label]="description()" [appTooltip]="description()" (click)="sync()"><app-icon [name]="drive.lastSyncAt() && !attention() && !busy() ? 'circleCheck' : 'sync'" [class.spinning]="busy()" />@if (attention()) {<span class="dot" aria-hidden="true"></span>}</button>
   }`
 })
 export class DriveSyncButton {
   readonly drive = inject(DriveService);
+  readonly connections = inject(GoogleConnections);
   readonly configure = output<void>();
   readonly result = output<string>();
-  readonly busy = computed(() => this.drive.busy() || this.drive.syncing());
-  readonly visible = computed(() => !!this.drive.store.drive().accountId && !!this.drive.runtime().link);
+  readonly busy = computed(() => this.drive.busy() || this.drive.syncing() || this.connections.loggingOut());
+  readonly visible = computed(() => !this.connections.renewalVisible() && !!this.drive.store.drive().accountId && !!this.drive.runtime().link);
   readonly needsSettings = computed(() => !this.drive.auth.connected() || !!this.drive.runtime().conflict?.length || this.drive.unavailable() || this.drive.store.drive().mode === 'off');
   readonly attention = computed(() => this.needsSettings() || !!this.drive.error() || !!this.drive.runtime().pending || this.drive.store.hasUnsavedChanges() || this.drive.store.taskConflicts().length > 0);
   readonly description = computed(() => {

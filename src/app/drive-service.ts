@@ -5,8 +5,8 @@ import { CalendarSyncCoordinator } from './calendar-sync';
 import { DriveApi } from './drive-api';
 import { DriveAuth } from './drive-auth';
 import type { GoogleAccount } from './google-auth';
-import { backupHash, canonical, DriveCollectionDeleted, DriveDeletePlan, DriveDocument, DriveFile, DriveRuntime, syncHash, versionGraph } from './drive-data';
-import { DriveEngine } from './drive-engine';
+import { canonical, DriveCollectionDeleted, DriveDeletePlan, DriveDocument, DriveFile, DriveRuntime, syncHash, versionGraph } from './drive-data';
+import { DriveEngine, type LogoutCheckpoint } from './drive-engine';
 import { fileScope } from './drive-catalog';
 import { IndexedDriveRepository } from './drive-repository';
 import { withStorageLock } from './storage-coordinator';
@@ -44,6 +44,7 @@ export class DriveService implements OnDestroy {
   readonly message = signal('');
   readonly lastSyncAt = signal('');
   readonly syncing = signal(false);
+  readonly loggingOut = signal(false);
   readonly active = signal(false);
   readonly online = signal(typeof navigator === 'undefined' || navigator.onLine !== false);
   private readonly localBusy = signal(false);
@@ -123,7 +124,7 @@ export class DriveService implements OnDestroy {
     this.debounce = setTimeout(() => { void this.sync(false); }, this.store.drive().debounceSeconds * 1000);
   }
   private autoReady(): boolean {
-    return !this.destroyed && !this.suspended && this.auth.connected() && this.online() && !this.unavailable() && this.store.drive().mode !== 'off' && !this.store.hasUnsavedChanges();
+    return !this.destroyed && !this.suspended && !this.loggingOut() && !this.store.cloudResume() && this.auth.connected() && this.online() && !this.unavailable() && this.store.drive().mode !== 'off' && !this.store.hasUnsavedChanges();
   }
   private poll(): void {
     const minutes = this.store.drive().pollMinutes;
@@ -147,6 +148,20 @@ export class DriveService implements OnDestroy {
     } catch (error) { this.error.set(this.describe(error)); }
   }
   disconnect(): void { clearTimeout(this.debounce); this.auth.disconnect('Drive 已解除連線，雲端備份保留。'); }
+  async checkpointForLogout(): Promise<LogoutCheckpoint | null> {
+    if (this.busy() || this.syncing() || this.loggingOut() || this.store.pendingWrites() || this.store.hasUnsavedChanges()) {this.error.set('請等目前的儲存完成，再按同步並登出。'); return null;}
+    if (!this.runtime().link) {this.error.set('請先建立或接續雲端資料，再同步並登出。'); return null;}
+    if (this.runtime().link?.kind !== 'full' || this.store.drive().kind !== 'full' || this.store.drive().mode === 'backup') {
+      if (!await this.enableAutomatic()) return null;
+    }
+    this.loggingOut.set(true); clearTimeout(this.debounce);
+    let checkpoint: LogoutCheckpoint | null = null;
+    try {
+      const completed = await this.run(async engine => {checkpoint = await engine.checkpointForLogout('sync');});
+      return completed ? checkpoint : null;
+    } finally {this.loggingOut.set(false);}
+  }
+  async clearLocalData(): Promise<void> {clearTimeout(this.debounce); this.runtime.set({}); this.files.set([]); this.removals.set([]); await this.repository.clear();}
   private async run(operation: (engine: DriveEngine, current: () => boolean) => Promise<void>, notice = '', guardConfiguration = true): Promise<boolean> {
     if (this.localBusy() || this.active()) return false;
     if (!this.auth.connected() || !this.online()) { this.error.set(this.online() ? '請先連線 Google Drive，待上傳版本仍保留。' : '目前離線，待上傳版本仍保留。'); return false; }
@@ -219,9 +234,22 @@ export class DriveService implements OnDestroy {
   async organize(): Promise<void> {
     await this.run(async (_, current) => {
       const result = await this.api.organize(current);
-      const {files, removals} = await this.retainedCatalog(current);
+      const [files, removals] = await Promise.all([this.api.list(), this.api.removals()]);
       if (current()) {this.acceptCatalog(files, removals); this.message.set(result.changed ? '已整理 ' + result.changed + ' 份檔案。' : '檔案已整理完成。');}
     });
+  }
+  async enableAutomatic(requireEmpty = false): Promise<boolean> {
+    if (this.busy() || this.syncing() || this.loggingOut() || this.store.hasUnsavedChanges() || this.store.cloudResume()) return false;
+    const context = this.context, generation = this.store.generation();
+    const completed = await this.run(engine => engine.enableFullSync(requireEmpty), '已開啟全部工作空間的自動儲存，並接收其他電腦的更新。');
+    if (!completed || context !== this.context || generation !== this.store.generation() || this.runtime().link?.kind !== 'full') {
+      if (context === this.context && generation === this.store.generation() && this.online() && this.auth.connected()) {const error = this.error(); await this.list(); this.error.set(error);}
+      return false;
+    }
+    const updated = await this.store.updateDrive({kind: 'full', workspaceIds: [], mode: 'sync'});
+    if (!updated.ok) {this.error.set(updated.message); return false;}
+    this.missingCollection.set(''); await this.refreshCatalog(this.runtime().link!.datasetId); this.schedule();
+    return !this.error();
   }
   private async refreshCatalog(datasetId?: string): Promise<void> {
     if (this.busy()) return;
@@ -257,7 +285,7 @@ export class DriveService implements OnDestroy {
     }
   }
   async join(file: DriveFile, revision: string, reviewedHeads?: string[]): Promise<boolean> {
-    const completed = await this.run(engine => engine.join(file, revision, reviewedHeads), file.kind === 'full' ? '已使用雲端資料與外觀、提醒設定，自動儲存已開啟。' : '已使用這些雲端工作空間，自動儲存已開啟，整體外觀與提醒保留。', false);
+    const completed = await this.run(async engine => {await engine.join(file, revision, reviewedHeads); if (file.kind !== 'full') await engine.enableFullSync();}, file.kind === 'full' ? '已使用雲端資料與外觀、提醒設定，自動儲存已開啟。' : '已使用這些雲端工作空間，並改用全部工作空間的自動同步；原雲端資料保留。', false);
     if (completed) {
       const link = this.runtime().link!;
       const result = await this.store.updateDrive({kind: link.kind, workspaceIds: link.workspaceIds, mode: 'sync'});
@@ -269,15 +297,18 @@ export class DriveService implements OnDestroy {
   async sync(manual = true): Promise<DriveSyncResult> {
     if (!this.autoReady() || this.busy() || this.syncing() || (!manual && this.runtime().conflict)) return 'skipped';
     const settings = this.store.drive(), link = this.runtime().link;
-    if (!link) return 'skipped';
-    if (link.kind !== settings.kind || JSON.stringify([...link.workspaceIds].sort()) !== JSON.stringify([...settings.workspaceIds].sort())) { this.error.set('要儲存的工作空間已變更，請在「儲存設定與更多操作」重新設定保存範圍。'); return 'failed'; }
+    if (!link || settings.mode === 'off') return 'skipped';
+    if (link.kind !== 'full' || settings.kind !== 'full' || settings.mode === 'backup' || settings.workspaceIds.length) {
+      if (!await this.enableAutomatic()) return this.runtime().conflict?.length ? 'conflict' : 'failed';
+      return this.sync(manual);
+    }
     this.syncing.set(true); if (manual) this.message.set('');
     try {
       clearTimeout(this.debounce);
       const context = this.context, generation = this.store.generation();
       this.lastPoll = Date.now();
       const previousVersion = this.runtime().link?.baseVersionId;
-      if (await this.run(engine => engine.synchronize(settings.mode as 'backup' | 'sync'))) {
+      if (await this.run(engine => engine.synchronize('sync'))) {
         if (previousVersion !== this.runtime().link?.baseVersionId) await this.refreshCatalog(link.datasetId);
         else if (this.runtime().conflict || manual) await this.list();
         if (context !== this.context || generation !== this.store.generation() || this.error()) return 'failed';
@@ -286,9 +317,9 @@ export class DriveService implements OnDestroy {
           const saved = this.runtime().link;
           if (!saved) return 'failed';
           const snapshot = await this.store.driveSnapshot(saved.kind, saved.workspaceIds);
-          const hash = settings.mode === 'backup' ? await backupHash(snapshot.backup) : await syncHash(snapshot.backup);
+          const hash = await syncHash(snapshot.backup);
           if (context !== this.context || generation !== this.store.generation()) return 'failed';
-          if (this.runtime().pending || hash !== (settings.mode === 'backup' ? saved.baseBackupHash : saved.baseHash) || snapshot.revision !== this.store.revision() || this.store.hasUnsavedChanges()) {
+          if (this.runtime().pending || hash !== saved.baseHash || snapshot.revision !== this.store.revision() || this.store.hasUnsavedChanges()) {
             if (manual) this.message.set('仍有新的修改等待同步，請再次同步後再斷網。');
             this.schedule(); return 'pending';
           }
@@ -301,7 +332,11 @@ export class DriveService implements OnDestroy {
     } finally {this.syncing.set(false);}
   }
   async resolve(heads: string[], choice?: DriveFile, revision?: string): Promise<void> {
-    if (await this.run(engine => engine.resolve(heads, choice, revision, this.store.drive().mode === 'backup' ? 'backup' : 'sync'), '已使用選定內容並保留可安全整併的修改，之前的備份仍保留。')) await this.refreshCatalog(this.runtime().link?.datasetId);
+    if (await this.run(async engine => {await engine.resolve(heads, choice, revision, 'sync'); await engine.enableFullSync();}, '已使用選定內容並啟用全部工作空間的自動同步，之前的備份仍保留。')) {
+      const updated = await this.store.updateDrive({kind: 'full', workspaceIds: [], mode: 'sync'});
+      if (!updated.ok) {this.error.set(updated.message); return;}
+      await this.refreshCatalog(this.runtime().link?.datasetId); this.schedule();
+    }
   }
   async preview(file: DriveFile): Promise<DriveDocument | undefined> {
     let document: DriveDocument | undefined;

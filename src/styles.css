@@ -119,6 +119,7 @@ button { border: 0; }
 
 .workspace-crumb { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-button { border: 1px solid var(--border); border-radius: 7px; padding: var(--sp8) var(--sp10); background: var(--surface-soft); color: var(--text-muted); display: inline-flex; gap: var(--sp6); align-items: center; font-size: var(--font-10); white-space: nowrap; }
+.orbit-tooltip {position: fixed; z-index: 3000; max-width: min(320px, calc(100vw - 16px)); box-sizing: border-box; padding: 8px 12px; border-radius: 7px; background: var(--text); color: var(--surface); box-shadow: 0 4px 16px #0003; font-size: var(--font-11); line-height: 1.6; overflow-wrap: anywhere; pointer-events: none;}
 .settings-button app-icon { width: 15px; height: 15px; }
 .management-list { display: flex; flex-direction: column; gap: var(--sp8); margin-bottom: var(--sp22); }
 .management-row { display: flex; align-items: center; gap: var(--sp10); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; padding: var(--sp12); }

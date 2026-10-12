@@ -10,16 +10,27 @@ import {resolve} from 'node:path';
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/toolbar-test-')), output = resolve(directory, 'toolbar.mjs');
-await build({stdin: {contents: "export {DriveSyncButton} from './src/app/drive-sync-button.ts'; export {DriveService} from './src/app/drive-service.ts'; export {GmailNotifications} from './src/app/gmail-notifications.ts'; export {GmailService} from './src/app/gmail-service.ts'; export {panelAttention} from './src/app/panel-attention.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const {DriveSyncButton, DriveService, GmailNotifications, GmailService, panelAttention} = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {DriveSyncButton} from './src/app/drive-sync-button.ts'; export {DriveService} from './src/app/drive-service.ts'; export {GoogleConnections} from './src/app/google-connections.ts'; export {GmailNotifications} from './src/app/gmail-notifications.ts'; export {GmailService} from './src/app/gmail-service.ts'; export {panelAttention} from './src/app/panel-attention.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const {DriveSyncButton, DriveService, GoogleConnections, GmailNotifications, GmailService, panelAttention} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 
 function syncButton() {
   const drive = {store: {drive: signal({accountId: 'account', mode: 'sync'}), pendingWrites: signal(0), hasUnsavedChanges: signal(false), taskConflicts: signal([])}, auth: {connected: signal(true)}, runtime: signal({link: {}}), online: signal(true), busy: signal(false), syncing: signal(false), lastSyncAt: signal(''), unavailable: signal(false), error: signal(''), message: signal('')};
-  const injector = createEnvironmentInjector([{provide: DriveService, useValue: drive}]);
+  const connections = {renewalVisible: signal(false), loggingOut: signal(false)};
+  const injector = createEnvironmentInjector([{provide: DriveService, useValue: drive}, {provide: GoogleConnections, useValue: connections}]);
   const button = runInInjectionContext(injector, () => new DriveSyncButton());
-  return {drive, button, close() {injector.destroy();}};
+  return {drive, button, connections, close() {injector.destroy();}};
 }
+
+test('G 授權按鈕顯示時，遠端同步按鈕隱藏；授權完成後恢復', () => {
+  const f = syncButton();
+  try {
+    assert.equal(f.button.visible(), true);
+    f.connections.renewalVisible.set(true); assert.equal(f.button.visible(), false);
+    f.connections.renewalVisible.set(false); assert.equal(f.button.visible(), true);
+    f.drive.runtime.set({}); assert.equal(f.button.visible(), false);
+  } finally {f.close();}
+});
 
 test('多功能側欄按鈕依衝突、提醒、新郵件優先顯示；沒有通知時保留一般開關', () => {
   assert.equal(panelAttention(2, 3, 4).target, 'tasks'); assert.equal(panelAttention(2, 3, 4).count, 2);

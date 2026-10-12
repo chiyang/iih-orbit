@@ -13,6 +13,7 @@ const PATHS: Record<string, string> = {
   check: 'M5 12l4 4L19 6',
   circleCheck: 'M22 11.1V12a10 10 0 1 1-5.9-9.1M22 4 12 14l-3-3',
   user: 'M20 21v-2a7 7 0 0 0-14 0v2M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
+  logout: 'M9 4H4v16h5M10 12h11m-4-4 4 4-4 4',
   chevron: 'm9 5 7 7-7 7',
   down: 'm6 9 6 6 6-6',
   up: 'm6 15 6-6 6 6',

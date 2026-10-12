@@ -1,0 +1,18 @@
+:host {display: contents;}
+.modal-body {padding: var(--sp23) var(--sp27); font-size: var(--font-13);}
+p {line-height: 1.8;}
+.form-error {color: var(--danger-text);}
+.modal-footer {border-top: 1px solid var(--border); background: var(--surface-soft); padding: var(--sp18) var(--sp27); display: flex; align-items: center; justify-content: space-between; gap: var(--sp12);}
+.form-note {font-size: var(--font-11); color: var(--text-muted);}
+.modal-footer > div {display: flex; gap: var(--sp8); flex-wrap: wrap; justify-content: flex-end;}
+.button {display: inline-flex; align-items: center; justify-content: center; padding: var(--sp11) var(--sp16); border: 1px solid transparent; border-radius: 7px; font: inherit; font-size: var(--font-12); font-weight: 500; cursor: pointer;}
+.button.primary {background: var(--accent-strong); color: var(--on-accent);}
+.button.secondary {border-color: var(--accent-border); color: var(--accent-text); background: var(--control-bg);}
+.button:hover:not(:disabled) {filter: brightness(.95);}
+.button:disabled {opacity: .55; cursor: default;}
+.button:focus-visible {outline: 2px solid var(--accent-strong); outline-offset: 3px;}
+@media (max-width: 600px) {
+  .modal-body {padding: var(--sp20);}
+  .modal-footer {padding: var(--sp16) var(--sp20); flex-wrap: wrap;}
+  .modal-footer > div {margin-left: auto;}
+}

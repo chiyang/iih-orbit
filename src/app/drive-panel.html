@@ -42,16 +42,17 @@
         }
         <div class="actions">
           @if (collection.current && !collection.deleting) {
-            @if (store.drive().mode === 'off') {<button class="primary" [disabled]="!canSave() || editing() || drive.unavailable()" (click)="resume()">恢復自動儲存</button>}
+            @if (store.drive().mode === 'off') {<button class="primary" [disabled]="!canSave() || drive.unavailable()" (click)="resume()">恢復自動儲存</button>}
             @else {<button class="primary" [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online() || !!drive.runtime().conflict && store.drive().mode === 'backup' || drive.unavailable()" (click)="drive.sync()"><app-icon name="sync" />{{ drive.runtime().conflict ? '再次嘗試整併' : '立即同步' }}</button><button [disabled]="drive.busy() || saving() || importing() || removing()" (click)="options({mode: 'off'})">暫停</button>}
           }
           @if (collection.heads.length === 1 && !(collection.current && drive.runtime().conflict)) {<button [class.primary]="!collection.current" [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !collection.heads[0].size || collection.deleting || !collection.current && !drive.catalogFresh()" (click)="inspect(collection.heads[0], !collection.current)">{{ collection.current ? '查看內容' : '查看並使用' }}<app-icon name="arrow" /></button>}
         </div>
         @if (collection.heads.length > 1 && !(collection.current && drive.runtime().conflict)) {<div class="cloud-choices" tabindex="-1" role="group" aria-label="選擇一份雲端內容"><h4>選擇雲端內容（{{ collection.heads.length }} 份）</h4><p class="note">按「查看並使用」預覽，確認後才會更換本機內容。</p><ng-container *ngTemplateOutlet="versionRows; context: {$implicit: collection.heads, branches: true, use: true}" /></div>}
         @if (collection.history.length) {<details class="history"><summary>過去備份（{{ collection.history.length }} 份）</summary><p class="note">保留最近內容，方便回復誤改。不需要的備份也可逐份刪除。尚有不同內容待選擇、未完成上傳或仍在使用的舊內容，會等處理完成再自動清理。</p><ng-container *ngTemplateOutlet="versionRows; context: {$implicit: collection.history}" /></details>}
-        <details class="secondary-option card-options"><summary>{{ collection.current ? '儲存設定與更多操作' : '更多操作' }}</summary>
+        @if (collection.current && needsUpgrade()) {<p class="notice">這份資料使用舊版儲存方式。下次同步會改為保存全部工作空間，並接收其他電腦的更新；原雲端資料仍保留。</p>}
+        <details class="secondary-option card-options"><summary>更多操作</summary>
           @if (collection.current) {
-            <div class="actions"><button [disabled]="drive.busy() || saving() || importing() || !!drive.runtime().pending" (click)="editing.set(!editing())">{{ editing() ? '取消設定變更' : '調整保存範圍與方式' }}</button><button [disabled]="!canBackup()" (click)="saveCopy()">另存當下的備份</button></div>
+            <div class="actions"><button [disabled]="!canBackup()" (click)="saveCopy()">另存當下的完整備份</button></div>
             <div class="field-pair"><label>修改後多久儲存？<select [disabled]="drive.busy() || saving()" [ngModel]="store.drive().debounceSeconds" (ngModelChange)="options({debounceSeconds: +$event})"><option [ngValue]="15">15 秒</option><option [ngValue]="30">30 秒</option><option [ngValue]="60">60 秒</option></select></label><label>多久檢查雲端更新？<select [disabled]="drive.busy() || saving()" [ngModel]="store.drive().pollMinutes" (ngModelChange)="options({pollMinutes: +$event})"><option [ngValue]="0">只在手動或修改時檢查</option><option [ngValue]="1">每 1 分鐘</option><option [ngValue]="5">每 5 分鐘</option><option [ngValue]="15">每 15 分鐘</option></select></label></div>
           }
           <p class="note">刪除整份資料會將目前內容與過去備份移至 Drive 垃圾桶，本機資料保留。{{ collection.current ? '並停止這份資料的自動儲存。' : '' }}</p><button class="danger" [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="requestRemoval(collection.id)"><app-icon name="trash" />{{ collection.deleting ? '繼續刪除' : '刪除這份雲端資料' }}</button>
@@ -87,19 +88,13 @@
 </section>
 
 @if (showCreateForm()) {
-  <section class="create-section" aria-labelledby="drive-auto-title"><h3 id="drive-auto-title">{{ editing() ? '自動儲存設定' : creating() ? '另建一份自動儲存' : '建立第一份自動儲存' }}</h3><p>{{ editing() ? '調整目前的保存範圍與方式。' : '把這台電腦的資料存到 Google Drive，之後的修改會自動保存。' }}</p><div class="saving-summary"><app-icon name="check" /><span>{{ kind() === 'full' ? '所有工作空間與設定' : '已選 ' + ids().length + ' 個工作空間' }} · {{ mode() === 'sync' ? '其他電腦也能接著使用' : '只保存這台電腦的修改' }}</span></div>
-    <details class="secondary-option" [open]="editing()"><summary>調整保存範圍與方式</summary>
-      <fieldset><legend>要保存哪些資料？</legend><label class="choice"><input type="radio" name="drive-range" value="full" [ngModel]="kind()" (ngModelChange)="kind.set($event)" [disabled]="saving() || drive.busy()">所有工作空間與設定</label><label class="choice"><input type="radio" name="drive-range" value="workspaces" [ngModel]="kind()" (ngModelChange)="kind.set($event)" [disabled]="saving() || drive.busy()">只選幾個工作空間</label></fieldset>
-      @if (kind() === 'workspaces') {<div class="workspace-choices">@for (workspace of store.workspaces(); track workspace.id) {<label class="choice"><input type="checkbox" [checked]="ids().includes(workspace.id)" [disabled]="saving() || drive.busy()" (change)="toggle(workspace.id, $any($event.target).checked)">{{ workspace.name }}</label>}</div>}
-      <p class="note">所有工作空間包含任務、專案、分類、狀態、主題色與提醒。深淺色／跟隨系統與字體大小只保存在目前瀏覽器；只選部分空間時，主題色與提醒也保留在這台電腦。</p>
-      <fieldset><legend>如何保存？</legend><label class="choice"><input type="radio" name="drive-mode" value="sync" [ngModel]="mode()" (ngModelChange)="mode.set($event)" [disabled]="saving() || drive.busy()">自動儲存並接收其他電腦的更新</label><label class="choice"><input type="radio" name="drive-mode" value="backup" [ngModel]="mode()" (ngModelChange)="mode.set($event)" [disabled]="saving() || drive.busy()">自動備份，只保存這台電腦的修改</label></fieldset>
-    </details>
-    @if (drive.runtime().link && !sameScope()) {<p class="notice">更換工作空間範圍會另建一份，原本的雲端資料與過去備份仍保留。</p>}
-    <div class="actions">@if (editing() || creating()) {<button [disabled]="saving()" (click)="editing.set(false); creating.set(false)">取消</button>}<button class="primary" [disabled]="!canSave()" (click)="saveAutomatic()"><app-icon name="save" />{{ saving() ? '儲存中…' : startLabel() }}</button></div><p class="note">需要開著 Orbit 並保持連線，才能自動保存。</p>
+  <section class="create-section" aria-labelledby="drive-auto-title"><h3 id="drive-auto-title">{{ creating() ? '另建一份自動儲存' : '建立第一份自動儲存' }}</h3><p>把全部工作空間與設定存到 Google Drive，之後自動保存修改並接收其他電腦的更新。</p><div class="saving-summary"><app-icon name="check" /><span>所有工作空間與設定 · 自動儲存並接收其他電腦的更新</span></div>
+    <p class="note">包含任務、專案、分類、狀態、主題色與提醒。深淺色主題與字體大小保留目前瀏覽器的選擇。</p>
+    <div class="actions">@if (creating()) {<button [disabled]="saving()" (click)="creating.set(false)">取消</button>}<button class="primary" [disabled]="!canSave()" (click)="saveAutomatic()"><app-icon name="save" />{{ saving() ? '儲存中…' : startLabel() }}</button></div><p class="note">需要開著 Orbit 並保持連線，才能自動保存。</p>
   </section>
 }
 
-@if (hasFiles()) {<details class="secondary-option file-management"><summary>檔案位置與整理</summary><p>Google Drive › IIH Orbit · 約 {{ bytes() / 1024 / 1024 | number:'1.1-1' }} MB</p><p class="note">整理只調整資料夾位置與檔名，所有內容與過去備份仍保留。</p><button [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !!drive.runtime().pending" (click)="drive.organize()">整理資料夾</button></details>}
+@if (hasFiles()) {<details class="secondary-option file-management"><summary>檔案位置與整理</summary><p>Google Drive › IIH Orbit · 約 {{ bytes() / 1024 / 1024 | number:'1.1-1' }} MB</p><p class="note">將最新同步檔放進「同步資料」，舊版本與手動備份放進「歷史備份」，並統一檔名，方便在 Drive 找到資料。只調整位置與檔名，內容與所有備份都會保留，可重複執行。</p><button [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !!drive.runtime().pending" (click)="drive.organize()">整理資料夾</button></details>}
 @if (error() || drive.error()) {<p class="warning" role="alert">{{ error() || drive.error() }}</p>}
 @if (drive.message()) {<p class="success" role="status">{{ drive.message() }}</p>}
 

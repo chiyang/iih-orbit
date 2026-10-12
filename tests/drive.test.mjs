@@ -40,6 +40,57 @@ function fixture(documents = new Map()) {
   return {engine, api, repository, board, documents, runtime: () => runtime, local: () => local, revision: () => revision, uploads: () => uploads, edit(title) {local.data.workspaces[0].tasks[0].title = title; revision = crypto.randomUUID();}, async branch(title, settingsConflict = false) {const b = structuredClone(local); b.data.workspaces[0].tasks[0].title = title; if (settingsConflict) {b.preferences.accent = '#123456'; local.preferences.accent = '#654321';} const link = runtime.link; const d = await createDriveDocument(b, link.datasetId, [link.baseVersionId], 'sync'); documents.set('cloud_' + d.cloud.versionId, d); return d;}};
 }
 
+test('登出先同步再完整備份並讀回驗證，保留原集合與全部工作空間', async () => {
+  for (const mode of ['sync', 'backup']) {
+    const f = fixture(); await f.engine.start('full', [], mode); const dataset = f.runtime().link.datasetId;
+    f.local().data.workspaces.push({...emptyWorkspace('second', '另一個工作空間'), tasks: [{...task, id: 'second-task'}]});
+    f.edit('登出前更新');
+    let reads = 0; const read = f.api.read; f.api.read = async file => {reads++; return read(file);};
+    const checkpoint = await f.engine.checkpointForLogout(mode);
+    assert.deepEqual(checkpoint, {datasetId: dataset, revision: f.revision()}); assert.ok(reads > 0);
+    const saved = [...f.documents.values()].at(-1);
+    assert.equal(saved.kind, 'full'); assert.equal(saved.cloud.datasetId, dataset); assert.equal(saved.data.workspaces.length, 2);
+    assert.equal(saved.data.workspaces[0].tasks[0].title, '登出前更新'); assert.equal(f.runtime().pending, undefined);
+    assert.equal(versionGraph(await f.api.list()).heads.length, 1);
+  }
+});
+
+test('登出拒絕部分範圍、上傳失敗與無法讀回備份，保留本機內容', async () => {
+  const partial = fixture(); await partial.engine.start('workspaces', ['workspace'], 'sync');
+  await assert.rejects(partial.engine.checkpointForLogout('sync'), /全部工作空間/); assert.equal(partial.documents.size, 1);
+  for (const failure of ['save', 'read']) {
+    const f = fixture(); await f.engine.start('full', [], 'sync'); f.edit('不能清除的資料');
+    f.api[failure] = async () => {throw new Error('模擬網路失敗');};
+    await assert.rejects(f.engine.checkpointForLogout('sync'), /網路失敗/);
+    assert.equal(f.local().data.workspaces[0].tasks[0].title, '不能清除的資料');
+    if (failure === 'save') assert.ok(f.runtime().pending);
+  }
+});
+
+test('登出備份期間本機或雲端有新修改時停止；雲端分歧可在原面板選擇', async () => {
+  const local = fixture(); await local.engine.start('full', [], 'sync');
+  const read = local.api.read; local.api.read = async file => {const result = await read(file); local.edit('備份讀回期間的新修改'); return result;};
+  await assert.rejects(local.engine.checkpointForLogout('sync'), /又有變更/);
+  assert.equal(local.local().data.workspaces[0].tasks[0].title, '備份讀回期間的新修改');
+  const remote = fixture(); await remote.engine.start('full', [], 'sync'); const root = [...remote.documents.values()][0];
+  const save = remote.api.save;
+  remote.api.save = async (document, id) => {
+    const result = await save(document, id), changed = structuredClone(root); changed.data.workspaces[0].tasks[0].title = '另一裝置的新修改';
+    remote.documents.set('parallel', await createDriveDocument(changed, root.cloud.datasetId, [root.cloud.versionId], 'sync'));
+    return result;
+  };
+  await assert.rejects(remote.engine.checkpointForLogout('sync'), /雲端又有更新/);
+  assert.equal(remote.runtime().conflict.length, 2); assert.equal(remote.documents.size, 3);
+});
+
+test('登出讀回內容不符即拒絕，即使上傳已回報成功', async () => {
+  const f = fixture(); await f.engine.start('full', [], 'sync');
+  const read = f.api.read;
+  f.api.read = async file => {const document = await read(file); document.data.workspaces[0].tasks[0].title = '不符的內容'; return document;};
+  await assert.rejects(f.engine.checkpointForLogout('sync'), /無法確認完整雲端備份/);
+  assert.equal(f.local().data.workspaces[0].tasks[0].title, '原始內容');
+});
+
 test('兩台裝置離線修改同一任務不同欄位，自動整併再接收，不回傳重複版本', async () => {
   const a = fixture(), b = fixture(a.documents);
   await a.engine.start('full', [], 'sync'); await b.engine.join((await b.api.list())[0], b.revision());
