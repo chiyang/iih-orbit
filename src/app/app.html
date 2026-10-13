@@ -89,6 +89,7 @@
       </div>}
     </section>
 
+    @if (store.storageLoading()) {<div class="storage-warning" role="status"><app-icon name="save" />正在載入本機資料…</div>}
     @if (store.storageWarning()) {<div class="storage-warning" role="alert"><app-icon name="save" />{{ store.storageWarning() }}</div>}
     @if (store.syncNotice()) {<div class="sync-notice" role="status"><app-icon name="save" /><span>{{ store.syncNotice() }}</span><button class="tiny-icon" aria-label="關閉同步提示" (click)="store.syncNotice.set('')"><app-icon name="close" /></button></div>}
 

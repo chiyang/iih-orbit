@@ -18,6 +18,7 @@
 | --- | --- |
 | [開發與部署](development.md) | 本機啟動、檢查、測試、正式建置、GitHub Pages workflow 與主要檔案 |
 | [資料儲存與相容性](data-storage.md) | localStorage、sessionStorage、IndexedDB、分頁協調、舊資料升級與保存失敗 |
+| [本機紀錄與雲端分塊備份](storage-sync-upgrade.md) | 本輪備份優化、資料升級、區塊重用、歷史維護與量測界線 |
 | [QA 紀錄](../QA.md) | 各次修改的驗證結果、建置限制及尚需手動驗收的範圍 |
 
 ## 設計紀錄
@@ -29,5 +30,6 @@
 | [Calendar 移轉設計](calendar-transfer-design.md) | 可寫入月曆、截止任務的時段、子任務格式、獨立副本及中斷處理 |
 | [提醒設計](reminder-design.md) | 已實作的訊息提醒、前景提示，以及尚未加入的系統通知／背景推播 |
 | [改版設計與實作順序](next-release-design.md) | 早期規劃、資料格式及各階段演進；部分段落描述的是當時的設計起點 |
+| [任務文件連結與儲存演進規劃](task-document-hub-design.md) | 2026-10-13 討論：先實作備份優化；文件雙向關聯、側欄目錄及授權方案仍待後續實作 |
 
 真實 Google 授權、信件／活動資料、Drive API 與跨裝置操作由使用者手動驗收；本機模擬測試不代表真實服務驗收。

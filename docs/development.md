@@ -23,6 +23,7 @@ npm start
 | --- | --- |
 | `npm run check` | TypeScript 與 Angular 樣板檢查 |
 | `npm test` | 資料、日期、排序、快取、授權及同步控制器的本機測試 |
+| `npm run test:storage-browser` | 啟動獨立來源的原生 IndexedDB 測試，開啟輸出網址後自動驗證並結束 |
 | `npm run build` | 一般正式建置 |
 | `npm run build:pages` | 正式建置，網站基底路徑為 `/iih-orbit/` |
 

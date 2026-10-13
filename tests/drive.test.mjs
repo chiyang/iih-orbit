@@ -16,7 +16,7 @@ const workspace = {...emptyWorkspace('workspace', '研究'), tasks: [task]};
 const state = {version: 1, activeWorkspaceId: workspace.id, workspaces: [workspace]};
 const backup = () => createBackup(state, 'full', [], DEFAULT_APPEARANCE);
 function metadata(document, id = 'drive_' + crypto.randomUUID()) {
-  return {id, name: 'Orbit.json', mimeType: 'application/json', createdTime: new Date().toISOString(), size: String(JSON.stringify(document).length), appProperties: versionProperties(document)};
+  return {id, name: 'Orbit.json', mimeType: 'application/json', createdTime: new Date().toISOString(), size: String(new TextEncoder().encode(JSON.stringify(document)).length), appProperties: versionProperties(document)};
 }
 function memory() {
   const values = new Map();
@@ -610,11 +610,11 @@ test('新版雲端摘要可辨識格式且維持索引上限，舊檔原校驗�
   const b = backup(), old = {...b, cloud: {formatVersion: 1, datasetId: crypto.randomUUID(), versionId: crypto.randomUUID(), parents: [], purpose: 'sync', fileHash: await checksum(b), syncHash: await syncHash(b, 1)}};
   assert.deepEqual(await readDriveDocument(old), old); assert.deepEqual(readDriveFile(metadata(old)).cloud, old.cloud);
   const document = await createDriveDocument(b, old.cloud.datasetId, Array.from({length: 20}, () => crypto.randomUUID()), 'sync');
-  const properties = versionProperties(document); assert.equal(Object.keys(properties).length, 30); assert.match(properties.syncHash, /^v4:/);
+  const properties = versionProperties(document); assert.equal(Object.keys(properties).length, 30); assert.match(properties.syncHash, /^v5:/);
   assert.deepEqual(readDriveFile(metadata(document)).cloud, document.cloud); assert.deepEqual(await readDriveDocument(document), document);
   const corrupted = structuredClone(document); corrupted.preferences.accent = '#3264ad'; corrupted.cloud.fileHash = await checksum(readBackup(corrupted));
   await assert.rejects(readDriveDocument(corrupted), /校驗/);
-  const unknown = metadata(document); unknown.appProperties.syncHash = 'v5:' + document.cloud.syncHash;
+  const unknown = metadata(document); unknown.appProperties.syncHash = 'v6:' + document.cloud.syncHash;
   assert.throws(() => readDriveFile(unknown));
 });
 
@@ -631,7 +631,7 @@ test('舊雲端字級仍接受原始校驗，新版摘要與重新保存排除�
     const next = await createDriveDocument(old, old.cloud.datasetId, [old.cloud.versionId], 'sync');
     assert.equal(Object.hasOwn(next.preferences, 'textSize'), false);
     assert.deepEqual(await readDriveDocument(next), next);
-    assert.equal(next.cloud.formatVersion, 4);
+    assert.equal(next.cloud.formatVersion, 5);
   }
 });
 
@@ -671,9 +671,9 @@ test('舊同步基準升級一次便追蹤設定，舊內容與校驗不改寫�
   await f.engine.synchronize('sync'); assert.equal(f.runtime().link.baseHashVersion, 4); assert.equal(f.uploads(), 0); assert.equal(reads, 1);
   await f.engine.synchronize('sync'); assert.equal(reads, 1); assert.equal(f.uploads(), 0);
   f.local().preferences.accent = '#3264ad'; await f.engine.synchronize('sync'); assert.equal(f.uploads(), 1);
-  const latest = [...f.documents.values()].at(-1); assert.equal(latest.cloud.formatVersion, 4); assert.deepEqual(latest.cloud.parents, [old.cloud.versionId]);
+  const latest = [...f.documents.values()].at(-1); assert.equal(latest.cloud.formatVersion, 5); assert.deepEqual(latest.cloud.parents, [old.cloud.versionId]);
   assert.deepEqual(f.documents.get('legacy_drive'), old); assert.deepEqual(await readDriveDocument(old), old);
-  assert.equal((await readDriveRuntime(f.runtime())).link.baseHashVersion, 4);
+  assert.equal((await readDriveRuntime(f.runtime())).link.baseHashVersion, 5);
 });
 
 test('格式 3 的原始主題校驗保留，舊同步與備份基準升級後主題變更不另存或造成分歧', async () => {
@@ -704,7 +704,7 @@ test('格式 3 的原始主題校驗保留，舊同步與備份基準升級後�
     }
     f.local().preferences.accent = '#3264ad'; await f.engine.synchronize(mode);
     assert.equal(f.uploads(), 1); const saved = [...f.documents.values()].at(-1);
-    assert.equal(saved.cloud.formatVersion, 4); assert.equal(Object.hasOwn(saved.preferences, 'theme'), false);
+    assert.equal(saved.cloud.formatVersion, 5); assert.equal(Object.hasOwn(saved.preferences, 'theme'), false);
     assert.deepEqual(await readDriveDocument(saved), saved);
   }
 });

@@ -47,11 +47,17 @@ export class GoogleConnections implements OnDestroy {
   constructor() {
     effect(() => {const id = this.store.google().clientId; untracked(() => {if (id) void this.prepare();});});
     effect(() => {
+      if (this.store.storageLoading?.()) return;
       const context = {generation: this.store.generation(), clientId: this.store.google().clientId, accountId: this.store.google().accountId};
       const connecting = this.connectingAll();
       untracked(() => {if (!this.writeAuth.authorizing() && !connecting) this.writeAuth.useSession(context);});
     });
-    if (this.store.cloudResume()?.cleanupPending) void this.cleanupLogout();
+    let startupChecked = false;
+    effect(() => {
+      if (this.store.storageLoading?.()) return;
+      const pending = this.store.cloudResume()?.cleanupPending;
+      untracked(() => {if (!startupChecked) {startupChecked = true; if (pending) void this.cleanupLogout();}});
+    });
   }
   async prepare(): Promise<void> {
     if (this.preparing()) return;

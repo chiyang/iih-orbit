@@ -104,17 +104,20 @@ test('登出檢查點讀回驗證，離線保留資料；舊部分範圍升級�
   } finally {f.close();}
 });
 
-test('自動同步有新版本才整理該集合並更新列表，整理失敗不重複上傳，使用者可單獨重試整理', async () => {
+test('自動同步先完成與更新列表，之後才整理該集合，整理失敗不重複上傳，使用者可單獨重試整理', async () => {
   const f = await fixture(), calls = [];
   try {
     f.api.organize = async (current, id) => {assert.equal(current(), true); calls.push(id); return {files: await f.api.list(), changed: 1};};
     await f.service.start('full', [], 'sync'); const dataset = f.service.runtime().link.datasetId;
     assert.deepEqual(calls, [dataset]); await f.service.sync(false); assert.equal(calls.length, 1);
     await f.store.saveTask({...f.store.tasks()[0], title: '更新列表'}); await f.service.sync(false);
-    assert.deepEqual(calls, [dataset, dataset]); assert.equal(f.service.files().length, 2); assert.equal(f.service.error(), '');
+    assert.deepEqual(calls, [dataset]); assert.equal(f.service.files().length, 2);
+    clearTimeout(f.service.maintenanceTimer); await f.service.refreshCatalog(dataset); assert.deepEqual(calls, [dataset, dataset]); assert.equal(f.service.error(), '');
     f.api.organize = async () => {throw new Error('搬移暫時失敗');};
     await f.store.saveTask({...f.store.tasks()[0], title: '已保存且可重試整理'}); await f.service.sync(false);
-    assert.equal(f.documents.size, 3); assert.equal(f.service.runtime().pending, undefined); assert.equal(f.service.files().length, 3); assert.match(f.service.error(), /備份已保存，資料夾整理未完成/);
+    assert.equal(f.documents.size, 3); assert.equal(f.service.error(), '');
+    clearTimeout(f.service.maintenanceTimer); await f.service.refreshCatalog(dataset);
+    assert.equal(f.service.runtime().pending, undefined); assert.equal(f.service.files().length, 3); assert.match(f.service.error(), /備份已保存，資料夾整理未完成/);
     await f.service.sync(false); assert.equal(f.documents.size, 3);
     f.api.organize = async () => ({files: await f.api.list(), changed: 2}); await f.service.organize();
     assert.equal(f.documents.size, 3); assert.equal(f.service.error(), ''); assert.match(f.service.message(), /已整理 2 份檔案/);
@@ -122,7 +125,9 @@ test('自動同步有新版本才整理該集合並更新列表，整理失敗�
     f.api.list = async () => {if (failList) throw new Error('清單暫時失敗'); return list();};
     f.api.organize = async () => {failList = true; throw new Error('整理中斷');};
     await f.store.saveTask({...f.store.tasks()[0], title: '保存成功後無法更新清單'}); await f.service.sync(false);
-    assert.equal(f.documents.size, 4); assert.equal(f.service.runtime().pending, undefined); assert.match(f.service.error(), /備份已保存.*清單未更新/);
+    assert.equal(f.documents.size, 4); assert.equal(f.service.error(), '');
+    clearTimeout(f.service.maintenanceTimer); await f.service.refreshCatalog(dataset);
+    assert.equal(f.service.runtime().pending, undefined); assert.match(f.service.error(), /備份已保存.*清單未更新/);
     assert.equal(f.service.catalogFresh(), false); assert.equal(f.service.catalogState(), 'error'); assert.match(f.service.catalogError(), /清單未更新/);
     failList = false; await f.service.list(); assert.equal(f.service.catalogFresh(), true);
   } finally {f.close();}
@@ -215,7 +220,7 @@ test('既有自動備份讀取後保留八份，之後每次保存也維持八�
     assert.equal(f.documents.size, 9); assert.equal(f.retired.size, 4); assert.equal(f.service.catalogFresh(), true);
     const latest = f.service.files().find(file => file.cloud.versionId === parent);
     await f.service.join(latest, f.store.revision());
-    for (let i = 0; i < 3; i++) {await f.store.saveTask({...f.store.tasks()[0], title: '保存後清理 ' + i}); await f.service.sync(false);}
+    for (let i = 0; i < 3; i++) {await f.store.saveTask({...f.store.tasks()[0], title: '保存後清理 ' + i}); await f.service.sync(false); clearTimeout(f.service.maintenanceTimer); await f.service.refreshCatalog(dataset);}
     assert.equal(f.documents.size, 9); assert.equal(f.retired.size, 7); assert.equal(f.service.runtime().pending, undefined);
     const group = f.panel().catalog().collections[0]; assert.equal(group.heads.length, 1); assert.equal(group.history.length, 7);
     assert.equal(f.service.cleanupError(), ''); assert.equal(f.service.runtime().conflict, undefined);
@@ -229,7 +234,9 @@ test('清理失敗不把成功保存或雲端清單當成失敗，下次讀取�
     f.api.pruneHistory = async () => {throw new Error('垃圾桶暫時無法寫入');};
     await f.store.saveTask({...f.store.tasks()[0], title: '清理失敗但已保存'}); await f.service.sync(false);
     assert.equal(f.documents.size, 2); assert.equal(f.service.runtime().pending, undefined); assert.equal(f.service.error(), '');
-    assert.equal(f.service.catalogFresh(), true); assert.equal(f.service.files().length, 2); assert.match(f.service.cleanupError(), /下次讀取會重試.*垃圾桶/);
+    assert.equal(f.service.catalogFresh(), true); assert.equal(f.service.files().length, 2); assert.equal(f.service.cleanupError(), '');
+    clearTimeout(f.service.maintenanceTimer); await f.service.refreshCatalog(f.service.runtime().link.datasetId);
+    assert.match(f.service.cleanupError(), /下次讀取會重試.*垃圾桶/);
     f.api.pruneHistory = prune; await f.service.list(); assert.equal(f.service.cleanupError(), ''); assert.equal(f.service.catalogFresh(), true);
   } finally {f.close();}
 });
@@ -1084,12 +1091,12 @@ test('上傳完成後又有本機修改時回報待同步，不讓斷網前按�
   try {
     await f.service.start('full', [], 'sync');
     await f.store.saveTask({...f.store.tasks()[0], title: '本次準備同步'});
-    const organize = f.api.organize;
-    f.api.organize = async (...args) => {await f.store.saveTask({...f.store.tasks()[0], title: '同步尾聲才加入的新修改'}); return organize(...args);};
+    const list = f.api.list, version = f.service.runtime().link.baseVersionId; let injected = false;
+    f.api.list = async (...args) => {if (!injected && version !== f.service.runtime().link.baseVersionId) {injected = true; await f.store.saveTask({...f.store.tasks()[0], title: '同步尾聲才加入的新修改'});} return list(...args);};
     assert.equal(await f.service.sync(), 'pending');
     assert.equal(f.service.lastSyncAt(), ''); assert.match(f.service.message(), /再次同步/);
     assert.equal(f.store.tasks()[0].title, '同步尾聲才加入的新修改');
-    f.api.organize = organize; assert.equal(await f.service.sync(), 'complete');
+    f.api.list = list; assert.equal(await f.service.sync(), 'complete');
   } finally {f.close();}
 });
 
@@ -1134,4 +1141,39 @@ test('完成核對期間仍維持同步中，第二次同步不插隊；核對�
     assert.equal(f.service.syncing(), true); assert.equal(await f.service.sync(), 'skipped');
     resume.resolve(); assert.equal(await running, 'complete'); assert.equal(f.service.syncing(), false);
   } finally {resume.resolve(); try {await running;} finally {f.close();}}
+});
+
+test('孤立區塊清理在閒置時執行，失敗與重試提示不改寫同步結果', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: new Date('2026-10-13T00:00:00Z')});
+  const f = await fixture(); let calls = 0, fail = false;
+  try {
+    await f.service.start('full', [], 'sync'); await f.service.sync(); await settle();
+    clearTimeout(f.service.maintenanceTimer);
+    const count = f.documents.size, runtime = structuredClone(f.service.runtime());
+    f.api.cleanupBlocks = async current => {assert.equal(current(), true); calls++; if (fail) throw new Error('垃圾桶暫時無法寫入'); return {observed: 0, removed: calls === 1 ? 20 : 0, remaining: calls === 1};};
+    await f.service.list(); assert.equal(calls, 0);
+    t.mock.timers.tick(4999); await settle(); assert.equal(calls, 0);
+    t.mock.timers.tick(1); await settle(); assert.equal(calls, 1);
+    assert.match(f.service.blockCleanupNotice(), /20.*30 天.*垃圾桶/);
+    assert.equal(f.documents.size, count); assert.deepEqual(f.service.runtime(), runtime);
+    f.service.error.set('先前同步的提示'); fail = true;
+    t.mock.timers.tick(300000); await settle(); assert.equal(calls, 2);
+    assert.match(f.service.blockCleanupError(), /稍後會重試.*垃圾桶/); assert.equal(f.service.error(), '先前同步的提示');
+    fail = false; t.mock.timers.tick(900000); await settle(); assert.equal(calls, 3);
+    assert.equal(f.service.blockCleanupError(), ''); assert.equal(f.service.error(), '先前同步的提示');
+    assert.equal(f.documents.size, count); assert.deepEqual(f.service.runtime(), runtime);
+  } finally {f.close(); t.mock.timers.reset();}
+});
+
+test('清理時有同步或本機待寫入就延後，服務結束後不再回收', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const f = await fixture(); let calls = 0;
+  try {
+    await f.service.start('full', [], 'sync'); await f.service.sync(); await settle(); clearTimeout(f.service.maintenanceTimer);
+    f.api.cleanupBlocks = async () => {calls++; return {observed: 0, removed: 0, remaining: false};};
+    await f.service.list(); f.store.pendingWrites.set(1);
+    t.mock.timers.tick(5000); await settle(); assert.equal(calls, 0);
+    f.store.pendingWrites.set(0); t.mock.timers.tick(5000); await settle(); assert.equal(calls, 1);
+    f.service.ngOnDestroy(); t.mock.timers.tick(86400000); await settle(); assert.equal(calls, 1);
+  } finally {f.close(); t.mock.timers.reset();}
 });

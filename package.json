@@ -8,7 +8,8 @@
     "build": "node --env-file=.build.env node_modules/@angular/cli/bin/ng.js build",
     "build:pages": "npm run build -- --configuration production --base-href /iih-orbit/",
     "check": "ngc --noEmit -p tsconfig.app.json",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "test:storage-browser": "node tests/workspace-records-browser.mjs"
   },
   "dependencies": {
     "@angular/cdk": "^22.2.0",

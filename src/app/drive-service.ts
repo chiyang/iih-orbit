@@ -27,7 +27,7 @@ function pendingRemoval(state: DriveRuntime, plan: DriveDeletePlan): DriveDocume
 export class DriveService implements OnDestroy {
   readonly store = inject(BoardStore);
   readonly auth = inject(DriveAuth);
-  private readonly api = new DriveApi(this.auth);
+  private readonly api = new DriveApi(this.auth, () => this.catalogKey());
   private readonly repository = new IndexedDriveRepository();
   readonly runtime = signal<DriveRuntime>({});
   readonly runtimeReady = signal(false);
@@ -36,6 +36,8 @@ export class DriveService implements OnDestroy {
   readonly catalogState = signal<'idle' | 'loading' | 'ready' | 'error'>('idle');
   readonly catalogError = signal('');
   readonly cleanupError = signal('');
+  readonly blockCleanupNotice = signal('');
+  readonly blockCleanupError = signal('');
   readonly catalogCheckedAt = signal('');
   private readonly catalogConnection = signal('');
   readonly catalogFresh = computed(() => this.auth.connected() && this.catalogState() === 'ready' && this.catalogConnection() === this.catalogKey());
@@ -62,12 +64,15 @@ export class DriveService implements OnDestroy {
     return this.store.drive().mode === 'backup' ? '自動備份已開啟' : '自動儲存已開啟';
   });
   private context = '';
-  private generation = this.store.generation();
+  private generation = '';
   private epoch = 0;
   private destroyed = false;
   private suspended = false;
   private debounce?: ReturnType<typeof setTimeout>;
   private lastPoll = 0;
+  private maintenanceTimer?: ReturnType<typeof setTimeout>;
+  private blockCleanupTimer?: ReturnType<typeof setTimeout>;
+  private readonly nextBlockCleanup = new Map<string, number>();
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly coordinator: CalendarSyncCoordinator;
   private channel?: BroadcastChannel;
@@ -78,7 +83,7 @@ export class DriveService implements OnDestroy {
     void this.loadRuntime(); this.poll();
   };
   private readonly storage = (event: StorageEvent) => { if (!event.key || event.key.startsWith(SYNC_PREFIX)) this.coordinator.refresh(); };
-  private readonly hide = () => { this.suspended = true; this.epoch++; clearTimeout(this.debounce); this.coordinator.suspend(); this.auth.cancelRequests(); };
+  private readonly hide = () => { this.suspended = true; this.epoch++; clearTimeout(this.debounce); this.debounce = undefined; this.coordinator.suspend(); this.auth.cancelRequests(); };
   private readonly show = (event: PageTransitionEvent) => { if (event.persisted) { this.suspended = false; this.coordinator.resume(); this.wake(); this.schedule(); } };
 
   constructor() {
@@ -92,12 +97,14 @@ export class DriveService implements OnDestroy {
     } catch { /* Storage events and the polling timer remain available. */ }
     this.coordinator = new CalendarSyncCoordinator(localStorage, withStorageLock, keys => this.active.set(keys.length > 0), syncChannel, navigator.locks, 240000, {storagePrefix: SYNC_PREFIX, lockPrefix: 'iih-orbit-drive-run:', label: 'Drive'});
     effect(() => {
+      if (this.store.storageLoading?.()) return;
       const settings = this.store.drive(), clientId = this.store.google().clientId, generation = this.store.generation();
       const context = JSON.stringify([clientId, generation, settings.accountId]);
       untracked(() => {
         this.auth.useSession({clientId, generation, accountId: settings.accountId});
         if (context !== this.context) {
-          const reset = generation !== this.generation; this.generation = generation;
+          this.api.clearCache?.(); clearTimeout(this.blockCleanupTimer); this.blockCleanupTimer = undefined; this.blockCleanupNotice.set(''); this.blockCleanupError.set('');
+          const reset = !!this.generation && generation !== this.generation; this.generation = generation;
           this.context = context; this.epoch++; this.auth.cancelRequests(); this.runtimeReady.set(false); this.runtime.set({}); this.files.set([]); this.removals.set([]); this.missingCollection.set(''); this.error.set('');
           this.catalogState.set('idle'); this.catalogConnection.set(''); this.catalogError.set(''); this.cleanupError.set(''); this.catalogCheckedAt.set('');
           this.lastSyncAt.set('');
@@ -119,9 +126,12 @@ export class DriveService implements OnDestroy {
     catch (error) { if (context === this.context && epoch === this.epoch) this.error.set(this.describe(error)); }
   }
   private schedule(): void {
-    clearTimeout(this.debounce);
+    clearTimeout(this.debounce); this.debounce = undefined;
     if (!this.autoReady()) return;
-    this.debounce = setTimeout(() => { void this.sync(false); }, this.store.drive().debounceSeconds * 1000);
+    this.debounce = setTimeout(() => {
+      this.debounce = undefined;
+      if (this.busy() || this.syncing()) this.schedule(); else void this.sync(false);
+    }, this.store.drive().debounceSeconds * 1000);
   }
   private autoReady(): boolean {
     return !this.destroyed && !this.suspended && !this.loggingOut() && !this.store.cloudResume() && this.auth.connected() && this.online() && !this.unavailable() && this.store.drive().mode !== 'off' && !this.store.hasUnsavedChanges();
@@ -147,21 +157,21 @@ export class DriveService implements OnDestroy {
       await this.loadRuntime(); await this.list(); this.schedule();
     } catch (error) { this.error.set(this.describe(error)); }
   }
-  disconnect(): void { clearTimeout(this.debounce); this.auth.disconnect('Drive 已解除連線，雲端備份保留。'); }
+  disconnect(): void { clearTimeout(this.debounce); this.debounce = undefined; this.auth.disconnect('Drive 已解除連線，雲端備份保留。'); }
   async checkpointForLogout(): Promise<LogoutCheckpoint | null> {
     if (this.busy() || this.syncing() || this.loggingOut() || this.store.pendingWrites() || this.store.hasUnsavedChanges()) {this.error.set('請等目前的儲存完成，再按同步並登出。'); return null;}
     if (!this.runtime().link) {this.error.set('請先建立或接續雲端資料，再同步並登出。'); return null;}
     if (this.runtime().link?.kind !== 'full' || this.store.drive().kind !== 'full' || this.store.drive().mode === 'backup') {
       if (!await this.enableAutomatic()) return null;
     }
-    this.loggingOut.set(true); clearTimeout(this.debounce);
+    this.loggingOut.set(true); clearTimeout(this.debounce); this.debounce = undefined;
     let checkpoint: LogoutCheckpoint | null = null;
     try {
       const completed = await this.run(async engine => {checkpoint = await engine.checkpointForLogout('sync');});
       return completed ? checkpoint : null;
     } finally {this.loggingOut.set(false);}
   }
-  async clearLocalData(): Promise<void> {clearTimeout(this.debounce); this.runtime.set({}); this.files.set([]); this.removals.set([]); await this.repository.clear();}
+  async clearLocalData(): Promise<void> {clearTimeout(this.debounce); this.debounce = undefined; this.runtime.set({}); this.files.set([]); this.removals.set([]); await this.repository.clear();}
   private async run(operation: (engine: DriveEngine, current: () => boolean) => Promise<void>, notice = '', guardConfiguration = true): Promise<boolean> {
     if (this.localBusy() || this.active()) return false;
     if (!this.auth.connected() || !this.online()) { this.error.set(this.online() ? '請先連線 Google Drive，待上傳版本仍保留。' : '目前離線，待上傳版本仍保留。'); return false; }
@@ -186,7 +196,7 @@ export class DriveService implements OnDestroy {
         this.error.set(this.describe(error)); await this.loadRuntime();
         if (error instanceof DriveCollectionDeleted && this.runtime().link?.datasetId === error.datasetId && connection === this.auth.connectionVersion()
           && JSON.stringify([this.store.google().clientId, this.store.generation(), this.store.drive().accountId]) === key) {
-          this.missingCollection.set(error.datasetId); clearTimeout(this.debounce);
+          this.missingCollection.set(error.datasetId); clearTimeout(this.debounce); this.debounce = undefined;
           const stopped = await this.store.stopDrive(this.store.generation(), JSON.stringify(this.store.drive()));
           if (!stopped.ok) this.error.set(error.message + ' ' + stopped.message);
         }
@@ -219,7 +229,37 @@ export class DriveService implements OnDestroy {
     }
     const removals = await this.api.removals();
     if (!current()) throw new Error('Drive 連線或設定已變更，清單未更新。');
+    this.scheduleBlockCleanup();
     return {files, removals};
+  }
+  private scheduleBlockCleanup(): void {
+    if (!this.api.cleanupBlocks || this.blockCleanupTimer !== undefined || this.destroyed) return;
+    const key = this.catalogKey(), wait = Math.max(5000, (this.nextBlockCleanup.get(key) ?? 0) - Date.now());
+    this.blockCleanupTimer = setTimeout(() => {
+      this.blockCleanupTimer = undefined;
+      if (this.destroyed || this.suspended || key !== this.catalogKey() || !this.auth.connected() || !this.online()) return;
+      if (this.busy() || this.syncing() || this.store.pendingWrites() || this.debounce !== undefined) {this.scheduleBlockCleanup(); return;}
+      void this.collectUnusedBlocks(key);
+    }, wait);
+  }
+  private async collectUnusedBlocks(key: string): Promise<void> {
+    const priorError = this.error(); let delay = 15 * 60000;
+    await this.run(async (_, current) => {
+      try {
+        const result = await this.api.cleanupBlocks(current);
+        if (!current()) return;
+        this.blockCleanupError.set('');
+        delay = result.remaining ? 5 * 60000 : 24 * 60 * 60000;
+        if (result.removed) this.blockCleanupNotice.set('已將 ' + result.removed + ' 個未引用滿 30 天的備份資料區塊移至 Drive 垃圾桶。');
+      } catch (error) {
+        if (!current()) throw error;
+        this.blockCleanupError.set('備份已保存，未使用資料的清理未完成，稍後會重試。' + this.describe(error));
+      }
+    });
+    if (key === this.catalogKey()) {
+      if (priorError && !this.error()) this.error.set(priorError);
+      this.nextBlockCleanup.set(key, Date.now() + delay); this.scheduleBlockCleanup();
+    }
   }
   async list(): Promise<boolean> {
     if (this.busy()) return false;
@@ -251,22 +291,37 @@ export class DriveService implements OnDestroy {
     this.missingCollection.set(''); await this.refreshCatalog(this.runtime().link!.datasetId); this.schedule();
     return !this.error();
   }
-  private async refreshCatalog(datasetId?: string): Promise<void> {
+  private async refreshCatalog(datasetId?: string, deferMaintenance = false): Promise<void> {
     if (this.busy()) return;
     const key = this.catalogKey(); this.catalogState.set('loading'); this.catalogError.set('');
     await this.run(async (_, current) => {
+      const load = async () => {
+        if (!deferMaintenance) return this.retainedCatalog(current);
+        const [files, removals] = await Promise.all([this.api.list(), this.api.removals()]);
+        return {files, removals};
+      };
       try {
-        if (datasetId) await this.api.organize(current, datasetId);
-        const {files, removals} = await this.retainedCatalog(current);
+        if (datasetId && !deferMaintenance) await this.api.organize(current, datasetId);
+        const {files, removals} = await load();
         if (current()) this.acceptCatalog(files, removals);
       } catch (error) {
         if (!current()) throw error;
-        this.error.set('備份已保存，資料夾整理未完成，可在「檔案位置與整理」按「整理資料夾」重試。' + this.describe(error));
-        try {const {files, removals} = await this.retainedCatalog(current); if (current()) this.acceptCatalog(files, removals);}
+        this.error.set((deferMaintenance ? '備份已保存，但雲端清單未更新，請重新載入。' : '備份已保存，資料夾整理未完成，可在「檔案位置與整理」按「整理資料夾」重試。') + this.describe(error));
+        try {const {files, removals} = await load(); if (current()) this.acceptCatalog(files, removals);}
         catch (listError) {if (!current()) throw listError; this.error.update(message => message + ' 清單未更新，請重新載入。' + this.describe(listError));}
       }
     });
     if (key === this.catalogKey() && this.catalogState() === 'loading') {this.catalogState.set('error'); this.catalogError.set(this.error() || '雲端清單尚未更新，請重新載入。');}
+    if (deferMaintenance && key === this.catalogKey()) this.scheduleMaintenance(datasetId);
+  }
+  private scheduleMaintenance(datasetId?: string): void {
+    clearTimeout(this.maintenanceTimer);
+    const context = this.context;
+    this.maintenanceTimer = setTimeout(() => {
+      if (this.destroyed || this.suspended || context !== this.context || !this.auth.connected() || !this.online()) return;
+      if (this.busy() || this.syncing() || this.store.pendingWrites() || this.debounce !== undefined) {this.scheduleMaintenance(datasetId); return;}
+      void this.refreshCatalog(datasetId);
+    }, 5000);
   }
   async manual(kind: BackupKind, ids: string[]): Promise<void> {
     if (await this.run(engine => engine.manual(kind, ids), '已另存一份備份至 Google Drive。')) await this.list();
@@ -304,13 +359,12 @@ export class DriveService implements OnDestroy {
     }
     this.syncing.set(true); if (manual) this.message.set('');
     try {
-      clearTimeout(this.debounce);
+      clearTimeout(this.debounce); this.debounce = undefined;
       const context = this.context, generation = this.store.generation();
       this.lastPoll = Date.now();
       const previousVersion = this.runtime().link?.baseVersionId;
       if (await this.run(engine => engine.synchronize('sync'))) {
-        if (previousVersion !== this.runtime().link?.baseVersionId) await this.refreshCatalog(link.datasetId);
-        else if (this.runtime().conflict || manual) await this.list();
+        if (previousVersion !== this.runtime().link?.baseVersionId || this.runtime().conflict || manual) await this.refreshCatalog(link.datasetId, true);
         if (context !== this.context || generation !== this.store.generation() || this.error()) return 'failed';
         if (this.runtime().conflict?.length) {if (manual) this.message.set('雲端仍有不同內容待選擇，請先處理。'); return 'conflict';}
         try {
@@ -393,7 +447,7 @@ export class DriveService implements OnDestroy {
         }
         if (pendingVersion) delete state.pending;
         await this.repository.write(review.context, state, guarded); check();
-        this.runtime.set(state); clearTimeout(this.debounce); started = true;
+        this.runtime.set(state); clearTimeout(this.debounce); this.debounce = undefined; started = true;
       };
       if (review.kind === 'collection') await this.api.trashCollection(review, guarded, detach);
       else {await detach(); await this.api.trash(review.files[0], guarded, review.branchHeads);}
@@ -414,7 +468,7 @@ export class DriveService implements OnDestroy {
   }
   private describe(error: unknown): string { return error instanceof Error ? error.message : 'Drive 操作未完成，本機資料保留。'; }
   ngOnDestroy(): void {
-    this.destroyed = true; this.epoch++; clearTimeout(this.debounce); clearInterval(this.timer); this.coordinator.close(); this.channel?.close(); this.auth.cancelRequests();
+    this.destroyed = true; this.epoch++; clearTimeout(this.debounce); this.debounce = undefined; clearTimeout(this.maintenanceTimer); clearTimeout(this.blockCleanupTimer); clearInterval(this.timer); this.coordinator.close(); this.channel?.close(); this.auth.cancelRequests();
     window.removeEventListener('online', this.wake); window.removeEventListener('offline', this.wake); window.removeEventListener('focus', this.wake);
     window.removeEventListener('storage', this.storage); window.removeEventListener('pagehide', this.hide); window.removeEventListener('pageshow', this.show);
   }

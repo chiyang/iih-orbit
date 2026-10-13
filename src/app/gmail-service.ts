@@ -63,6 +63,7 @@ export class GmailService implements OnDestroy {
   private readonly changed = (event: StorageEvent) => { if (event.key === PREFERENCES) this.preferences.set(this.readPreferences()); };
   constructor() {
     effect(() => {
+      if (this.store.storageLoading?.()) return;
       const generation = this.store.generation(), preferences = this.preferences(), clientId = this.clientId();
       untracked(() => {
         if (preferences.generation !== generation) {
@@ -79,6 +80,7 @@ export class GmailService implements OnDestroy {
       });
     });
     effect(() => {
+      if (this.store.storageLoading?.()) return;
       const identity = JSON.stringify([this.store.generation(), this.clientId(), this.preferences().accountId, this.preferences().email, this.selected(), this.query(), this.auth.connectionVersion()]);
       const connected = this.auth.connected(), active = this.active();
       untracked(() => {

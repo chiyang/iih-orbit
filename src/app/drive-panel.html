@@ -11,6 +11,8 @@
   <div class="heading"><div><h3 id="drive-versions-title">雲端資料</h3><p>目前使用的資料、其他電腦的資料與另外保存的備份，都在這裡。</p></div><button [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="drive.list()"><app-icon name="sync" />{{ drive.catalogState() === 'loading' ? '讀取中…' : '重新載入' }}</button></div>
   <p class="note">每份自動儲存保留最近 8 份內容（最新 1 份＋過去 7 份），更舊的自動移至 Drive 垃圾桶。另存的備份會保留。</p>
   @if (drive.cleanupError() && drive.auth.connected()) {<p class="warning" role="alert">{{ drive.cleanupError() }}</p>}
+  @if (drive.blockCleanupNotice() && drive.auth.connected()) {<p class="note" role="status">{{ drive.blockCleanupNotice() }}</p>}
+  @if (drive.blockCleanupError() && drive.auth.connected()) {<p class="warning" role="alert">{{ drive.blockCleanupError() }}</p>}
   @if (drive.catalogState() === 'loading') {<p class="catalog-feedback" role="status">正在讀取 Google Drive，請稍候…</p>}
   @else if (drive.catalogState() === 'error' && drive.auth.connected()) {<div class="notice" role="alert"><strong>雲端資料讀取失敗</strong><p>{{ drive.catalogError() }}</p><p class="note">{{ hasFiles() ? '下方保留上次的清單，重新載入成功後才能改用其他資料或另建一份。' : '尚未確認雲端是否有資料。重新載入成功後，才會提供建立自動儲存。' }}</p></div>}
   @else if (drive.catalogFresh()) {<p class="catalog-feedback" role="status">已讀取 {{ cloudCount() }} 份雲端資料 · {{ drive.catalogCheckedAt() | date:'HH:mm:ss' }} 更新</p>}
@@ -94,7 +96,7 @@
   </section>
 }
 
-@if (hasFiles()) {<details class="secondary-option file-management"><summary>檔案位置與整理</summary><p>Google Drive › IIH Orbit · 約 {{ bytes() / 1024 / 1024 | number:'1.1-1' }} MB</p><p class="note">將最新同步檔放進「同步資料」，舊版本與手動備份放進「歷史備份」，並統一檔名，方便在 Drive 找到資料。只調整位置與檔名，內容與所有備份都會保留，可重複執行。</p><button [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !!drive.runtime().pending" (click)="drive.organize()">整理資料夾</button></details>}
+@if (hasFiles()) {<details class="secondary-option file-management"><summary>檔案位置與整理</summary><p>Google Drive › IIH Orbit · 清單內備份檔案約 {{ bytes() / 1024 / 1024 | number:'1.1-1' }} MB（共用區塊與垃圾桶另計）</p><p class="note">未使用的備份區塊確認沒有引用後，觀察 30 天，再於閒置時分批移至 Drive 垃圾桶。</p><p class="note">將最新同步檔放進「同步資料」，舊版本與手動備份放進「歷史備份」，並統一檔名，方便在 Drive 找到資料。只調整位置與檔名，內容與所有備份都會保留，可重複執行。</p><button [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !!drive.runtime().pending" (click)="drive.organize()">整理資料夾</button></details>}
 @if (error() || drive.error()) {<p class="warning" role="alert">{{ error() || drive.error() }}</p>}
 @if (drive.message()) {<p class="success" role="status">{{ drive.message() }}</p>}
 

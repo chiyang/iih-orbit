@@ -17,6 +17,7 @@ import { BoardHistoryEntry, boardChangeLabel, HISTORY_LIMIT, sameBoard } from '.
 import type { WorkspaceCreationOptions } from './workspace-templates';
 import { unresolvedTaskConflicts } from './task-conflict-data';
 import { DEVICE_NAME_LIMIT, DEVICE_STORAGE_KEY, loadDeviceIdentity } from './device-data';
+import { WorkspaceRecordRepository } from './workspace-records';
 
 export type StoreResult = {ok: true; persisted: boolean} | {ok: false; message: string};
 export interface TaskEditContext {
@@ -32,6 +33,10 @@ export class BoardStore implements OnDestroy {
   readonly syncNotice = signal('');
   readonly pendingWrites = signal(0);
   readonly hasUnsavedChanges = signal(false);
+  readonly storageLoading = signal(false);
+  private readonly records = typeof window !== 'undefined' && typeof indexedDB !== 'undefined' ? new WorkspaceRecordRepository() : null;
+  private ready: Promise<void> = Promise.resolve();
+  private storageFailure = '';
   readonly device = signal(loadDeviceIdentity());
   private readonly selectionStorage = this.sessionStorage();
   private snapshot = this.load();
@@ -72,6 +77,10 @@ export class BoardStore implements OnDestroy {
   private readonly focusListener = () => {this.device.set(loadDeviceIdentity(this.device())); this.refreshFromStorage();};
 
   constructor() {
+    if (this.records) {
+      this.storageLoading.set(true); this.pendingWrites.update(count => count + 1);
+      this.ready = this.initializeRecords().catch(error => {this.storageFailure = this.message(error); this.storageWarning.set(this.storageFailure);}).finally(() => {this.storageLoading.set(false); this.pendingWrites.update(count => count - 1);});
+    }
     if (typeof window === 'undefined') return;
     window.addEventListener('storage', this.storageListener);
     window.addEventListener('focus', this.focusListener);
@@ -400,6 +409,12 @@ export class BoardStore implements OnDestroy {
   }
 
   async snapshotForExport(): Promise<WorkspaceState> {
+    if (this.records) {
+      await this.ready;
+      if (this.hasUnsavedChanges() || this.storageFailure) return structuredClone(this.workspaceState());
+      const latest = await this.records.read(); if (!latest) throw new Error('本機資料索引遺失，請先匯出目前內容。');
+      this.apply(latest); return structuredClone(this.workspaceState());
+    }
     return withStorageLock(() => {
       if (this.hasUnsavedChanges()) return structuredClone(this.workspaceState());
       try { this.apply(this.readLatest()); }
@@ -409,16 +424,18 @@ export class BoardStore implements OnDestroy {
   }
 
   async backupForExport(kind: BackupKind, selectedIds: string[] = [], includeGoogle = false): Promise<OrbitBackup> {
-    return withStorageLock(() => {
-      if (!this.hasUnsavedChanges()) this.apply(this.readLatest());
+    await this.ready;
+    if (this.records && (this.hasUnsavedChanges() || this.storageFailure)) return createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), includeGoogle, this.reminders(), this.drive());
+    return this.readCurrent(data => {
+      if (!this.hasUnsavedChanges()) this.apply(data);
       return createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), includeGoogle, this.reminders(), this.drive());
     });
   }
 
   driveSnapshot(kind: BackupKind, selectedIds: string[]): Promise<{backup: OrbitBackup; revision: string}> {
-    return withStorageLock(() => {
+    return this.readCurrent(data => {
       if (this.hasUnsavedChanges()) throw new Error('本機有未保存的資料，請先下載備份，Drive 自動同步已暫停。');
-      this.apply(this.readLatest());
+      this.apply(data);
       return {backup: createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), false, this.reminders(), this.drive()), revision: this.revision()};
     });
   }
@@ -577,8 +594,17 @@ export class BoardStore implements OnDestroy {
   }
 
   refreshFromStorage(): void {
+    if (this.records) {
+      const revision = this.lastSavedRevision;
+      void this.readCurrent(data => {if (this.lastSavedRevision === revision) this.acceptRefresh(data);}).catch(error => this.storageWarning.set(this.message(error)));
+      return;
+    }
     try {
-      const latest = this.readLatest();
+      this.acceptRefresh(this.readLatest());
+    } catch (error) { this.storageWarning.set(this.message(error)); }
+  }
+
+  private acceptRefresh(latest: StoredWorkspaceData): void {
       if (latest.revision === this.lastSavedRevision) return;
       if (this.hasUnsavedChanges()) {
         this.storageWarning.set('其他分頁有新資料，但本分頁仍有未儲存變更。請先匯出此分頁的備份，避免遺失內容。');
@@ -587,7 +613,6 @@ export class BoardStore implements OnDestroy {
       const replaced = latest.generation !== this.generation();
       this.apply(latest);
       this.syncNotice.set(replaced ? '其他分頁已還原或重置資料，畫面已更新；未送出的表單草稿仍保留。' : '已同步其他分頁的資料與設定。');
-    } catch (error) { this.storageWarning.set(this.message(error)); }
   }
 
   private mutateBoard(change: (board: BoardState) => BoardState, workspaceId = this.currentWorkspace().id, generation = this.generation(), resolvingConflict = false): Promise<StoreResult> {
@@ -610,8 +635,10 @@ export class BoardStore implements OnDestroy {
     const expectedGeneration = options.generation ?? this.generation();
     this.pendingWrites.update(count => count + 1);
     try {
-      return await withStorageLock(() => {
-        const disk = this.readLatest();
+      await this.ready;
+      if (this.storageFailure) throw new Error(this.storageFailure);
+      let prepared: StoredWorkspaceData | undefined;
+      const prepare = (disk: StoredWorkspaceData): StoredWorkspaceData => {
         if (this.hasUnsavedChanges() && disk.revision !== this.lastSavedRevision) throw new Error('其他分頁已更新資料，請先匯出本分頁未儲存的內容，再重新整理。');
         const latest = this.hasUnsavedChanges() ? {...this.snapshot, state: this.workspaceState()} : disk;
         if (latest.generation !== expectedGeneration) {
@@ -629,15 +656,17 @@ export class BoardStore implements OnDestroy {
         if (!drive) throw new Error('Drive 設定不合法，未儲存這次變更。');
         const onboarding = changed.generation === latest.generation && isInitialWorkspace(state) ? changed.onboarding : undefined;
         const next: StoredWorkspaceData = {...changed, onboarding, state, google, drive, revision: crypto.randomUUID(), updatedAt: new Date().toISOString()};
-        try { localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(next)); }
-        catch {
+        prepared = next; return next;
+      };
+      const unsaved = (next: StoredWorkspaceData): StoreResult => {
           if (options.requirePersistence) throw new Error(options.persistenceMessage ?? '瀏覽器儲存空間不足或無法保存，還原或重置未套用；原有資料保留。');
           this.apply(next, options.select, false);
           options.afterApply?.();
           this.hasUnsavedChanges.set(true);
           this.storageWarning.set('瀏覽器目前無法儲存資料。變更只保留在此分頁，請保持開啟並匯出備份。');
           return {ok: true, persisted: false};
-        }
+      };
+      const finish = (next: StoredWorkspaceData): StoreResult => {
         let cleanupWarning = '';
         try { options.afterPersist?.(); }
         catch { cleanupWarning = '資料已重置，但瀏覽器阻擋部分舊資料的清理。空白工作空間已保存，舊資料不會自動載入。'; }
@@ -648,6 +677,17 @@ export class BoardStore implements OnDestroy {
         this.syncNotice.set('');
         try { this.channel?.postMessage({revision: next.revision}); } catch { /* Native storage events also notify other tabs. */ }
         return {ok: true, persisted: true};
+      };
+      if (this.records) {
+        let next: StoredWorkspaceData;
+        try {next = await this.records.update(disk => {if (!disk) throw new Error('本機資料索引遺失，未覆蓋原有內容。'); return prepare(disk);});}
+        catch (error) {if (prepared) return unsaved(prepared); throw error;}
+        const result = finish(next); this.notifyRecordWrite(next); return result;
+      }
+      return await withStorageLock(() => {
+        const next = prepare(this.readLatest());
+        try {localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(next));} catch {return unsaved(next);}
+        return finish(next);
       });
     } catch (error) {
       const message = this.message(error);
@@ -693,11 +733,41 @@ export class BoardStore implements OnDestroy {
   private readLatest(): StoredWorkspaceData {
     const saved = localStorage.getItem(WORKSPACE_STORAGE_KEY);
     if (saved) {
+      if (JSON.parse(saved)?.storage === 'indexeddb') {
+        if (!this.records) throw new Error('此瀏覽器無法讀取已升級的本機資料，請使用支援 IndexedDB 的瀏覽器。');
+        return this.initialData(createWorkspaceState(createInitialState()));
+      }
       const data = readStoredData(JSON.parse(saved));
       if (!data) throw new Error('儲存資料格式不完整，請先匯出目前可讀的資料，避免覆蓋原檔。');
       return {...data, preferences: data.preferences ?? this.legacyAppearance(), google: data.google ?? structuredClone(DEFAULT_GOOGLE)};
     }
     return this.legacyData();
+  }
+
+  private async initializeRecords(): Promise<void> {
+    const raw = localStorage.getItem(WORKSPACE_STORAGE_KEY), migrated = raw && JSON.parse(raw)?.storage === 'indexeddb';
+    if (this.storageWarning() && !migrated) throw new Error('舊本機資料無法完整驗證，尚未升級，請先匯出可讀內容。');
+    const migrate = async () => {
+      const data = await this.records!.update(current => {
+        if (current) return current;
+        if (migrated) throw new Error('本機資料索引存在，但保存紀錄遺失；請從 JSON 或雲端備份還原。');
+        return this.readLatest();
+      });
+      this.apply(data, this.selectedState(data.state).activeWorkspaceId); this.storageWarning.set(''); this.notifyRecordWrite(data);
+    };
+    // Hold the legacy Web Lock through commit and marker publication during upgrade.
+    if (navigator.locks) await navigator.locks.request('iih-orbit-data-write', migrate); else await migrate();
+  }
+  private notifyRecordWrite(data: StoredWorkspaceData): void {
+    try {localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({formatVersion: 3, storage: 'indexeddb', generation: data.generation, revision: data.revision}));}
+    catch {this.storageWarning.set('資料已保存在本機，但其他分頁的更新提示暫時無法保存；請重新整理舊分頁。');}
+  }
+  private async readCurrent<T>(read: (data: StoredWorkspaceData) => T): Promise<T> {
+    await this.ready;
+    if (this.storageFailure) throw new Error(this.storageFailure);
+    if (!this.records) return withStorageLock(() => read(this.readLatest()));
+    const data = await this.records.read(); if (!data) throw new Error('本機資料索引遺失，原有資料保留。');
+    return read(data);
   }
 
   private load(): StoredWorkspaceData {

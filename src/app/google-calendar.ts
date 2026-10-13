@@ -86,6 +86,7 @@ export class GoogleCalendarService implements OnDestroy {
       if (previouslyBusy && !keys.length && !this.localSyncing() && !this.destroyed) void this.refresh(false);
     }, syncChannel, typeof window !== 'undefined' ? navigator.locks : undefined);
     effect(() => {
+      if (this.store.storageLoading?.()) return;
       this.configuration(); this.requestedRanges(); this.auth.connected();
       untracked(() => void this.configure());
     });
@@ -116,7 +117,7 @@ export class GoogleCalendarService implements OnDestroy {
   }
 
   private async configure(): Promise<void> {
-    if (this.destroyed || this.suspended) return;
+    if (this.destroyed || this.suspended || this.store.storageLoading?.()) return;
     const epoch = ++this.epoch;
     this.useCalendarList();
     this.attempts.clear();

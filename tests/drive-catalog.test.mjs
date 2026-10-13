@@ -5,6 +5,7 @@ import {emptyWorkspace} from '../src/app/workspace-data.ts';
 import {DEFAULT_APPEARANCE} from '../src/app/appearance-data.ts';
 import {canonical, createDriveDocument, DriveCollectionDeleted, readDriveFile, versionGraph, versionProperties} from '../src/app/drive-data.ts';
 import {driveCatalog, fileScope} from '../src/app/drive-catalog.ts';
+import {packBackup} from '../src/app/backup-blocks.ts';
 import {DriveApi} from '../src/app/drive-api.ts';
 import {GoogleHttpError} from '../src/app/google-api.ts';
 
@@ -22,7 +23,8 @@ function memoryDrive() {
         }
         const type = /key='type' and value='([^']+)'/.exec(parameters.q)?.[1];
         const parent = /'([^']+)' in parents/.exec(parameters.q)?.[1];
-        return {files: [...files.values()].filter(file => (!parameters.q.includes('trashed = false') || !file.trashed) && file.appProperties?.orbit === 'v1' && file.appProperties.type === type && (!parent || file.parents?.includes(parent))).map(file => structuredClone(file))};
+        const dataset = /key='dataset' and value='([^']+)'/.exec(parameters.q)?.[1];
+        return {files: [...files.values()].filter(file => (!parameters.q.includes('trashed = false') || !file.trashed) && file.appProperties?.orbit === 'v1' && file.appProperties.type === type && (!parent || file.parents?.includes(parent)) && (!dataset || file.appProperties.dataset === dataset)).map(file => structuredClone(file))};
       }
       const id = path.slice('files/'.length), file = files.get(id);
       if (!file) throw new GoogleHttpError(404);
@@ -35,12 +37,13 @@ function memoryDrive() {
       return structuredClone(file);
     },
     async upload(url, options) {
+      if (options.method === 'PATCH') {const id = new URL(url).pathname.split('/').at(-1), file = files.get(id); if (!file) throw new GoogleHttpError(404); const document = JSON.parse(options.body); documents.set(id, document); file.size = String(new TextEncoder().encode(options.body).length); return Response.json(file);}
       assert.equal(options.method, 'POST'); assert.match(url, /multipart/);
       const parts = [...options.body.matchAll(/\r\n\r\n(\{[^\r]*\})\r\n--/g)].map(match => JSON.parse(match[1]));
       assert.equal(parts.length, 2);
       const [metadata, document] = parts;
       if (files.has(metadata.id)) throw new GoogleHttpError(409);
-      const file = {...metadata, createdTime: document.exportedAt, size: String(new TextEncoder().encode(JSON.stringify(document)).length)};
+      const file = {...metadata, createdTime: document.exportedAt ?? document.header?.exportedAt ?? new Date().toISOString(), size: String(new TextEncoder().encode(JSON.stringify(document)).length)};
       files.set(file.id, file); documents.set(file.id, structuredClone(document)); return Response.json(file);
     }
   };
@@ -48,11 +51,25 @@ function memoryDrive() {
   const root = {id: 'root_folder', name: 'IIH Orbit', mimeType: 'application/vnd.google-apps.folder', createdTime: '2026-10-01T00:00:00Z', appProperties: {orbit: 'v1', type: 'folder'}};
   files.set(root.id, root);
   return {api, transport, files, documents, requests, patches,
-    put(document, id, time = document.exportedAt, legacy = false) {
+    async put(document, id, time = document.exportedAt, legacy = false) {
+      let content = document;
+      if (document.cloud.formatVersion === 5) {
+        const packed = await packBackup(document), refs = new Map();
+        for (const [hash, block] of packed.blocks) {
+          let existing = [...files.values()].find(file => file.appProperties?.type === 'block' && file.appProperties.dataset === document.cloud.datasetId && file.appProperties.hash === hash);
+          if (!existing) {
+            existing = {id: 'block_' + ++nextId, name: hash + '.json', mimeType: 'application/json', createdTime: time, size: String(new TextEncoder().encode(canonical(block)).length), sha256Checksum: hash, appProperties: {orbit: 'v1', type: 'block', dataset: document.cloud.datasetId, hash}};
+            files.set(existing.id, existing); documents.set(existing.id, block);
+          }
+          refs.set(hash, {id: existing.id, hash});
+        }
+        for (const workspace of packed.manifest.state.workspaces) {workspace.metadata = refs.get(workspace.metadata.hash); workspace.tasks = workspace.tasks.map(ref => refs.get(ref.hash));}
+        content = packed.manifest;
+      }
       const properties = versionProperties(document);
       if (legacy) {delete properties.label; delete properties.counts;}
-      const file = {id, name: 'iih-orbit-unknown.json', mimeType: 'application/json', createdTime: time, size: String(new TextEncoder().encode(JSON.stringify(document)).length), parents: [root.id], appProperties: properties};
-      files.set(id, file); documents.set(id, structuredClone(document)); return readDriveFile(file);
+      const file = {id, name: 'iih-orbit-unknown.json', mimeType: 'application/json', createdTime: time, size: String(new TextEncoder().encode(JSON.stringify(content)).length), parents: [root.id], appProperties: properties};
+      files.set(id, file); documents.set(id, structuredClone(content)); return readDriveFile(file);
     },
     path(id) {const file = files.get(id); return file.parents?.length ? this.path(file.parents[0]) + '/' + file.name : file.name;}
   };
@@ -62,7 +79,7 @@ async function history(f, count = 12, purpose = 'sync') {
   const dataset = crypto.randomUUID(), files = [];
   for (let i = 0; i < count; i++) {
     const document = await createDriveDocument(backup(), dataset, i ? [files[i - 1].cloud.versionId] : [], purpose);
-    files.push(f.put(document, 'history_' + dataset + '_' + i, new Date(Date.UTC(2026, 9, 1, i)).toISOString()));
+    files.push(await f.put(document, 'history_' + dataset + '_' + i, new Date(Date.UTC(2026, 9, 1, i)).toISOString()));
   }
   return files;
 }
@@ -93,7 +110,7 @@ test('自動清理始終保留目前最新內容，時間偏差不會把 head �
 test('不同內容待選擇、空的待上傳檔案及正在刪除的集合不自動清理', async () => {
   for (const condition of ['branch', 'pending', 'removed']) {
     const f = memoryDrive(), versions = await history(f);
-    if (condition === 'branch') f.put(await createDriveDocument(backup(), versions[0].cloud.datasetId, [versions[0].cloud.versionId], 'sync'), 'new_branch');
+    if (condition === 'branch') await f.put(await createDriveDocument(backup(), versions[0].cloud.datasetId, [versions[0].cloud.versionId], 'sync'), 'new_branch');
     if (condition === 'pending') f.files.get(versions.at(-1).id).size = '0';
     if (condition === 'removed') {const root = f.files.get(versions[0].id); root.trashed = true; root.appProperties.type = 'deleted-collection';}
     assert.equal((await f.api.pruneHistory()).removed, 0); assert.equal(f.patches.length, 0);
@@ -113,7 +130,7 @@ test('自動清理逐份重查，期間出現新分支就保留所有未刪除�
   const branch = await createDriveDocument(backup(), versions[0].cloud.datasetId, [versions[0].cloud.versionId], 'sync');
   let inserted = false;
   f.transport.api = async (path, parameters, options) => {
-    if (!inserted && path === 'files/' + versions[0].id) {inserted = true; f.put(branch, 'concurrent_branch');}
+    if (!inserted && path === 'files/' + versions[0].id) {inserted = true; await f.put(branch, 'concurrent_branch');}
     return api(path, parameters, options);
   };
   assert.equal((await f.api.pruneHistory()).removed, 0); assert.equal(f.patches.length, 0);
@@ -141,8 +158,8 @@ test('備份摘要以工作空間名稱辨識，中文名稱與二十個父版�
   assert.equal(Object.keys(properties).length, 30);
   for (const [key, value] of Object.entries(properties)) assert.ok(new TextEncoder().encode(key + value).length <= 124);
   assert.ok(properties.label.endsWith('…')); assert.equal(properties.counts, '1/0');
-  const f = memoryDrive(), file = f.put(document, 'file_new'); assert.equal(fileScope(file), properties.label); assert.deepEqual(file.summary, {label: properties.label, workspaces: 1, tasks: 0});
-  const old = f.put(document, 'file_old', undefined, true); assert.equal(old.summary, undefined); assert.equal(fileScope(old), '選定工作空間'); assert.deepEqual(old.cloud, file.cloud);
+  const f = memoryDrive(), file = await f.put(document, 'file_new'); assert.equal(fileScope(file), properties.label); assert.deepEqual(file.summary, {label: properties.label, workspaces: 1, tasks: 0});
+  const old = await f.put(document, 'file_old', undefined, true); assert.equal(old.summary, undefined); assert.equal(fileScope(old), '選定工作空間'); assert.deepEqual(old.cloud, file.cloud);
 });
 
 test('集合列表以最新版本分組、手動備份獨立，時間偏差不影響版本編號，分支保持可辨識', async () => {
@@ -150,13 +167,13 @@ test('集合列表以最新版本分組、手動備份獨立，時間偏差不�
   const a = await createDriveDocument(backup('workspaces'), root.cloud.datasetId, [root.cloud.versionId], 'sync');
   const b = await createDriveDocument(backup('workspaces'), root.cloud.datasetId, [root.cloud.versionId], 'sync');
   const other = await createDriveDocument(backup(), crypto.randomUUID(), [], 'backup'), manual = await createDriveDocument(backup());
-  const files = [f.put(root, 'file_root', '2026-10-20T00:00:00Z'), f.put(a, 'file_a', '2026-10-01T00:00:00Z'), f.put(b, 'file_b', '2026-10-02T00:00:00Z'), f.put(other, 'file_other'), f.put(manual, 'file_manual')];
+  const files = [await f.put(root, 'file_root', '2026-10-20T00:00:00Z'), await f.put(a, 'file_a', '2026-10-01T00:00:00Z'), await f.put(b, 'file_b', '2026-10-02T00:00:00Z'), await f.put(other, 'file_other'), await f.put(manual, 'file_manual')];
   const catalog = driveCatalog(files, root.cloud.datasetId), group = catalog.collections[0];
   assert.equal(catalog.collections.length, 2); assert.equal(catalog.manual.length, 1); assert.equal(group.current, true); assert.equal(group.label, '研究計畫');
   assert.deepEqual(new Set(group.heads.map(file => file.id)), new Set(['file_a', 'file_b'])); assert.equal(group.history.length, 1); assert.equal(group.versions.get(root.cloud.versionId), 1);
   assert.ok(group.versions.get(a.cloud.versionId) > 1); assert.ok(group.versions.get(b.cloud.versionId) > 1); assert.equal(group.startedAt, files[0].createdTime);
   const merge = await createDriveDocument(backup('workspaces'), root.cloud.datasetId, [a.cloud.versionId, b.cloud.versionId], 'sync');
-  const merged = driveCatalog([...files, f.put(merge, 'file_merge', '2026-09-30T00:00:00Z')], root.cloud.datasetId).collections[0];
+  const merged = driveCatalog([...files, await f.put(merge, 'file_merge', '2026-09-30T00:00:00Z')], root.cloud.datasetId).collections[0];
   assert.equal(merged.heads.length, 1); assert.equal(merged.versions.get(merge.cloud.versionId), 4); assert.equal(merged.history.length, 3);
   const cycle = structuredClone(files); cycle[0].cloud.parents = [a.cloud.versionId];
   const invalid = driveCatalog(cycle, root.cloud.datasetId).collections[0]; assert.match(invalid.warning, /循環/); assert.equal(invalid.heads.length, 0); assert.equal(invalid.history.length, 3);
@@ -178,7 +195,7 @@ test('整理既有檔案保留兩個同步分支，祖先移入歷史，手動�
   const a = await createDriveDocument(backup('workspaces'), root.cloud.datasetId, [root.cloud.versionId], 'sync');
   const b = await createDriveDocument(backup('workspaces'), root.cloud.datasetId, [root.cloud.versionId], 'sync');
   const manual = await createDriveDocument(backup()), auto = await createDriveDocument(backup(), crypto.randomUUID(), [], 'backup');
-  f.put(root, 'file_root', undefined, true); f.put(a, 'file_a', undefined, true); f.put(b, 'file_b', undefined, true); f.put(manual, 'file_manual', undefined, true); f.put(auto, 'file_auto', undefined, true);
+  await f.put(root, 'file_root', undefined, true); await f.put(a, 'file_a', undefined, true); await f.put(b, 'file_b', undefined, true); await f.put(manual, 'file_manual', undefined, true); await f.put(auto, 'file_auto', undefined, true);
   const before = canonical([...f.documents]);
   const result = await f.api.organize(); assert.equal(result.changed, 5); assert.equal(canonical([...f.documents]), before);
   assert.match(f.path('file_root'), /^IIH Orbit\/歷史備份\/同步歷史\//);
@@ -194,7 +211,7 @@ test('整理既有檔案保留兩個同步分支，祖先移入歷史，手動�
 test('整理只處理指定集合，空的待上傳檔案保留；回覆後連線失效與版本被改動都不搬移', async () => {
   const f = memoryDrive(), one = await createDriveDocument(backup(), crypto.randomUUID(), [], 'sync');
   const two = await createDriveDocument(backup(), crypto.randomUUID(), [], 'sync');
-  f.put(one, 'file_one'); f.put(two, 'file_two'); const pending = await createDriveDocument(backup()); f.put(pending, 'file_pending'); f.files.get('file_pending').size = '0';
+  await f.put(one, 'file_one'); await f.put(two, 'file_two'); const pending = await createDriveDocument(backup()); await f.put(pending, 'file_pending'); f.files.get('file_pending').size = '0';
   await f.api.organize(() => true, one.cloud.datasetId); assert.ok(f.path('file_one').startsWith('IIH Orbit/同步資料/')); assert.deepEqual(f.files.get('file_two').parents, ['root_folder']); assert.deepEqual(f.files.get('file_pending').parents, ['root_folder']);
   const requests = f.transport.api; let current = true;
   f.transport.api = async (...args) => {const result = await requests(...args); current = false; return result;};
@@ -210,8 +227,8 @@ test('資料夾查詢不完整時停止建立，整理遇到循環版本不移�
   await assert.rejects(f.api.save(document, 'file_new'), /資料夾清單不完整/); assert.equal(f.files.size, 1);
   f.transport.api = request;
   const root = await createDriveDocument(backup(), crypto.randomUUID(), [], 'sync'), child = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'sync');
-  root.cloud.parents = [child.cloud.versionId]; f.put(root, 'file_root'); f.put(child, 'file_child');
-  await assert.rejects(f.api.organize(), /循環/); assert.equal(f.patches.length, 0); assert.equal(f.files.size, 3);
+  root.cloud.parents = [child.cloud.versionId]; await f.put(root, 'file_root'); await f.put(child, 'file_child');
+  await assert.rejects(f.api.organize(), /循環/); assert.equal(f.patches.length, 0); assert.equal([...f.files.values()].filter(file => file.appProperties.type !== 'block').length, 3);
 });
 
 test('整個集合移至垃圾桶，含歷史與全部分支，留下刪除標記且不影響其他集合或原始 JSON', async () => {
@@ -219,7 +236,7 @@ test('整個集合移至垃圾桶，含歷史與全部分支，留下刪除標�
   const a = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'sync');
   const b = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'sync');
   const other = await createDriveDocument(backup(), crypto.randomUUID(), [], 'backup');
-  f.put(root, 'file_root'); f.put(a, 'file_branch_a'); f.put(b, 'file_branch_b'); f.put(other, 'file_other');
+  await f.put(root, 'file_root'); await f.put(a, 'file_branch_a'); await f.put(b, 'file_branch_b'); await f.put(other, 'file_other');
   const before = canonical([...f.documents]), plan = await f.api.planCollection(root.cloud.datasetId); let detached = false;
   assert.equal(plan.files.length, 3);
   assert.equal(await f.api.trashCollection(plan, () => true, async () => {assert.equal(f.patches.length, 0); detached = true;}), 3);
@@ -234,9 +251,9 @@ test('整個集合移至垃圾桶，含歷史與全部分支，留下刪除標�
 });
 
 test('確認期間新增分支拒絕全部刪除；連線失效與關閉本機處理失敗都不寫入 Drive', async () => {
-  const f = memoryDrive(), root = await createDriveDocument(backup(), crypto.randomUUID(), [], 'backup'); f.put(root, 'file_root');
+  const f = memoryDrive(), root = await createDriveDocument(backup(), crypto.randomUUID(), [], 'backup'); await f.put(root, 'file_root');
   const plan = await f.api.planCollection(root.cloud.datasetId), child = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'backup');
-  f.put(child, 'file_child'); let stopped = false;
+  await f.put(child, 'file_child'); let stopped = false;
   await assert.rejects(f.api.trashCollection(plan, () => true, async () => {stopped = true;}), /確認期間雲端集合已更新/);
   assert.equal(stopped, false); assert.equal(f.patches.length, 0);
   const fresh = await f.api.planCollection(root.cloud.datasetId); let current = true;
@@ -246,7 +263,7 @@ test('確認期間新增分支拒絕全部刪除；連線失效與關閉本機�
 
 test('刪除部分失敗可以重新確認並繼續；垃圾桶中的集合標記仍禁止同步，整理不移動剩餘檔案', async () => {
   const f = memoryDrive(), root = await createDriveDocument(backup(), crypto.randomUUID(), [], 'sync');
-  const child = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'sync'); f.put(root, 'file_root'); f.put(child, 'file_child');
+  const child = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'sync'); await f.put(root, 'file_root'); await f.put(child, 'file_child');
   const request = f.transport.api; let fail = true;
   f.transport.api = async (...args) => {if (args[0] === 'files/file_child' && args[2]?.method === 'PATCH' && fail) throw new GoogleHttpError(403); return request(...args);};
   const plan = await f.api.planCollection(root.cloud.datasetId);
@@ -261,12 +278,12 @@ test('刪除部分失敗可以重新確認並繼續；垃圾桶中的集合標�
 });
 
 test('刪除開始後另一裝置寫入新版本，保留未確認的新檔並要求重試，不能假裝全部成功', async () => {
-  const f = memoryDrive(), root = await createDriveDocument(backup(), crypto.randomUUID(), [], 'sync'); f.put(root, 'file_root');
+  const f = memoryDrive(), root = await createDriveDocument(backup(), crypto.randomUUID(), [], 'sync'); await f.put(root, 'file_root');
   const late = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'sync');
   const request = f.transport.api; let injected = false;
   f.transport.api = async (...args) => {
     const response = await request(...args);
-    if (args[0] === 'files/file_root' && args[2]?.method === 'PATCH' && !injected) {injected = true; f.put(late, 'file_late');}
+    if (args[0] === 'files/file_root' && args[2]?.method === 'PATCH' && !injected) {injected = true; await f.put(late, 'file_late');}
     return response;
   };
   const plan = await f.api.planCollection(root.cloud.datasetId);
@@ -276,11 +293,11 @@ test('刪除開始後另一裝置寫入新版本，保留未確認的新檔並�
 });
 
 test('獨立備份刪除有身分校驗與連線柵欄，已刪除檔案重試不重新上傳，也不刪除自動集合單一版本', async () => {
-  const f = memoryDrive(), document = await createDriveDocument(backup()), file = f.put(document, 'file_manual');
+  const f = memoryDrive(), document = await createDriveDocument(backup()), file = await f.put(document, 'file_manual');
   await assert.rejects(f.api.trash(file, () => false), /刪除已停止/); assert.equal(f.patches.length, 0);
   await f.api.trash(file); assert.equal(f.files.get(file.id).trashed, true); await f.api.trash(file); assert.equal(f.patches.length, 1);
   await assert.rejects(f.api.save(document, file.id), DriveCollectionDeleted);
-  const automatic = await createDriveDocument(backup(), crypto.randomUUID(), [], 'backup'), autoFile = f.put(automatic, 'file_auto');
+  const automatic = await createDriveDocument(backup(), crypto.randomUUID(), [], 'backup'), autoFile = await f.put(automatic, 'file_auto');
   await assert.rejects(f.api.trash(autoFile), /目前的雲端資料/); assert.equal(f.files.get(autoFile.id).trashed, undefined);
 });
 
@@ -288,7 +305,7 @@ test('過去備份逐份刪除後只剩目前內容，刪除紀錄保留連續�
   const f = memoryDrive(), root = await createDriveDocument(backup(), crypto.randomUUID(), [], 'sync');
   const middle = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'sync');
   const latest = await createDriveDocument(backup(), root.cloud.datasetId, [middle.cloud.versionId], 'sync');
-  const rootFile = f.put(root, 'file_root'), middleFile = f.put(middle, 'file_middle'), latestFile = f.put(latest, 'file_latest');
+  const rootFile = await f.put(root, 'file_root'), middleFile = await f.put(middle, 'file_middle'), latestFile = await f.put(latest, 'file_latest');
   const original = structuredClone(f.documents.get(middleFile.id));
   await f.api.trash(middleFile); await f.api.trash(rootFile);
   assert.equal(f.files.get(middleFile.id).trashed, true); assert.equal(f.files.get(middleFile.id).appProperties.type, 'deleted-version');
@@ -307,7 +324,7 @@ test('過去備份逐份刪除後只剩目前內容，刪除紀錄保留連續�
 test('逐份刪除之後仍能刪除全部雲端資料，留下停止同步標記而不誤把過去備份當成整份刪除', async () => {
   const f = memoryDrive(), root = await createDriveDocument(backup(), crypto.randomUUID(), [], 'backup');
   const latest = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'backup');
-  const old = f.put(root, 'file_root'); f.put(latest, 'file_latest'); await f.api.trash(old);
+  const old = await f.put(root, 'file_root'); await f.put(latest, 'file_latest'); await f.api.trash(old);
   assert.equal((await f.api.removals()).length, 0); await f.api.assertAvailable(root.cloud.datasetId);
   const plan = await f.api.planCollection(root.cloud.datasetId); let stopped = false;
   assert.equal(await f.api.trashCollection(plan, () => true, async () => {stopped = true;}), 1);
@@ -320,7 +337,7 @@ test('過去備份刪除重查目前內容、身分與連線，不允許刪除�
   const f = memoryDrive(), root = await createDriveDocument(backup(), crypto.randomUUID(), [], 'sync');
   const a = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'sync');
   const b = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'sync');
-  const old = f.put(root, 'file_root'), first = f.put(a, 'file_a'); f.put(b, 'file_b');
+  const old = await f.put(root, 'file_root'), first = await f.put(a, 'file_a'); await f.put(b, 'file_b');
   await assert.rejects(f.api.trash(first), /目前的雲端資料/); assert.equal(f.patches.length, 0);
   const altered = structuredClone(old); altered.cloud.fileHash = 'a'.repeat(64);
   await assert.rejects(f.api.trash(altered), /備份已變更/); assert.equal(f.patches.length, 0);
@@ -334,7 +351,7 @@ test('逐份刪除已確認的待選擇內容，保留另一份、祖先與刪�
     const f = memoryDrive(), root = await createDriveDocument(backup(), crypto.randomUUID(), [], purpose);
     const a = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], purpose);
     const b = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], purpose);
-    const old = f.put(root, 'file_root'), first = f.put(a, 'file_a'), remaining = f.put(b, 'file_b');
+    const old = await f.put(root, 'file_root'), first = await f.put(a, 'file_a'), remaining = await f.put(b, 'file_b');
     const heads = [a.cloud.versionId, b.cloud.versionId], original = structuredClone(f.documents.get(first.id));
     await f.api.trash(first, () => true, heads);
     assert.equal(f.files.get(first.id).trashed, true); assert.equal(f.files.get(first.id).appProperties.type, 'deleted-version');
@@ -353,11 +370,11 @@ test('刪除待選擇內容前重查所有分支，新增、刪除或接續版�
     const f = memoryDrive(), root = await createDriveDocument(backup(), crypto.randomUUID(), [], 'backup');
     const a = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'backup');
     const b = await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'backup');
-    f.put(root, 'file_root'); const first = f.put(a, 'file_a'), second = f.put(b, 'file_b'), heads = [a.cloud.versionId, b.cloud.versionId];
+    await f.put(root, 'file_root'); const first = await f.put(a, 'file_a'), second = await f.put(b, 'file_b'), heads = [a.cloud.versionId, b.cloud.versionId];
     let current = true;
-    if (change === 'added') f.put(await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'backup'), 'file_new');
+    if (change === 'added') await f.put(await createDriveDocument(backup(), root.cloud.datasetId, [root.cloud.versionId], 'backup'), 'file_new');
     if (change === 'removed') await f.api.trash(second, () => true, heads);
-    if (change === 'continued') f.put(await createDriveDocument(backup(), root.cloud.datasetId, [a.cloud.versionId], 'backup'), 'file_new');
+    if (change === 'continued') await f.put(await createDriveDocument(backup(), root.cloud.datasetId, [a.cloud.versionId], 'backup'), 'file_new');
     if (change === 'disconnected') {
       const request = f.transport.api;
       f.transport.api = async (...args) => {const result = await request(...args); if (args[0] === 'files') current = false; return result;};

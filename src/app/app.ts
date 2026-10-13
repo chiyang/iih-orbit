@@ -373,6 +373,7 @@ export class App {
       field?.focus();
     });
     effect(() => {
+      if (this.store.storageLoading()) return;
       const phase = this.store.onboarding();
       untracked(() => {
         if (phase === 'guide' && this.modal() !== 'intro') { this.introFirstUse.set(true); this.closePanel(); this.modal.set('intro'); }
@@ -381,6 +382,7 @@ export class App {
       });
     });
     effect(() => {
+      if (this.store.storageLoading()) return;
       const generation = this.store.generation(), workspace = this.store.currentWorkspace().id;
       const context = JSON.stringify([generation, workspace]);
       if (context !== this.browseContext) untracked(() => {
