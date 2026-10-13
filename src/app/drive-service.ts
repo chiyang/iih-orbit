@@ -137,6 +137,7 @@ export class DriveService implements OnDestroy {
     return !this.destroyed && !this.suspended && !this.loggingOut() && !this.store.cloudResume() && this.auth.connected() && this.online() && !this.unavailable() && this.store.drive().mode !== 'off' && !this.store.hasUnsavedChanges();
   }
   private poll(): void {
+    if (this.store.pendingWrites() || this.debounce !== undefined) return;
     const minutes = this.store.drive().pollMinutes;
     if (this.autoReady() && minutes && document.visibilityState !== 'hidden' && Date.now() - this.lastPoll >= minutes * 60000) void this.sync(false);
   }

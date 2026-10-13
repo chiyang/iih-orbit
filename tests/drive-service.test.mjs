@@ -537,6 +537,29 @@ test('只更改主題色時，全部資料自動備份在等待時間後保存�
   } finally {f.close(); t.mock.timers.reset();}
 });
 
+test('定期與回到前景的檢查等待最後一次修改的儲存延遲，手動同步可立即執行', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync'); await f.service.sync(); await settle(); clearTimeout(f.service.maintenanceTimer);
+    const count = f.documents.size, sync = t.mock.method(f.service, 'sync', f.service.sync.bind(f.service));
+    f.service.lastPoll = Date.now() - 5 * 60000;
+    await f.store.saveTask({...f.store.tasks()[0], title: '第一次修改'}); await settle();
+    await f.event('focus'); assert.equal(sync.mock.callCount(), 0); assert.equal(f.service.busy(), false);
+    t.mock.timers.tick(10000); await settle();
+    await f.store.saveTask({...f.store.tasks()[0], title: '最後一次修改'}); await settle();
+    f.service.poll(); assert.equal(sync.mock.callCount(), 0);
+    t.mock.timers.tick(14999); await settle(); assert.equal(sync.mock.callCount(), 0); assert.equal(f.documents.size, count);
+    t.mock.timers.tick(1); assert.equal(sync.mock.callCount(), 1); await sync.mock.calls[0].result;
+    assert.equal(f.documents.size, count + 1); assert.equal([...f.documents.values()].at(-1).data.workspaces[0].tasks[0].title, '最後一次修改');
+    f.service.lastPoll = Date.now() - 5 * 60000; f.store.pendingWrites.set(1);
+    f.service.poll(); assert.equal(sync.mock.callCount(), 1);
+    f.store.pendingWrites.set(0); await f.event('focus'); assert.equal(sync.mock.callCount(), 2); assert.equal(f.documents.size, count + 1);
+    await f.store.saveTask({...f.store.tasks()[0], title: '手動立即同步'}); await settle();
+    assert.equal(await f.service.sync(), 'complete'); assert.equal(sync.mock.callCount(), 3); assert.equal(f.documents.size, count + 2);
+  } finally {f.close(); t.mock.timers.reset();}
+});
+
 test('另一個分頁顯示 Drive 處理中並拒絕重複備份，完成後讀取同一個待上傳狀態', async () => {
   const f = await fixture(); const peer = f.create(); await settle(); let finish;
   try {

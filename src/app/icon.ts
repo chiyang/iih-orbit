@@ -54,7 +54,7 @@ const PATHS: Record<string, string> = {
 @Component({
   selector: 'app-icon',
   template: '<svg viewBox="0 0 24 24" [attr.fill]="name() === \'pinFilled\' ? \'currentColor\' : \'none\'" [attr.stroke]="name() === \'pinFilled\' ? \'none\' : \'currentColor\'" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path()" /></svg>',
-  styles: ':host {display: inline-flex; width: 20px; height: 20px; flex-shrink: 0; vertical-align: middle} svg {width: 100%; height: 100%}'
+  styles: ':host {display: inline-flex; width: 20px; height: 20px; flex-shrink: 0; vertical-align: middle} svg {display: block; width: 100%; height: 100%}'
 })
 export class Icon {
   readonly name = input.required<string>();
