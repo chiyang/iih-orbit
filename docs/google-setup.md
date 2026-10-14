@@ -2,7 +2,7 @@
 
 [文件索引](README.md) · [專案首頁](../README.md)
 
-Orbit 不需要 Google 帳號即可管理本機任務。要使用 Gmail、Google Calendar 或遠端同步備份時，每位使用者自行申請 OAuth Client ID，於「設定 → Google 連線」填入一次，再按需要啟用服務。
+Orbit 不需要 Google 帳號即可管理本機任務。要使用 Gmail、Google Calendar、Drive 檔案瀏覽或遠端同步備份時，每位使用者自行申請 OAuth Client ID，於「設定 → Google 連線」填入一次，再按需要啟用服務。
 
 ## 首次設定
 
@@ -20,23 +20,24 @@ Orbit 使用 Google Identity Services Token Model，直接由瀏覽器呼叫 RES
 
 ## 各服務的權限與入口
 
-同一個 Client ID 可供三項服務使用；各服務保留自己的帳號與連線紀錄，可分別選擇不同 Google 帳號。
+同一個 Client ID 可供月曆、郵件、檔案瀏覽與同步備份使用；各服務保留自己的帳號與連線紀錄，可分別選擇不同 Google 帳號。
 
 | 服務 | 個別連線取得的權限 | 功能設定 |
 | --- | --- | --- |
 | Google Calendar | 月曆讀取與帳號識別；首次移轉任務時另取得活動寫入權限 | 「Google 月曆」：工作空間綁定、來源與更新頻率 |
 | Gmail | 郵件唯讀與帳號識別 | 「Gmail」：郵件使用與更新說明；側欄操作標籤、搜尋與更新 |
+| Google Drive 檔案瀏覽 | Drive `drive.metadata.readonly` 與帳號識別 | 「Google Drive」：瀏覽帳號、重新授權、解除連線 |
 | 遠端同步備份 | Drive `drive.file` 與帳號識別 | 「遠端同步備份」：全部工作空間同步、頻率與雲端資料 |
 
-可以在「Google 連線」同一頁分別連線或解除。已有 Client ID 時，各功能分頁上方也直接提供連線、切換帳號／重新授權及解除連線；沒有 ID 時才顯示「前往 Google 連線設定」。三個功能分頁共用相同的連線區樣式。
+可以在「Google 連線」同一頁分別連線或解除。已有 Client ID 時，各功能分頁上方也直接提供連線、切換帳號／重新授權及解除連線；沒有 ID 時才顯示「前往 Google 連線設定」。右側檔案分頁只保留瀏覽操作，帳號與連線選項集中到「Google Drive」設定分頁。
 
-授權元件準備完成後，按連線才開啟 Google 授權視窗。Calendar 的寫入權限不代表所有月曆都能寫入；移轉只能選擇具有 `writerWithoutPrivateAccess`、`writer` 或 `owner` 權限的月曆。Drive 僅管理 Orbit 建立或明確授權的檔案，不列出帳號的所有 Drive 檔案。參考 [Drive 權限說明](https://developers.google.com/workspace/drive/api/guides/api-specific-auth)。
+授權元件準備完成後，按連線才開啟 Google 授權視窗。Calendar 的寫入權限不代表所有月曆都能寫入；移轉只能選擇具有 `writerWithoutPrivateAccess`、`writer` 或 `owner` 權限的月曆。Drive 備份仍以 `drive.file` 管理 Orbit 建立或明確授權的檔案；檔案瀏覽另以 `drive.metadata.readonly` 逐層取得自己的檔案與資料夾資訊，排除 Orbit 備份使用的「IIH Orbit」資料夾。參考 [Drive 權限說明](https://developers.google.com/workspace/drive/api/guides/api-specific-auth)。
 
 ## 一次授權全部服務
 
-三個個別服務上方的「一次授權全部服務」只開啟一個 Google 視窗，以同一帳號申請 Calendar 讀取／移轉、Gmail 讀取與 Drive 檔案權限。
+個別服務上方的「一次授權全部服務」只開啟一個 Google 視窗，以同一帳號申請 Calendar 讀取／移轉、Gmail 讀取、Drive 備份及 Drive 唯讀檔案資訊權限。
 
-全部服務（包含 Calendar 移轉權限）連線有效時，這個按鈕改為「目前 Google 全部服務已連線」提示；部分權限未取得時仍提供授權入口，不把部分連線顯示為全部已連線。曾經取得的授權到期時，顯示「重新授權全部服務」。
+全部服務（包含 Calendar 移轉與 Drive 檔案瀏覽權限）連線有效時，這個按鈕改為「目前 Google 全部服務已連線」提示；部分權限未取得時仍提供授權入口，不把部分連線顯示為全部已連線。曾經取得的授權到期時，顯示「重新授權全部服務」。
 
 已保存 Client ID，且目前瀏覽器曾取得的服務授權到期時，頁首顯示 G 按鈕；按下直接開啟相同的全部服務授權流程，不必進入設定。成功後隱藏，取消授權仍保留到期提醒；主動解除服務不觸發提醒。G 按鈕顯示時會隱藏遠端同步按鈕，在窄螢幕也保留。等待上傳資料仍沿用原有保護，此時可由設定單獨重新連線 Drive。
 
@@ -56,9 +57,9 @@ Orbit 使用 Google Identity Services Token Model，直接由瀏覽器呼叫 RES
 | --- | --- | --- |
 | Gmail | 目前瀏覽器的 localStorage | 驗證帳號、Client ID、資料世代、權限與原期限後接續 |
 | Calendar（讀取及移轉） | 目前瀏覽器的 localStorage，讀取／寫入憑證分開保存 | 關閉後重開，驗證帳號、Client ID、資料世代、權限與原期限後接續 |
-| Drive | 目前瀏覽器的 localStorage，獨立的憑證鍵 | 關閉後重開，驗證帳號、Client ID、資料世代、權限與原期限後接續 |
+| Drive 備份／檔案瀏覽 | 目前瀏覽器的 localStorage，兩種權限各用獨立憑證鍵 | 關閉後重開，驗證帳號、Client ID、資料世代、權限與原期限後接續 |
 
-三個服務均可在同一瀏覽器關閉網頁後接續仍有效的憑證，重新整理不需再次授權。有效的舊版 sessionStorage 憑證會在驗證後遷移至 localStorage。離線或網路請求逾時不清除憑證，恢復網路後沿用原連線；啟用 Drive 自動同步時可繼續處理待上傳資料。
+各服務均可在同一瀏覽器關閉網頁後接續仍有效的憑證，重新整理不需再次授權。有效的舊版 sessionStorage 憑證會在驗證後遷移至 localStorage。離線或網路請求逾時不清除憑證，恢復網路後沿用原連線；啟用 Drive 自動同步時可繼續處理待上傳資料。
 
 原到期時間不延長，沒有背景自動續期。Google 憑證到期或 API 回覆 401 時，清除該服務憑證並提示重新連線；離線或到期時仍可查看已有的 Calendar／Gmail 快取。瀏覽器封鎖或清除網站儲存空間時，無法保證重開後接續。
 

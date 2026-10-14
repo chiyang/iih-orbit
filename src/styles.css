@@ -2,6 +2,7 @@
 @import './projects.css';
 @import './theme.css';
 @import './mail-drag-preview.css';
+@import './document-drag-preview.css';
 @import '@angular/cdk/overlay-prebuilt.css';
 
 :root {
@@ -151,3 +152,5 @@ button { border: 0; }
 }
 
 .brand-name, .brand-institution, .workspace-initial, .mobile-wordmark, .mobile-wordmark strong { color: var(--accent-text); }
+
+.cdk-overlay-container:has(.information-picker-dialog){z-index:1100}

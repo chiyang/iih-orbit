@@ -6,6 +6,8 @@ import { readWorkspaceState } from './workspace-data.ts';
 import { scheduleError } from './task-schedule.ts';
 import type { Task, TaskConflict, TaskConflictVersion } from './models.ts';
 import { taskVersionKey } from './task-conflict-data.ts';
+import { mergeDocumentLinks, mergeDocumentSources, reconcileDocumentTasks } from './document-data.ts';
+import type { DocumentLink, DocumentSource } from './models.ts';
 
 type RecordValue = Record<string, unknown>;
 const object = (value: unknown): value is RecordValue => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -65,6 +67,8 @@ class Merger {
     return structuredClone(values[this.preferred ?? 0]);
   }
   merge(base: unknown, values: unknown[], path: string): unknown {
+    if (path.endsWith('.documentLinks')) return mergeDocumentLinks([base ?? [], ...values.map(value => value ?? [])] as DocumentLink[][]);
+    if (path.endsWith('.documentSources')) return mergeDocumentSources([base ?? [], ...values.map(value => value ?? [])] as DocumentSource[][]);
     const changed = values.filter(value => !same(value, base));
     if (!changed.length) return structuredClone(base);
     if (changed.every(value => same(value, changed[0]))) return structuredClone(changed[0]);
@@ -260,7 +264,7 @@ export function mergeDriveBackups(baseInput: OrbitBackup, inputs: OrbitBackup[],
       // The task itself carries later edits; resolved snapshots only retain the decision history.
       if (variants.size >= 2) records.push({id, versions: [...variants.values()].sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0), ...(resolution ? {resolved: resolution} : {})});
     }
-    return {...workspace, tasks, ...(records.length ? {taskConflicts: records.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)} : {})};
+    return reconcileDocumentTasks({...workspace, tasks, ...(records.length ? {taskConflicts: records.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)} : {})});
   });
   // Interdependent changes can be individually valid yet form an invalid schedule or reference.
   workspaces = workspaces.flatMap(workspace => {
@@ -276,7 +280,7 @@ export function mergeDriveBackups(baseInput: OrbitBackup, inputs: OrbitBackup[],
     merger.conflicts.add('data.sources.references');
     calendars = sources(selected).map(source => ({...source, id: identities.get(calendarKey(source))!, workspaceIds: source.workspaceIds.filter(id => workspaceIds.includes(id))})).filter(source => source.workspaceIds.length);
   }
-  const candidate: OrbitBackup = {...local, data: {version: 1, activeWorkspaceId: workspaceIds.includes(local.data.activeWorkspaceId) ? local.data.activeWorkspaceId : workspaceIds[0], workspaces},
+  const candidate: OrbitBackup = {...local, formatVersion: workspaces.some(workspace => workspace.version === 5) ? 6 : 5, data: {version: 1, activeWorkspaceId: workspaceIds.includes(local.data.activeWorkspaceId) ? local.data.activeWorkspaceId : workspaceIds[0], workspaces},
     ...(local.kind === 'full' ? {preferences: merged['preferences'] as OrbitBackup['preferences'], reminders: merged['reminders'] as OrbitBackup['reminders'],
       google: {...(local.google ?? DEFAULT_GOOGLE), refreshMinutes: merged['refreshMinutes'] as typeof DEFAULT_GOOGLE.refreshMinutes ?? DEFAULT_GOOGLE.refreshMinutes, sources: calendars},
       ...(local.drive ? {drive: {...local.drive, workspaceIds: local.drive.workspaceIds.filter(id => workspaceIds.includes(id))}} : {})}

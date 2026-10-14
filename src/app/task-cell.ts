@@ -27,6 +27,7 @@ export class TaskCell {
   readonly field = input.required<TaskCellField>();
   readonly now = input(new Date());
   readonly saved = output<string>();
+  readonly documentCount = computed(() => this.store.documentCount(this.task().id));
   readonly editing = signal(false);
   readonly busy = signal(false);
   readonly error = signal('');

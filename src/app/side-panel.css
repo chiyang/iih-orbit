@@ -1,10 +1,10 @@
 .right-panel {width: var(--right-panel-width); flex: 0 0 var(--right-panel-width); min-width: 0; position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface); z-index: 30;}
 .right-panel-header {display: flex; align-items: center; justify-content: space-between; gap: var(--sp6); min-height: 65px; padding: var(--sp10) var(--sp12); border-bottom: 1px solid var(--border); flex-shrink: 0;}
-.panel-switcher {display: grid; grid-template-columns: repeat(3, 1fr); flex: 1; gap: var(--sp3); min-width: 0; max-width: 360px; padding: var(--sp3); border: 1px solid var(--border); border-radius: 9px; background: var(--control-bg);}
-.panel-switcher button {display: flex; align-items: center; justify-content: center; gap: var(--sp5); min-width: 0; padding: var(--sp8) var(--sp4); border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: var(--font-11); font-weight: 600; white-space: nowrap; cursor: pointer; transition: background-color .15s;}
+.panel-switcher {display: flex; flex: 1; gap: var(--sp3); min-width: 0; padding: var(--sp3); border: 1px solid var(--border); border-radius: 9px; background: var(--control-bg);}
+.panel-switcher button {flex: 0 0 34px; display: flex; align-items: center; justify-content: center; gap: var(--sp5); min-width: 0; padding: var(--sp8) var(--sp4); border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: var(--font-11); font-weight: 600; white-space: nowrap; cursor: pointer; transition: background-color .15s;}
 .panel-switcher button:hover {background: var(--surface-hover); color: var(--accent-text);}
 .panel-switcher button:active {background: var(--accent-border);}
-.panel-switcher button.selected {background: var(--surface); color: var(--accent-text); box-shadow: 0 1px 4px rgb(var(--shadow-rgb) / .12);}
+.panel-switcher button.selected {flex: 1 1 auto;background: var(--surface); color: var(--accent-text); box-shadow: 0 1px 4px rgb(var(--shadow-rgb) / .12);}
 .panel-switcher button:focus-visible {outline: 2px solid var(--accent-text); outline-offset: 2px;}
 .right-panel-header app-icon {width: 16px; height: 16px;}
 .panel-switcher app-icon {width: 14px; height: 14px;}
@@ -21,3 +21,16 @@
 .mail-board-placeholder {display: flex; align-items: center; justify-content: center; gap: var(--sp8); min-height: calc(110px * var(--font-scale)); padding: var(--sp16); border: 2px dashed var(--accent-border); border-radius: 8px; background: var(--accent-soft); color: var(--accent-text); font-size: var(--font-11); pointer-events: none;}
 .mail-board-placeholder app-icon {width: 20px; height: 20px; flex-shrink: 0;}
 .reminder-panel-loading {padding: var(--sp20); color: var(--text-muted); font-size: var(--font-12);}
+
+.panel-pane > app-document-panel {flex:1;min-height:0;}
+.document-link-target {outline:2px solid var(--accent-text)!important;outline-offset:-2px;background:var(--accent-soft)!important;}
+.task-card {position:relative;}
+.document-card-feedback {position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border:2px solid var(--accent-text);border-radius:10px;background:color-mix(in srgb,var(--accent-soft) 92%,transparent);color:var(--accent-text);font-size:var(--font-12);font-weight:600;pointer-events:none;z-index:4;padding:12px;text-align:center;}
+.document-board-placeholder {display:flex;align-items:center;justify-content:center;gap:8px;min-height:65px;margin:6px 0;border:2px dashed var(--accent-text);border-radius:9px;background:var(--accent-soft);color:var(--accent-text);font-size:var(--font-12);pointer-events:none;}
+.document-list-placeholder td {padding:16px;text-align:center;border:2px dashed var(--accent-text);background:var(--accent-soft);color:var(--accent-text);font-size:var(--font-12);pointer-events:none;}
+.document-drop-notice {display:flex;align-items:center;gap:10px;padding:12px 16px;margin-bottom:12px;border:1px solid var(--accent-border);border-radius:9px;background:var(--accent-soft);color:var(--text);font-size:var(--font-12);line-height:1.7;}
+.document-drop-notice>span {flex:1;}
+
+.task-row .pin-column{position:relative}.document-row-feedback{position:absolute;left:8px;top:50%;transform:translateY(-50%);z-index:2;padding:9px 12px;border-radius:8px;background:var(--surface);color:var(--accent-text);box-shadow:0 2px 12px #0002;white-space:nowrap;pointer-events:none}
+
+.mail-list-placeholder td{padding:16px;text-align:center;border:2px dashed var(--accent-text);background:var(--accent-soft);color:var(--accent-text);font-size:var(--font-12);pointer-events:none}

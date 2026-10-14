@@ -1,14 +1,19 @@
-/* Task editing styles loaded alongside the document viewer. */
+/* Task editing styles are owned by the task form and always available. */
 
-/* Dialog sizing is only needed after the document viewer has loaded. */
+
 .modal[data-modal='task'].description-focused { width: 1100px; }
 .modal[data-modal='task'].description-focused .modal-body { padding-bottom: 15px; }
 .modal[data-modal='task'].description-focused app-markdown-editor { margin-bottom: 0; }
 .task-form .subtask-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; gap: 8px; }
+.task-form .subtask-editor {background:var(--surface-soft);border:1px solid var(--border);border-radius:9px;padding:var(--sp15);}
+.task-form .subtask-heading {display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp6);margin-bottom:var(--sp16);color:var(--text-muted);}
+.task-form .subtask-heading app-icon {width:15px;height:15px;}
+.task-form .subtask-heading strong {font-size:var(--font-11);font-weight:500;}
+.task-form .subtask-heading small {margin-left:auto;font-size:var(--font-8);}
 .task-form .subtask-row label { display: flex; gap: 8px; align-items: center; color: var(--text-muted); font-size: var(--font-11); overflow-wrap: anywhere; }
 .task-form .subtask-row input { accent-color: var(--accent-strong); width: 14px; height: 14px; flex-shrink: 0; }
 .task-form .subtask-row .checked { color: var(--text-soft); text-decoration: line-through; }
-.task-form .subtask-add { display: flex; align-items: center; margin-top: 8px; border: 1px dashed var(--border); border-radius: 6px; padding: 1px 6px; }
+.task-form .subtask-add { display: flex; align-items: center; margin-top: 8px; border: 1px dashed var(--border); border-radius: 6px; padding: 1px 6px; background:var(--surface); }
 .task-form .subtask-add input { flex: 1; width: 100%; min-width: 0; border: 0; background: transparent; font-size: var(--font-11); padding: 10px 6px; color: var(--text-muted); }
 .task-form .subtask-add input::placeholder { color: var(--text-soft); }
 .task-form .subtask-add input:focus { outline: none; }

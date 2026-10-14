@@ -22,6 +22,10 @@
 .modal-header { display: flex; align-items: center; justify-content: space-between; padding: var(--sp24) var(--sp27) var(--sp20); border-bottom: 1px solid var(--border); }
 .modal-eyebrow { font-size: var(--font-8); color: var(--text-muted); letter-spacing: 1.6px; }
 .modal-header h2 { font-size: var(--font-20); font-weight: 600; color: var(--text); margin: var(--sp7) 0 0; }
+.modal[data-modal='task'] > .modal-header { padding: var(--sp10) var(--sp20); }
+.modal[data-modal='task'] > .modal-header h2 { font-size: var(--font-16); margin: 0; }
+.modal[data-modal='task'] .modal-body { padding: var(--sp16) var(--sp20); }
+.modal[data-modal='task'] .modal-footer { padding: var(--sp12) var(--sp20); }
 .modal-body { padding: var(--sp23) var(--sp27); }
 .form-field { display: block; color: var(--text-muted); font-size: var(--font-11); font-weight: 500; margin-bottom: var(--sp18); }
 .required { color: var(--danger-text); }

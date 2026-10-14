@@ -1,0 +1,63 @@
+import '@angular/compiler';
+import {createEnvironmentInjector, runInInjectionContext, signal, ɵEffectScheduler, ɵChangeDetectionScheduler} from '@angular/core';
+import {DIALOG_DATA, Dialog, DialogRef} from '@angular/cdk/dialog';
+import {Subject} from 'rxjs';
+import assert from 'node:assert/strict';
+import {after, test} from 'node:test';
+import {createRequire} from 'node:module';
+import {mkdir, mkdtemp, rm} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {documentFromUrl} from '../src/app/document-data.ts';
+import {mailInformationSource} from '../src/app/mail-information-data.ts';
+
+const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
+await mkdir('.angular', {recursive: true});
+const directory = await mkdtemp(resolve('.angular/information-picker-test-')), output = resolve(directory, 'picker.mjs');
+await build({stdin: {contents: "export {DriveFilePicker} from './src/app/drive-file-picker.ts'; export {DocumentLinksEditor} from './src/app/document-links-editor.ts'; export {DriveBrowser} from './src/app/drive-browser.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const {DriveFilePicker, DocumentLinksEditor, DriveBrowser} = await import(pathToFileURL(output).href);
+after(() => rm(directory, {recursive: true, force: true}));
+const first = documentFromUrl('google-drive', 'https://docs.google.com/document/d/first/edit', '第一份'), second = documentFromUrl('google-drive', 'https://drive.google.com/drive/folders/second', '第二份'), mail = mailInformationSource({id: 'mail', subject: '郵件', from: 'sender@example.test', senderEmail: 'sender@example.test', messageId: '<mail@example.test>'}, 'me@example.test', 'account');
+function fixture() {
+  const effects = new Set(), context = signal('context'), browser = {connection: {context, connecting: signal(false)}, busy: signal(false)}, closures = [], opens = [];
+  const ref = {closed: new Subject(), backdropClick: new Subject(), close(value) {closures.push(value); this.closed.next(value); this.closed.complete();}};
+  const dialog = {open(component, config) {opens.push({component, config}); return ref;}};
+  const injector = createEnvironmentInjector([{provide: DriveBrowser, useValue: browser}, {provide: DialogRef, useValue: ref}, {provide: Dialog, useValue: dialog}, {provide: DIALOG_DATA, useValue: {value: [first, mail]}}, {provide: ɵEffectScheduler, useValue: {add: e => effects.add(e), schedule() {}, remove: e => effects.delete(e)}}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
+  globalThis.ngServerMode = true;
+  let picker, editor;
+  try {runInInjectionContext(injector, () => {picker = new DriveFilePicker(); editor = new DocumentLinksEditor();});} finally {delete globalThis.ngServerMode;}
+  editor.value = signal([first, mail]); editor.known = signal([first, second, mail]);
+  const flush = () => {for (const effect of effects) if (effect.dirty) effect.run();}; flush();
+  return {picker, editor, browser, ref, opens, closures, flush, close: () => injector.destroy()};
+}
+test('獨立選檔可新增、取消選取與取消整個視窗，取消不變更任務草稿', async () => {
+  const f = fixture(), changes = [];
+  try {
+    f.editor.valueChange.subscribe(value => changes.push(value)); await f.editor.openPicker(); assert.equal(f.editor.pickerOpen(), true);
+    f.picker.toggle(second); f.picker.toggle(first); assert.deepEqual(f.picker.selected().map(source => source.id), [second.id]);
+    f.picker.cancel(); assert.equal(f.editor.pickerOpen(), false); assert.deepEqual(changes, []); assert.deepEqual(f.editor.value(), [first, mail]); assert.match(f.editor.notice(), /取消/);
+  } finally {f.close();}
+});
+test('確認才加入草稿，保留 Gmail 資訊連結，結果與選取清單沒有共用可變陣列', async () => {
+  const f = fixture(), changes = [];
+  try {
+    f.editor.valueChange.subscribe(value => changes.push(value)); await f.editor.openPicker(); f.picker.toggle(second); f.picker.confirm();
+    assert.equal(changes.length, 1); assert.deepEqual(changes[0].map(source => source.id), [mail.id, first.id, second.id]); assert.equal(f.editor.pickerOpen(), false);
+    changes[0][1].name = '修改草稿'; assert.equal(f.picker.selected()[0].name, first.name);
+    assert.equal(f.opens[0].config.disableClose, true); assert.equal(f.opens[0].config.ariaModal, true);
+  } finally {f.close();}
+});
+test('Escape 只取消內層選檔，帳號更換丟棄尚未確認的新選取', async () => {
+  const f = fixture(); let prevented = false, stopped = false;
+  try {
+    await f.editor.openPicker(); f.picker.toggle(second); f.browser.connection.context.set('another-account'); f.flush(); assert.deepEqual(f.picker.selected(), [first]); assert.match(f.picker.notice(), /帳號已更新/);
+    f.picker.escape({preventDefault() {prevented = true;}, stopPropagation() {stopped = true;}}); assert.equal(prevented, true); assert.equal(stopped, true); assert.equal(f.editor.pickerOpen(), false); assert.deepEqual(f.editor.value(), [first, mail]);
+  } finally {f.close();}
+});
+
+test('選檔元件載入期間取消或離開任務，不會晚到開啟視窗', async () => {
+  const f = fixture();
+  const pending = f.editor.openPicker(); f.editor.cancelPicker(); await pending;
+  assert.equal(f.editor.pickerOpen(), false); assert.equal(f.opens.length, 0);
+  const reopening = f.editor.openPicker(); f.close(); await reopening; assert.equal(f.opens.length, 0);
+});

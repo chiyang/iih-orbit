@@ -6,6 +6,8 @@ import { createRequire } from 'node:module';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
+import {JSDOM} from 'jsdom';
+import {documentFromUrl, DOCUMENT_DRAG_TYPE} from '../src/app/document-data.ts';
 import { COLUMNS } from '../src/app/models.ts';
 import { reminderItems } from '../src/app/reminder-items.ts';
 import { externalEvent } from '../src/app/google-data.ts';
@@ -16,8 +18,8 @@ const { build } = createRequire(require.resolve('@angular/build/package.json'))(
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/app-project-test-'));
 const output = resolve(directory, 'app.mjs');
-await build({stdin: {contents: "export {App} from './src/app/app.ts'; export {Settings} from './src/app/settings.ts'; export {BoardStore} from './src/app/board-store.ts'; export {UiPreferences} from './src/app/ui-preferences.ts'; export {StartupGuide} from './src/app/startup-guide.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const { App, Settings, BoardStore, UiPreferences, StartupGuide } = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {DocumentTasks} from './src/app/document-tasks.ts'; export {App} from './src/app/app.ts'; export {Settings} from './src/app/settings.ts'; export {BoardStore} from './src/app/board-store.ts'; export {UiPreferences} from './src/app/ui-preferences.ts'; export {StartupGuide} from './src/app/startup-guide.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const { DocumentTasks, App, Settings, BoardStore, UiPreferences, StartupGuide } = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 
 const task = {id: 'welcome-task', title: '迎新海報', description: '', projectId: 'welcome', categoryId: 'design', status: 'todo', priority: 'medium', startDate: '2026-10-08', startTime: '', dueDate: '2026-10-08', dueTime: '', subtasks: []};
@@ -29,7 +31,7 @@ function application(fresh = false) {
   const store = new BoardStore();
   const effects = new Set();
   const scheduler = {add(effect) {effects.add(effect);}, schedule() {}, remove(effect) {effects.delete(effect);}};
-  const injector = createEnvironmentInjector([{provide: BoardStore, useValue: store}, {provide: UiPreferences, useValue: {textSize: () => 'standard'}}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
+  const injector = createEnvironmentInjector([DocumentTasks, {provide: BoardStore, useValue: store}, {provide: UiPreferences, useValue: {textSize: () => 'standard'}}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   // Only the viewport value is needed to construct the action controller; no DOM or browser is used.
   globalThis.window = {innerWidth: 1440};
   let app;
@@ -753,13 +755,15 @@ test('側欄入口直接開啟月曆設定，設定分頁支援左右鍵與首�
     let focused = '', prevented = 0;
     const key = name => settings.tabKeydown({key: name, preventDefault() { prevented++; }, currentTarget: {closest: () => ({querySelector: selector => ({focus() { focused = selector; }})})}});
     key('ArrowRight'); assert.equal(settings.activeTab(), 'gmail'); assert.match(focused, /gmail/);
+    key('ArrowRight'); assert.equal(settings.activeTab(), 'drive-files'); assert.match(focused, /drive-files/);
     key('ArrowRight'); assert.equal(settings.activeTab(), 'drive'); assert.match(focused, /drive/);
     settings.beginReset('all'); settings.confirmation = '重置整個 Orbit';
     key('End'); assert.equal(settings.activeTab(), 'reset');
     key('ArrowRight'); assert.equal(settings.activeTab(), 'appearance');
     key('ArrowLeft'); assert.equal(settings.activeTab(), 'reset');
     key('Home'); assert.equal(settings.activeTab(), 'appearance');
-    assert.equal(settings.confirmation, '重置整個 Orbit'); assert.equal(settings.resetMode(), 'all'); assert.equal(prevented, 6);
+    assert.equal(settings.confirmation, '重置整個 Orbit'); assert.equal(settings.resetMode(), 'all'); assert.equal(prevented, 7);
+    app.openSettings('drive-files'); assert.equal(app.settingsTab(), 'drive-files');
     app.openSettings(); assert.equal(app.settingsTab(), 'appearance');
   } finally { close(); }
 });
@@ -818,4 +822,49 @@ test('多功能側欄入口切到提示對應內容，同頁可關閉；新郵�
     assert.deepEqual(calls, [['search', ''], ['labels', ['INBOX']]]); assert.equal(app.query(), '主畫面篩選');
     app.modal.set('task'); app.activatePanel({target: 'tasks'}); assert.equal(app.mailOpen(), true);
   } finally {f.close();}
+});
+
+test('檔案獨立分頁與任務／Gmail／提醒互斥，重新開啟保存分頁與原篩選', () => {
+  const f = application();
+  try {const app = f.app; app.projectFilter.set('welcome'); app.openFiles(); assert.equal(app.filesOpen(), true); assert.equal(app.panelTab(), 'files'); assert.equal(app.panelOpen(), true); assert.equal(app.tasksOpen(), false); assert.equal(app.mailOpen(), false); assert.equal(app.remindersOpen(), false); app.rememberBrowse(); const reopen = f.reopen(); assert.equal(reopen.filesOpen(), true); assert.equal(reopen.projectFilter(), 'welcome'); app.closePanel(); assert.equal(app.panelOpen(), false); app.togglePanel(); assert.equal(app.filesOpen(), true); app.openTaskPanel(); assert.equal(app.filesOpen(), false); app.openMail(); assert.equal(app.filesOpen(), false); app.openFiles(); app.openReminders(); assert.equal(app.filesOpen(), false);} finally {f.close();}
+});
+
+test('看板邊緣 placeholder 保持落點；中央關聯與空欄新增，工具列不接受檔案', async () => {
+  const f = application(), dom = new JSDOM('<div class="kanban-column" data-status="todo"><div class="document-board-placeholder"></div><article class="task-card" data-task-id="welcome-task"><span>task</span></article></div><header></header>'), previousElement = globalThis.Element, previousNode = globalThis.Node;
+  globalThis.Element = dom.window.Element; globalThis.Node = dom.window.Node;
+  const card = dom.window.document.querySelector('article'), placeholder = dom.window.document.querySelector('.document-board-placeholder'), data = new Map();
+  const transfer = {types: [DOCUMENT_DRAG_TYPE], setData: (key, value) => data.set(key, value), getData: key => data.get(key), dropEffect: 'none'};
+  const event = (target, y) => ({target, currentTarget: target, clientY: y, clientX: 150, dataTransfer: transfer, preventDefault() {}, stopPropagation() {}});
+  const source = documentFromUrl('google-drive', 'https://docs.google.com/document/d/file/edit', '檔案');
+  try {
+    card.getBoundingClientRect = () => ({top: 100, bottom: 300, height: 200}); placeholder.getBoundingClientRect = () => ({top: 0, bottom: 0});
+    f.app.documentTasks.start({...event(null, 20)}, source, () => true); f.app.documentTasks.notice.set('上一筆操作已完成');
+    f.app.documentOver(event(card.querySelector('span'), 200)); assert.equal(f.app.documentLinks('welcome-task'), true);
+    f.app.documentOver(event(card, 105)); assert.equal(f.app.documentCreates('welcome-task', 'todo'), true);
+    // The displayed placeholder shifts the card down. Dropping inside it must preserve insertion.
+    placeholder.getBoundingClientRect = () => ({top: 100, bottom: 170}); card.getBoundingClientRect = () => ({top: 180, bottom: 380, height: 200});
+    await f.app.dropDocument(event(placeholder, 150)); assert.equal(f.app.modal(), null); assert.equal(f.store.tasks()[0].title, '檔案'); assert.equal(f.store.documentsForTask(f.store.tasks()[0].id)[0].id, source.id);
+    f.app.documentTasks.start(event(null, 20), source, () => true); f.app.documentOver(event(dom.window.document.querySelector('header'), 20)); assert.equal(f.app.documentTasks.position(), null);
+  } finally {globalThis.Element = previousElement; globalThis.Node = previousNode; dom.window.close(); f.close();}
+});
+
+test('郵件看板與清單中央關聯、邊緣新增，placeholder 位移不改變落點', async () => {
+  const f = application(), dom = new JSDOM('<div class="kanban-column"><div class="mail-board-placeholder"></div><article class="task-card" data-task-id="welcome-task"><span>task</span></article></div><table><thead><tr><th>標題</th></tr></thead><tbody><tr class="task-row" data-task-id="daily"><td>任務</td></tr></tbody></table>'), previousNode = globalThis.Node;
+  globalThis.Node = dom.window.Node;
+  const board = dom.window.document.querySelector('.kanban-column'), card = board.querySelector('article'), placeholder = board.querySelector('.mail-board-placeholder'), list = dom.window.document.querySelector('table'), row = list.querySelector('.task-row'), drops = [];
+  const mail = {boardPosition: signal(null), dragging: signal(true), over: () => true, drop: async (...args) => drops.push(args), undoContext: () => null};
+  Object.defineProperty(f.app, 'mailTasks', {value: mail});
+  const event = (currentTarget, target, y) => ({currentTarget, target, clientY: y});
+  try {
+    card.getBoundingClientRect = () => ({top: 100, height: 200}); placeholder.getBoundingClientRect = () => ({top: 0, bottom: 0});
+    f.app.boardMailOver(event(board, card, 200), COLUMNS[0]); assert.equal(f.app.mailLinks('welcome-task'), true); assert.equal(f.app.mailCreates(undefined, 'todo'), false);
+    await f.app.dropBoardMail(event(board, card, 200), COLUMNS[0]); assert.equal(drops[0][4], 'welcome-task');
+    f.app.boardMailOver(event(board, card, 105), COLUMNS[0]); assert.equal(f.app.mailCreates('welcome-task', 'todo'), true);
+    placeholder.getBoundingClientRect = () => ({top: 100, bottom: 170}); card.getBoundingClientRect = () => ({top: 180, height: 200});
+    await f.app.dropBoardMail(event(board, placeholder, 150), COLUMNS[0]); assert.equal(drops[1][3], 'welcome-task'); assert.equal(drops[1][4], undefined);
+    row.getBoundingClientRect = () => ({top: 100, height: 50}); f.app.listMailOver(event(list, row, 125)); assert.equal(f.app.mailLinks('daily'), true);
+    await f.app.dropListMail(event(list, row, 125)); assert.equal(drops[2][4], 'daily');
+    f.app.listMailOver(event(list, row, 101)); assert.equal(f.app.mailCreates('daily'), true);
+    assert.equal(f.app.listMailOver(event(list, list.querySelector('th'), 20)), false); assert.equal(mail.boardPosition(), null);
+  } finally {globalThis.Node = previousNode; dom.window.close(); f.close();}
 });

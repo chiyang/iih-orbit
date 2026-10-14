@@ -66,14 +66,32 @@ export interface CalendarTransfer {
 }
 
 export interface BoardState {
-  version: 4;
+  version: 4 | 5;
   projects: Project[];
   categories: Category[];
   statuses: BoardStatus[];
   tasks: Task[];
   calendarTransfers?: CalendarTransfer[];
   taskConflicts?: TaskConflict[];
+  documentSources?: DocumentSource[];
+  documentLinks?: DocumentLink[];
 }
+
+export type DocumentProvider = 'google-drive' | 'gmail' | 'pcloud' | 'microsoft-365';
+/** Stable source identity and last known display information; never file contents or credentials. */
+export interface DocumentSource {
+  id: string;
+  provider: DocumentProvider;
+  sourceScope: string;
+  fileId?: string;
+  locator?: string;
+  url: string;
+  name: string;
+  location?: string;
+  mimeType?: string;
+}
+/** Each addition has its own identity. Removals are permanent for that addition. */
+export interface DocumentLink {id: string; taskId: string; documentId: string; removed?: true}
 
 export interface DeviceIdentity {id: string; name: string}
 export interface TaskConflictSource extends Partial<DeviceIdentity> {updatedAt?: string}

@@ -151,7 +151,7 @@ export class DriveApi {
     const value = await this.transport.api('files/' + file.id, {alt: 'media'});
     check();
     if (new TextEncoder().encode(JSON.stringify(value)).length > 20 * 1024 * 1024) throw new Error('Drive 備份超過 20 MB。');
-    const document = file.cloud.formatVersion === 5
+    const document = file.cloud.formatVersion >= 5 && file.cloud.purpose !== 'manual'
       ? await unpackBackup(readManifest(value, file.cloud), reference => this.readBlock(reference, file.cloud.datasetId, check))
       : await readDriveDocument(value);
     if (document.cloud.fileHash !== file.cloud.fileHash || document.cloud.versionId !== file.cloud.versionId || document.cloud.datasetId !== file.cloud.datasetId
@@ -230,7 +230,7 @@ export class DriveApi {
     check();
     const logical = JSON.stringify(checked);
     if (new TextEncoder().encode(logical).length > 20 * 1024 * 1024) throw new Error('備份超過 20 MB，請減少工作空間範圍。');
-    if (document.cloud.formatVersion === 5) return this.saveChunked(checked, id, check);
+    if (document.cloud.formatVersion >= 5 && document.cloud.purpose !== 'manual') return this.saveChunked(checked, id, check);
     const data = logical;
     check();
     const bytes = new TextEncoder().encode(data).length;

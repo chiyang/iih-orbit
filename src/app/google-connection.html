@@ -4,23 +4,23 @@
   <p>授權到期需重新連線；授權憑證不放進備份。解除本機連線會停止同來源分頁對該服務的存取。可到 <a href="https://myaccount.google.com/connections" target="_blank" rel="noopener noreferrer">Google 帳號管理存取權</a> 撤銷授權。</p>
   <a href="https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid" target="_blank" rel="noopener noreferrer">Google 官方設定說明 ↗</a>
 </details>
-<p>三個服務共用一個 Client ID，各自選擇帳號與授權。</p>
+<p>月曆、郵件、Drive 備份與檔案瀏覽共用一個 Client ID，各自管理帳號與授權。</p>
 <div class="google-field">
   <label for="google-client-id">OAuth Client ID</label>
   <div class="google-client-id-input"><input id="google-client-id" type="text" autocomplete="off" spellcheck="false" aria-label="共用 Google OAuth Client ID" [ngModel]="draft()" (ngModelChange)="draft.set($event)" placeholder="…apps.googleusercontent.com"><button type="button" class="google-copy" aria-label="複製 OAuth Client ID" title="複製 Client ID" [disabled]="!draft().trim() || copying()" [attr.aria-busy]="copying()" (click)="copyClientId()"><app-icon [name]="copyStatus() === 'success' ? 'check' : 'copy'" />複製</button></div>
   @if (copyStatus() !== 'idle') {<small class="copy-feedback" [class.google-error]="copyStatus() === 'error'" role="status">{{ copyStatus() === 'success' ? '已複製 Client ID。' : '無法複製，請選取 Client ID 後手動複製。' }}</small>}
 </div>
-<div class="google-actions"><button type="button" [disabled]="busy()" (click)="save()">保存 Client ID</button>@if (store.google().clientId && unsaved()) {<button type="button" [disabled]="busy()" (click)="draft.set(store.google().clientId); error.set('')">取消變更</button>}@if (store.google().clientId && (!calendar.auth.ready() || !gmail.auth.ready() || !drive.auth.ready())) {<button type="button" [disabled]="preparing()" (click)="prepare()">{{ preparing() ? '準備連線…' : '重新準備連線' }}</button>}</div>
+<div class="google-actions"><button type="button" [disabled]="busy()" (click)="save()">保存 Client ID</button>@if (store.google().clientId && unsaved()) {<button type="button" [disabled]="busy()" (click)="draft.set(store.google().clientId); error.set('')">取消變更</button>}@if (store.google().clientId && (!calendar.auth.ready() || !gmail.auth.ready() || !drive.auth.ready() || !files.auth.ready())) {<button type="button" [disabled]="preparing()" (click)="prepare()">{{ preparing() ? '準備連線…' : '重新準備連線' }}</button>}</div>
 @if (store.google().clientId && unsaved()) {<p class="google-note">更換 Client ID 需重新授權，月曆綁定會清除，Drive 自動儲存會暫停。請先確認沒有待上傳的資料。</p>}
 @if (message()) {<p class="google-status" role="status">{{ message() }}</p>}
 @if (error()) {<p class="google-error" role="alert">{{ error() }}</p>}
 <div class="google-connect-all">
   @if (connections.allConnected()) {
     <div class="google-all-connected" role="status"><app-icon name="check" /><strong>目前 Google 全部服務已連線</strong></div>
-    <p>Calendar（讀取與移轉）、Gmail 與 Drive 授權有效；下方可分別管理帳號與連線。</p>
+    <p>Calendar（讀取與移轉）、Gmail、Drive 備份與檔案瀏覽授權有效；下方可分別管理帳號與連線。</p>
   } @else {
     <button type="button" class="google-primary" [disabled]="busy() || unsaved() || !connections.canConnect()" (click)="connectAll()">{{ connectingAll() ? '等待全部授權…' : connections.renewalNeeded() ? '重新授權全部服務' : '一次授權全部服務' }}</button>
-    <p>{{ connections.renewalNeeded() ? '部分 Google 授權已到期，重新授權後即可接續使用。' : '一次選擇同一帳號，授權 Calendar（讀取與移轉）、Gmail 與 Drive；下方仍可分別連線。' }}</p>
+    <p>{{ connections.renewalNeeded() ? '部分 Google 授權已到期，重新授權後即可接續使用。' : '一次選擇同一帳號，授權 Calendar（讀取與移轉）、Gmail、Drive 備份與檔案瀏覽；下方仍可分別連線。' }}</p>
     @if (drive.runtime().pending) {<p class="google-note">請先完成 Drive 等待上傳的資料，或在下方單獨重新連線 Drive。</p>}
   }
 </div>
@@ -40,10 +40,17 @@
     @if (gmail.error() || gmail.warning() || gmail.auth.sessionWarning()) {<p class="google-error" role="alert">{{ gmail.error() || gmail.warning() || gmail.auth.sessionWarning() }}</p>}
   </section>
   <section class="google-service" aria-labelledby="connection-drive">
-    <div class="service-heading"><h4 id="connection-drive">Google Drive</h4><span [class.connected]="drive.auth.connected()">{{ drive.auth.connected() ? '已連線' : '尚未連線' }}</span></div>
+    <div class="service-heading"><h4 id="connection-drive">Google Drive 備份</h4><span [class.connected]="drive.auth.connected()">{{ drive.auth.connected() ? '已連線' : '尚未連線' }}</span></div>
     <p>管理 Orbit 雲端備份與跨裝置同步。</p>
     @if (store.drive().email) {<p class="service-account">{{ store.drive().email }}</p>}
     <div class="google-actions"><button type="button" class="google-primary" [disabled]="busy() || unsaved() || !store.google().clientId || !drive.auth.ready() || !drive.online()" (click)="drive.connect()">{{ drive.auth.authorizing() ? '等待授權…' : drive.auth.connected() ? '切換帳號／重新授權' : '連線 Drive' }}</button>@if (drive.auth.connected()) {<button type="button" [disabled]="busy()" (click)="drive.disconnect()">解除連線</button>}<button type="button" (click)="configure.emit('drive')">遠端同步備份設定</button></div>
     @if (drive.error() || drive.auth.sessionWarning()) {<p class="google-error" role="alert">{{ drive.error() || drive.auth.sessionWarning() }}</p>}
+  </section>
+  <section class="google-service" aria-labelledby="connection-drive-files">
+    <div class="service-heading"><h4 id="connection-drive-files">Google Drive 檔案瀏覽</h4><span [class.connected]="files.auth.connected()">{{ files.auth.connected() ? '已連線' : files.auth.expired() ? '授權已到期' : '尚未連線' }}</span></div>
+    <p>唯讀取得檔名、資料夾與連結，供檔案側欄及任務資訊連結使用。</p>
+    @if (files.account().email) {<p class="service-account">{{ files.account().email }}</p>}
+    <div class="google-actions"><button type="button" class="google-primary" [disabled]="busy() || unsaved() || !store.google().clientId || !files.auth.ready()" (click)="connectFiles()">{{ files.connecting() ? '等待授權…' : files.auth.connected() ? '切換帳號／重新授權' : '連線檔案瀏覽' }}</button>@if (files.auth.connected()) {<button type="button" [disabled]="busy()" (click)="files.disconnect()">解除檔案瀏覽連線</button>}<button type="button" (click)="configure.emit('drive-files')">Google Drive 設定</button></div>
+    @if (files.error() || files.warning() || files.auth.sessionWarning()) {<p class="google-error" role="alert">{{ files.error() || files.warning() || files.auth.sessionWarning() }}</p>}
   </section>
 </div>

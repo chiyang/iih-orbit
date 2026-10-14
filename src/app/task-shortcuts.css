@@ -10,11 +10,11 @@
 .card-top .category-badge {min-width: 0; flex: 0 1 auto; max-width: none;}
 .card-quick-actions {display: flex; align-items: center; gap: var(--sp4); flex-shrink: 0;}
 .task-table th.pin-column, .task-table td.pin-column {width: 45px; padding-right: var(--sp5); padding-left: var(--sp9); text-align: center;}
-.task-pin-option {display: flex; align-items: flex-start; gap: var(--sp9); padding: var(--sp12); margin: var(--sp16) 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-soft); font-size: var(--font-11); cursor: pointer;}
-.task-pin-option input {margin: var(--sp4) 0 0; accent-color: var(--accent-strong);}
-.task-pin-option strong {display: flex; align-items: center; gap: var(--sp6); font-weight: 600;}
-.task-pin-option app-icon {width: 14px; height: 14px;}
-.task-pin-option small {display: block; margin-top: var(--sp4); color: var(--text-muted); font-size: var(--font-10);}
+.task-title-input {display: flex; align-items: center; gap: var(--sp8); margin-top: var(--sp8);}
+.task-title-field .task-title-input input {flex: 1; min-width: 0; width: auto; margin-top: 0;}
+.task-title-pin {width: max(28px, calc(36px * var(--font-scale))); height: max(28px, calc(36px * var(--font-scale)));}
+.task-information-count {display:flex;align-items:center;gap:var(--sp5);color:var(--text-muted);font-size:var(--font-10);line-height:1.6;margin-bottom:var(--sp10);}
+.task-information-count app-icon {width:13px;height:13px;}
 .main {container: workspace-main / inline-size;}
 .topbar-tools > .panel-entry.selected {background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent-text);}
 .topbar-tools > .settings-entry {width: max(28px, calc(36px * var(--font-scale))); padding: 0; justify-content: center;}

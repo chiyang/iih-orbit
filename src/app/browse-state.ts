@@ -25,8 +25,8 @@ export interface BrowseState {
   /** Legacy local value; the synchronized workspace value takes precedence. */
   headerCompact: boolean;
   trashOpen: boolean;
-  panel: 'closed' | 'gmail' | 'reminders' | 'tasks';
-  panelTab: 'gmail' | 'reminders' | 'tasks';
+  panel: 'closed' | 'gmail' | 'reminders' | 'tasks' | 'files';
+  panelTab: 'gmail' | 'reminders' | 'tasks' | 'files';
   reminderTab: ReminderTab;
 }
 const KEY = 'iih-orbit-browse-state-v1';
@@ -49,8 +49,8 @@ export function readBrowseState(value: unknown): BrowseState {
     calendarScrollHour: typeof s.calendarScrollHour === 'number' && Number.isFinite(s.calendarScrollHour) && s.calendarScrollHour >= 0 && s.calendarScrollHour <= 24 ? s.calendarScrollHour : 7.75,
     showOrbit: s.showOrbit !== false, showGoogle: s.showGoogle !== false, progressExpanded: s.progressExpanded === true,
     headerCompact: s.headerCompact === true, trashOpen: s.trashOpen === true,
-    panel: choice(s.panel, ['closed', 'gmail', 'reminders', 'tasks'], 'closed'),
-    panelTab: choice(s.panelTab, ['gmail', 'reminders', 'tasks'], choice(s.panel, ['gmail', 'reminders', 'tasks'], 'tasks')),
+    panel: choice(s.panel, ['closed', 'gmail', 'reminders', 'tasks', 'files'], 'closed'),
+    panelTab: choice(s.panelTab, ['gmail', 'reminders', 'tasks', 'files'], choice(s.panel, ['gmail', 'reminders', 'tasks', 'files'], 'tasks')),
     reminderTab: choice(s.reminderTab, ['today', 'tomorrow', 'this-week', 'next-week', 'due-soon', 'overdue'], 'today')
   };
 }

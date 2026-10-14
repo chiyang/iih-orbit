@@ -1,5 +1,5 @@
 import { computed, Injectable, OnDestroy, signal } from '@angular/core';
-import { BoardState, BoardStatus, CalendarTransfer, Category, Project, Task, TaskConflict, TaskStatus, WorkspaceState } from './models';
+import { BoardState, BoardStatus, CalendarTransfer, Category, DocumentLink, DocumentSource, Project, Task, TaskConflict, TaskStatus, WorkspaceState } from './models';
 import { originKey, taskFingerprint } from './calendar-transfer-data';
 import { readBoardState } from './board-data';
 import { createInitialState, isInitialWorkspace } from './seed';
@@ -18,12 +18,14 @@ import type { WorkspaceCreationOptions } from './workspace-templates';
 import { unresolvedTaskConflicts } from './task-conflict-data';
 import { DEVICE_NAME_LIMIT, DEVICE_STORAGE_KEY, loadDeviceIdentity } from './device-data';
 import { WorkspaceRecordRepository } from './workspace-records';
+import { documentIdentity, documentsForTask, indexDocumentTasks, mergeDocumentLinks, mergeDocumentSources, reconcileDocumentTasks, setTaskDocuments, taskDocumentIds } from './document-data';
 
 export type StoreResult = {ok: true; persisted: boolean} | {ok: false; message: string};
 export interface TaskEditContext {
   workspaceId: string;
   generation: string;
   original: Task | null;
+  documentLinks?: DocumentLink[];
 }
 export interface TrashContext {workspaceId: string; workspaceName: string; generation: string; tasks: Task[]}
 
@@ -56,6 +58,18 @@ export class BoardStore implements OnDestroy {
   readonly tasks = computed(() => this.state().tasks.filter(task => !task.deletedAt));
   readonly trashedTasks = computed(() => this.state().tasks.filter(task => !!task.deletedAt));
   readonly taskConflicts = computed(() => this.workspaces().flatMap(workspace => unresolvedTaskConflicts(workspace.taskConflicts).map(conflict => ({workspace, conflict}))));
+  readonly documents = computed(() => [...new Map(this.workspaces().flatMap(workspace => workspace.documentSources ?? []).map(source => [documentIdentity(source), source])).values()]);
+  private readonly documentRelations = computed(() => indexDocumentTasks(this.workspaces(), true));
+  private readonly documentCounts = computed(() => {
+    const active = new Set(this.tasks().map(task => task.id));
+    return new Map([...taskDocumentIds(this.state())].filter(([id]) => active.has(id)).map(([id, documents]) => [id, documents.length]));
+  });
+  documentCount(taskId: string): number {return this.documentCounts().get(taskId) ?? 0;}
+  documentsForTask(taskId: string, workspaceId = this.currentWorkspace().id): DocumentSource[] {
+    const workspace = this.workspaces().find(item => item.id === workspaceId);
+    return workspace ? documentsForTask(workspace, taskId) : [];
+  }
+  tasksForDocument(source: DocumentSource, includeTrash = false) {return (this.documentRelations().get(documentIdentity(source)) ?? []).filter(entry => includeTrash || !entry.task.deletedAt);}
   private readonly history = signal<BoardHistoryEntry[]>([]);
   private readonly lastUndo = computed(() => this.history().findLast(entry => !entry.undone && entry.workspaceId === this.currentWorkspace().id && entry.generation === this.generation()));
   private readonly nextRedo = computed(() => this.history().find(entry => entry.undone && entry.workspaceId === this.currentWorkspace().id && entry.generation === this.generation()));
@@ -114,15 +128,17 @@ export class BoardStore implements OnDestroy {
   }
 
   taskContext(id: string): TaskEditContext {
-    return {workspaceId: this.currentWorkspace().id, generation: this.generation(), original: structuredClone(this.state().tasks.find(task => task.id === id) ?? null)};
+    return {workspaceId: this.currentWorkspace().id, generation: this.generation(), original: structuredClone(this.state().tasks.find(task => task.id === id) ?? null), documentLinks: structuredClone(this.state().documentLinks?.filter(link => link.taskId === id) ?? [])};
   }
 
-  saveTask(task: Task, context: TaskEditContext = this.taskContext(task.id), beforeId?: string): Promise<StoreResult> {
+  saveTask(task: Task, context: TaskEditContext = this.taskContext(task.id), beforeId?: string, documents?: readonly DocumentSource[]): Promise<StoreResult> {
     const saved = structuredClone(task);
+    const selected = documents === undefined ? undefined : structuredClone([...documents]);
     return this.mutateBoard(board => {
       const current = board.tasks.find(item => item.id === saved.id) ?? null;
       if (current?.deletedAt || saved.deletedAt) throw new Error('這個任務已刪除並移至垃圾桶，請先還原後再編輯。');
       if (JSON.stringify(current) !== JSON.stringify(context.original)) throw new Error('這個任務已在另一個分頁更新或刪除。草稿已保留，請載入最新版本或另存為新任務。');
+      if (selected && context.documentLinks && JSON.stringify(board.documentLinks?.filter(link => link.taskId === saved.id) ?? []) !== JSON.stringify(context.documentLinks)) throw new Error('文件關聯已在另一個分頁更新。草稿已保留，請載入最新版本或另存新任務。');
       if (!board.statuses.some(status => status.id === saved.status) || (saved.categoryId && !board.categories.some(category => category.id === saved.categoryId))) throw new Error('任務的分類或狀態已變更，請重新選擇後儲存。');
       if (saved.projectId && !board.projects.some(project => project.id === saved.projectId)) throw new Error('所屬專案已被刪除，請重新選擇或改為未指定專案。');
       const tasks = current ? board.tasks.map(item => item.id === saved.id ? saved : item) : [...board.tasks];
@@ -130,7 +146,17 @@ export class BoardStore implements OnDestroy {
         const beforeIndex = beforeId ? tasks.findIndex(item => item.id === beforeId && item.status === saved.status) : -1;
         tasks.splice(beforeIndex < 0 ? tasks.length : beforeIndex, 0, saved);
       }
-      return {...board, tasks};
+      const changed = {...board, tasks};
+      return selected === undefined ? changed : setTaskDocuments(changed, saved.id, selected);
+    }, context.workspaceId, context.generation);
+  }
+
+  linkDocument(taskId: string, source: DocumentSource, context = this.taskContext(taskId)): Promise<StoreResult> {
+    const document = structuredClone(source);
+    return this.mutateBoard(board => {
+      const task = board.tasks.find(item => item.id === taskId);
+      if (!task || task.deletedAt || JSON.stringify(task) !== JSON.stringify(context.original)) throw new Error('任務已更新或刪除，請重新查看後再加入文件。');
+      return setTaskDocuments(board, taskId, [...documentsForTask(board, taskId), document]);
     }, context.workspaceId, context.generation);
   }
 
@@ -165,7 +191,7 @@ export class BoardStore implements OnDestroy {
       if (!workspace || JSON.stringify(workspace.tasks.filter(task => !!task.deletedAt)) !== JSON.stringify(context.tasks)) throw new Error('垃圾桶內容已更新，請重新查看後再確認清空。');
       const ids = new Set(context.tasks.map(task => task.id));
       if (unresolvedTaskConflicts(workspace.taskConflicts).some(conflict => ids.has(conflict.id))) throw new Error('垃圾桶含有待選擇版本的任務，請先在右側欄處理衝突。');
-      return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspace.id ? {...item, tasks: item.tasks.filter(task => !ids.has(task.id))} : item)}};
+      return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspace.id ? reconcileDocumentTasks({...item, tasks: item.tasks.filter(task => !ids.has(task.id))}) : item)}};
     }, {generation: context.generation, requirePersistence: true, persistenceMessage: '無法保存清空垃圾桶的變更，垃圾桶內容仍保留。', afterApply: () => this.history.update(entries => entries.filter(entry => entry.workspaceId !== context.workspaceId))});
   }
 
@@ -173,7 +199,7 @@ export class BoardStore implements OnDestroy {
     return this.mutateBoard(board => {
       const task = board.tasks.find(item => item.id === context.original?.id);
       if (!task || task.deletedAt || JSON.stringify(task) !== JSON.stringify(context.original)) throw new Error('這個任務已更新，無法撤銷建立。');
-      return {...board, tasks: board.tasks.filter(item => item.id !== task.id)};
+      return reconcileDocumentTasks({...board, tasks: board.tasks.filter(item => item.id !== task.id)});
     }, context.workspaceId, context.generation);
   }
 
@@ -187,7 +213,14 @@ export class BoardStore implements OnDestroy {
     const result = await this.transact(data => {
       const workspace = data.state.workspaces.find(item => item.id === entry.workspaceId);
       if (!workspace || !sameBoard(readBoardState(workspace)!, redo ? entry.before : entry.after)) throw new Error(`工作區已在其他分頁更新，無法${action}這一步；目前內容保留。`);
-      return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspace.id ? {...item, ...structuredClone(redo ? entry.after : entry.before)} : item)}};
+      const target = structuredClone(redo ? entry.after : entry.before);
+      let restored: BoardState = target;
+      if (workspace.documentSources) {
+        restored = {...target, version: 5, documentSources: mergeDocumentSources([workspace.documentSources, target.documentSources ?? []]), documentLinks: mergeDocumentLinks([workspace.documentLinks ?? [], target.documentLinks ?? []])};
+        for (const task of target.tasks.filter(task => !task.deletedAt)) restored = setTaskDocuments(restored, task.id, documentsForTask(target, task.id));
+        restored = reconcileDocumentTasks(restored);
+      }
+      return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspace.id ? {...item, ...restored} : item)}};
     }, {generation: entry.generation, afterApply: () => this.history.update(entries => entries.map(item => item === entry ? {...item, undone: !redo} : item))});
     if (!result.ok) this.refreshFromStorage();
     return result;
@@ -210,7 +243,7 @@ export class BoardStore implements OnDestroy {
       if (!version) throw new Error('選定的任務版本已不存在，請重新查看。');
       if (draft && (!version.task || draft.id !== conflict.id)) throw new Error('草稿不屬於選定的任務版本，原有內容保留。');
       const task = draft ?? (version.task ? structuredClone(version.task) : null);
-      if (task && (!task.title.trim() || task.title.length > 100 || task.description.length > 20000 || task.subtasks.some(item => !item.title.trim() || item.title.length > 200) || !readBoardState({...board, tasks: [task]}))) throw new Error('請確認名稱、描述、子任務、分類及時程，原有版本尚未變更。');
+      if (task && (!task.title.trim() || task.title.length > 100 || task.description.length > 20000 || task.subtasks.some(item => !item.title.trim() || item.title.length > 200) || !readBoardState({...board, version: 4, documentSources: undefined, documentLinks: undefined, tasks: [task]}))) throw new Error('請確認名稱、描述、子任務、分類及時程，原有版本尚未變更。');
       const tasks = task ? board.tasks.some(value => value.id === task.id) ? board.tasks.map(value => value.id === task.id ? task : value) : [...board.tasks, task] : board.tasks.filter(value => value.id !== conflict.id);
       return {...board, tasks, taskConflicts: board.taskConflicts!.map(value => value.id === conflict.id ? {...value, resolved: key} : value)};
     }, workspaceId, generation, true);
@@ -249,7 +282,7 @@ export class BoardStore implements OnDestroy {
       const workspace = data.state.workspaces.find(item => item.id === context.workspaceId);
       if (workspace && unresolvedTaskConflicts(workspace.taskConflicts).some(conflict => conflict.id === context.original?.id)) throw new Error('這個任務有同步衝突，請先在右側欄選擇版本後再移轉。');
       if (!workspace) throw new Error('原工作空間已不存在，Google 活動與本機資料未再修改。');
-      const board = change(workspace);
+      const board = reconcileDocumentTasks(change(workspace));
       return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspace.id ? {...workspace, ...board, tasks: recordTaskEdits(workspace.tasks, board.tasks, new Date(), this.device())} : item)}};
     }, {generation: context.generation, requirePersistence: true});
   }
@@ -623,7 +656,8 @@ export class BoardStore implements OnDestroy {
       before = readBoardState(workspace)!;
       const changed = change(workspace);
       if (!resolvingConflict && unresolvedTaskConflicts(workspace.taskConflicts).some(conflict => JSON.stringify(workspace.tasks.find(task => task.id === conflict.id)) !== JSON.stringify(changed.tasks.find(task => task.id === conflict.id)))) throw new Error('這個任務有同步衝突，請先在右側欄選擇版本後再編輯。');
-      const board = {...changed, tasks: recordTaskEdits(workspace.tasks, changed.tasks, new Date(), this.device())};
+      const now = new Date(), tasks = recordTaskEdits(workspace.tasks, changed.tasks, now, this.device()), previousLinks = taskDocumentIds(workspace), nextLinks = taskDocumentIds(changed);
+      const board = reconcileDocumentTasks({...changed, tasks: tasks.map(task => JSON.stringify(previousLinks.get(task.id) ?? []) === JSON.stringify(nextLinks.get(task.id) ?? []) ? task : {...task, updatedAt: now.toISOString(), editSource: {...this.device()}})});
       return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspaceId ? {...workspace, ...board} : item)}};
     }, {generation, afterApply: () => {
       const after = readBoardState(this.workspaces().find(workspace => workspace.id === workspaceId))!;

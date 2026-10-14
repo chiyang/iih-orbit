@@ -1,10 +1,16 @@
 import { Component, computed, input } from '@angular/core';
 
 const PATHS: Record<string, string> = {
+  external: 'M7 17 19 5M9 5h10v10M5 8H3v13h13v-2',
   plus: 'M12 5v14M5 12h14',
   help: 'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01',
   warning: 'M12 3 2 21h20L12 3zM12 9v5M12 17h.01',
   mail: 'M3 5h18v14H3zM3 5l9 7 9-7',
+  folder: 'M3 7V4h6l2 3h10v13H3V7z',
+  file: 'M5 3h9l5 5v13H5zM14 3v6h5M8 13h8M8 17h6',
+  filePdf: 'M5 3h9l5 5v13H5zM14 3v6h5M8 17l3-6 3 6M9 15h7',
+  fileImage: 'M3 3h18v18H3zM3 17l6-6 4 4 3-3 5 5M17 7h.01',
+  link: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2',
   copy: 'M9 9h12v12H9zM15 9V3H3v12h6',
   search: 'M21 21l-4.5-4.5M19 10.5a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0',
   board: 'M3 4h18v16H3zM9 4v16M15 4v16M5.5 8h1M11.5 8h1M17.5 8h1M5.5 11h1M11.5 11h1',

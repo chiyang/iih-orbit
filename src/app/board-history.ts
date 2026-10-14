@@ -1,4 +1,5 @@
 import type { BoardState } from './models.ts';
+import { taskDocumentIds } from './document-data.ts';
 
 export const HISTORY_LIMIT = 50;
 export interface BoardHistoryEntry {
@@ -11,7 +12,12 @@ export interface BoardHistoryEntry {
 }
 
 export function sameBoard(left: BoardState, right: BoardState): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  const content = (board: BoardState) => {
+    const {version, documentSources, documentLinks, ...fields} = board;
+    const ids = taskDocumentIds(board), documents = board.tasks.flatMap(task => (ids.get(task.id) ?? []).map(source => [task.id, source])).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    return {...fields, ...(documents.length ? {documents} : {})};
+  };
+  return JSON.stringify(content(left)) === JSON.stringify(content(right));
 }
 
 export function boardChangeLabel(before: BoardState, after: BoardState): string {
@@ -21,6 +27,7 @@ export function boardChangeLabel(before: BoardState, after: BoardState): string 
   }
   const originals = new Map(before.tasks.map(task => [task.id, task]));
   if (after.tasks.some(task => !originals.has(task.id))) return '新增任務';
+  if (JSON.stringify(before.documentLinks) !== JSON.stringify(after.documentLinks)) return '變更資訊連結';
   if (before.tasks.length > after.tasks.length) return '撤銷任務建立';
   for (const task of after.tasks) {
     const old = originals.get(task.id)!;

@@ -25,3 +25,5 @@ button, input, select {font: inherit; color: var(--text);}
 .cell-error {max-width: 230px; white-space: normal; color: var(--danger-text); font-size: var(--font-10); line-height: 1.6;}
 .cell-error button {margin: var(--sp5) var(--sp4) 0 0;}
 button:disabled, input:disabled, select:disabled {opacity: .55; cursor: default;}
+.task-information-count{display:flex;align-items:center;gap:var(--sp5);margin-top:var(--sp7);color:var(--text-muted);font-size:var(--font-10);line-height:1.6}
+.task-information-count app-icon{width:13px;height:13px}

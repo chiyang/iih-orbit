@@ -11,6 +11,7 @@ import { ExternalEvent, externalOccursOn } from './google-data';
 import { CalendarPosition, moveCalendarTask, snapCalendarMinute } from './calendar-move';
 import type { TaskEditContext } from './board-store';
 import { GMAIL_MIME } from './gmail-data';
+import { DOCUMENT_DRAG_TYPE } from './document-data';
 
 export interface CalendarCreate {
   date: string;
@@ -45,8 +46,12 @@ export class Calendar {
   readonly editTask = output<Task>();
   readonly readExternal = output<ExternalEvent>();
   readonly createTask = output<CalendarCreate>();
+  readonly documentDragging = input(false);
+  readonly documentDrop = output<{event: DragEvent; position?: CalendarPosition; taskId?: string}>();
+  readonly documentLinkTaskId = signal('');
+  readonly documentBlocked = signal(false);
   readonly mailDragging = input(false);
-  readonly mailDrop = output<{event: DragEvent; position: CalendarPosition}>();
+  readonly mailDrop = output<{event: DragEvent; position?: CalendarPosition; taskId?: string}>();
   readonly anchor = signal(new Date());
   readonly hoveredMonthWeek = signal<number | null>(null);
   readonly expandedDays = signal(new Set<string>());
@@ -164,7 +169,7 @@ export class Calendar {
       const generation = this.google.store.generation(), workspace = this.google.store.currentWorkspace().id, mode = this.mode(), showOrbit = this.showOrbit();
       untracked(() => { this.hoveredMonthWeek.set(null); if (this.drag && (!showOrbit || this.drag.context.generation !== generation || this.drag.context.workspaceId !== workspace || this.drag.origin.kind === 'month' && mode !== 'month')) this.endDrag(); });
     });
-    effect(() => { const dragging = this.mailDragging(); untracked(() => { if (!dragging && !this.drag) this.endDrag(); }); });
+    effect(() => { const dragging = this.mailDragging() || this.documentDragging(); untracked(() => { if (!dragging && !this.drag) this.endDrag(); }); });
     afterRenderEffect(() => {
       const anchor = this.anchor();
       const hourHeight = this.hourHeight();
@@ -236,12 +241,12 @@ export class Calendar {
   }
 
   openWeek(date: string): void {
-    if (this.mode() !== 'month' || this.drag || this.mailDragging() || this.savingMove() || Date.now() < this.ignoreClickUntil || !date || !validDate(date)) return;
+    if (this.mode() !== 'month' || this.drag || this.mailDragging() || this.documentDragging() || this.savingMove() || Date.now() < this.ignoreClickUntil || !date || !validDate(date)) return;
     this.weekRequested.emit(date);
   }
 
   openMonth(): void {
-    if (this.mode() !== 'week' || this.drag || this.mailDragging() || this.savingMove() || Date.now() < this.ignoreClickUntil) return;
+    if (this.mode() !== 'week' || this.drag || this.mailDragging() || this.documentDragging() || this.savingMove() || Date.now() < this.ignoreClickUntil) return;
     this.monthRequested.emit(dateKey(this.anchor()));
   }
 
@@ -291,9 +296,29 @@ export class Calendar {
     const minute = snapCalendarMinute(this.startMinute() + (y - element.getBoundingClientRect().top) / this.hourHeight() * 60 - (this.drag?.pointerOffset ?? 0));
     return {kind: 'time', day, minute: Math.max(this.startMinute(), Math.min(this.endMinute() - 15, minute))};
   }
+  private documentEvent(event: DragEvent): boolean {return this.documentDragging() && !!event.dataTransfer?.types.includes(DOCUMENT_DRAG_TYPE);}
+  private mailEvent(event: DragEvent): boolean {return this.mailDragging() && !!event.dataTransfer?.types.includes(GMAIL_MIME);}
+  documentEntryOver(event: DragEvent, task: Task): void {
+    if (!this.documentEvent(event) && !this.mailEvent(event)) return;
+    event.preventDefault(); event.stopPropagation();
+    const blocked = this.isExternal(task); if (event.dataTransfer) event.dataTransfer.dropEffect = blocked ? 'none' : 'copy';
+    this.documentBlocked.set(blocked); this.documentLinkTaskId.set(blocked ? '' : task.id); this.dropPosition.set(null); this.pointer = undefined;
+  }
+  documentEntryDrop(event: DragEvent, task: Task): void {
+    if (!this.documentEvent(event) && !this.mailEvent(event)) return;
+    event.preventDefault(); event.stopPropagation();
+    if (!this.isExternal(task)) {if (this.documentEvent(event)) this.documentDrop.emit({event, taskId: task.id}); else this.mailDrop.emit({event, taskId: task.id});}
+    this.endDrag(); this.ignoreClickUntil = Date.now() + 350;
+  }
   dragOver(event: DragEvent, position: CalendarPosition): void {
+    if (this.documentEvent(event)) {
+      event.preventDefault(); event.stopPropagation(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      this.documentBlocked.set(false); this.documentLinkTaskId.set(''); this.dropPosition.set(position); this.pointer = {x: event.clientX, y: event.clientY};
+      if (!this.dragScrollTimer) this.dragScrollTimer = setInterval(() => this.scrollWhileDragging(), 60);
+      return;
+    }
     if (this.mailDragging() && event.dataTransfer?.types.includes(GMAIL_MIME)) {
-      event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; this.dropPosition.set(position); this.pointer = {x: event.clientX, y: event.clientY};
+      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; this.documentBlocked.set(false); this.documentLinkTaskId.set(''); this.dropPosition.set(position); this.pointer = {x: event.clientX, y: event.clientY};
       if (!this.dragScrollTimer) this.dragScrollTimer = setInterval(() => this.scrollWhileDragging(), 60);
       return;
     }
@@ -304,7 +329,7 @@ export class Calendar {
   timeDragOver(event: DragEvent, day: string): void {
     const element = event.currentTarget as HTMLElement;
     this.dragOver(event, this.timePosition(day, element, event.clientY));
-    if (this.drag || this.mailDragging()) this.pointer = {x: event.clientX, y: event.clientY, timeDay: element};
+    if (this.drag || this.mailDragging() || this.documentDragging()) this.pointer = {x: event.clientX, y: event.clientY, timeDay: element};
   }
   allDayDragOver(event: DragEvent): void {
     const day = this.allDayAt(event.currentTarget as HTMLElement, event.clientX);
@@ -316,6 +341,7 @@ export class Calendar {
     if (day) void this.drop(event, {kind: 'all-day', day});
   }
   async drop(event: DragEvent, target: CalendarPosition): Promise<void> {
+    if (this.documentEvent(event)) {event.preventDefault(); event.stopPropagation(); this.documentDrop.emit({event, position: target}); this.endDrag(); this.ignoreClickUntil = Date.now() + 350; return;}
     if (this.mailDragging() && event.dataTransfer?.types.includes(GMAIL_MIME)) { this.mailDrop.emit({event, position: target}); this.endDrag(); this.ignoreClickUntil = Date.now() + 350; return; }
     const drag = this.drag;
     if (!drag || this.savingMove()) return;
@@ -332,16 +358,16 @@ export class Calendar {
   }
   endDrag(): void {
     if (this.drag) this.ignoreClickUntil = Date.now() + 350;
-    this.drag = undefined; this.pointer = undefined; this.draggedTaskId.set(''); this.dropPosition.set(null);
+    this.drag = undefined; this.pointer = undefined; this.draggedTaskId.set(''); this.dropPosition.set(null); this.documentLinkTaskId.set(''); this.documentBlocked.set(false);
     clearInterval(this.dragScrollTimer); this.dragScrollTimer = undefined;
   }
   leaveCalendar(event: DragEvent): void {
     const element = event.currentTarget as HTMLElement, rect = element.getBoundingClientRect();
-    if (!element.contains(event.relatedTarget as Node | null) && (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom)) { this.dropPosition.set(null); this.pointer = undefined; }
+    if (!element.contains(event.relatedTarget as Node | null) && (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom)) { this.dropPosition.set(null); this.documentLinkTaskId.set(''); this.documentBlocked.set(false); this.pointer = undefined; }
   }
   private scrollWhileDragging(): void {
     const scroller = this.weekScroller()?.nativeElement, pointer = this.pointer;
-    if ((!this.drag && !this.mailDragging()) || !scroller || !pointer?.timeDay) return;
+    if ((!this.drag && !this.mailDragging() && !this.documentDragging()) || !scroller || !pointer?.timeDay) return;
     const rect = scroller.getBoundingClientRect();
     const headerHeight = scroller.querySelector<HTMLElement>('.week-sticky-head')?.getBoundingClientRect().height ?? 0;
     const vertical = pointer.y > rect.bottom - 45 ? 16 : pointer.y < rect.top + headerHeight + 35 ? -16 : 0;

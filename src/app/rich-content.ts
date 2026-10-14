@@ -4,7 +4,7 @@ import { renderMarkdown, sanitizeMailHtml } from './rich-content-data';
 @Component({
   selector: 'app-rich-content',
   template: `@if (plain()) {<span>{{ plainText() }}</span>} @else {<div class="orbit-rich-content" [class.mail-rich-content]="format() === 'html'" [innerHTML]="html()"></div>}`,
-  styleUrls: ['./rich-content.css', './document-dialog.css'],
+  styleUrls: ['./rich-content.css'],
   encapsulation: ViewEncapsulation.None
 })
 export class RichContent {

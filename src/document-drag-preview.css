@@ -1,0 +1,2 @@
+.document-drag-preview {position:fixed;top:0;left:0;z-index:2147483647;max-width:240px;padding:10px 14px;border:1px solid var(--accent-border);border-radius:9px;background:var(--surface);color:var(--text);box-shadow:0 4px 16px #0003;opacity:.8;pointer-events:none;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.document-drag-mask {position:fixed;width:1px;height:1px;pointer-events:none;}

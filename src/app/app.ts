@@ -53,15 +53,20 @@ import { CloudResumeNotice } from './cloud-resume-notice';
 import { CloudLogoutConfirm } from './cloud-logout-confirm';
 import { Tooltip } from './tooltip';
 import { PanelButton, type PanelActivation } from './panel-button';
+import { DocumentLinksEditor } from './document-links-editor';
+import type { DocumentSource } from './models';
+import { DocumentPanel } from './document-panel';
+import { DocumentTasks } from './document-tasks';
+import { documentCardPosition, type DocumentDropPosition } from './drive-browser-data';
 
 type Modal = 'intro' | 'task' | 'task-conflict' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'empty-trash' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | 'logout' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView, TaskConflictEditor, GoogleRenewalButton, DriveSyncButton, CloudLogoutButton, CloudResumeNotice, CloudLogoutConfirm, Tooltip, PanelButton],
+  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView, TaskConflictEditor, GoogleRenewalButton, DriveSyncButton, CloudLogoutButton, CloudResumeNotice, CloudLogoutConfirm, Tooltip, PanelButton, DocumentLinksEditor, DocumentPanel],
   templateUrl: './app.html',
-  styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css', './startup.css', './task-shortcuts.css', './workspace-controls.css']
+  styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css', './document-dialog.css', './startup.css', './task-shortcuts.css', './workspace-controls.css']
 })
 export class App {
   readonly store = inject(BoardStore);
@@ -70,27 +75,34 @@ export class App {
   private browseGeneration = this.store.generation();
   private readonly injector = inject(Injector);
   get mailTasks(): MailTasks { return this.injector.get(MailTasks); }
+  get documentTasks(): DocumentTasks { return this.injector.get(DocumentTasks); }
+  readonly filesOpen = signal(this.savedBrowse.panel === 'files');
   readonly mailOpen = signal(this.savedBrowse.panel === 'gmail');
   readonly tasksOpen = signal(this.savedBrowse.panel === 'tasks');
   readonly panelTab = signal(this.savedBrowse.panelTab);
   readonly mailVisit = signal(0);
-  readonly panelOpen = computed(() => this.mailOpen() || this.remindersOpen() || this.tasksOpen());
+  readonly panelOpen = computed(() => this.mailOpen() || this.remindersOpen() || this.tasksOpen() || this.filesOpen());
   readonly panelOverlay = signal(window.innerWidth <= 700);
   readonly narrowPanelViewport = signal(window.innerWidth <= 1100);
   readonly compactNavigation = computed(() => this.mobileViewport() || this.panelOpen() && this.narrowPanelViewport());
   readonly panelWidth = signal(this.readPanelWidth());
   private resizingPanel = false;
   private readPanelWidth(): number { try { return Math.min(520, Math.max(300, Number(localStorage.getItem('orbit-side-panel-width-v1')) || 360)); } catch { return 360; } }
-  openMail(): void { if (!this.modal()) { this.sidebarOpen.set(false); this.tasksOpen.set(false); this.remindersOpen.set(false); this.mailOpen.set(true); this.panelTab.set('gmail'); this.mailVisit.update(visit => visit + 1); } }
+  openMail(): void { if (!this.modal()) { this.sidebarOpen.set(false); this.filesOpen.set(false); this.tasksOpen.set(false); this.remindersOpen.set(false); this.mailOpen.set(true); this.panelTab.set('gmail'); this.mailVisit.update(visit => visit + 1); } }
   toggleMail(): void { if (this.mailOpen()) this.closePanel(); else this.openMail(); }
-  closePanel(): void { this.mailOpen.set(false); this.remindersOpen.set(false); this.tasksOpen.set(false); }
+  closePanel(): void { this.filesOpen.set(false); this.documentTasks.end(); this.mailOpen.set(false); this.remindersOpen.set(false); this.tasksOpen.set(false); }
   openTaskPanel(): void {
     if (this.modal()) return;
-    this.sidebarOpen.set(false); this.mailOpen.set(false); this.remindersOpen.set(false); this.tasksOpen.set(true); this.panelTab.set('tasks');
+    this.sidebarOpen.set(false); this.filesOpen.set(false); this.mailOpen.set(false); this.remindersOpen.set(false); this.tasksOpen.set(true); this.panelTab.set('tasks');
+  }
+  openFiles(): void {
+    if (this.modal()) return;
+    this.sidebarOpen.set(false); this.mailOpen.set(false); this.remindersOpen.set(false); this.tasksOpen.set(false); this.filesOpen.set(true); this.panelTab.set('files');
   }
   togglePanel(): void {
     if (this.modal()) return;
     if (this.panelOpen()) this.closePanel();
+    else if (this.panelTab() === 'files') this.openFiles();
     else if (this.panelTab() === 'gmail') this.openMail();
     else if (this.panelTab() === 'reminders') this.openReminders(this.reminderTab());
     else this.openTaskPanel();
@@ -111,6 +123,61 @@ export class App {
     const current = this.store.tasks().find(item => item.id === task.id);
     if (current) this.openTask(current.status, current);
     else this.notify('這個任務已被刪除或移至其他工作空間。');
+  }
+  openDocumentTask(entry: {workspaceId: string; task: Task}): void {
+    if (this.modal()) return;
+    const workspace = this.store.workspaces().find(item => item.id === entry.workspaceId), task = workspace?.tasks.find(item => item.id === entry.task.id);
+    if (!task) {this.notify('這個任務已不存在，請重新查看。'); return;}
+    this.store.switchWorkspace(entry.workspaceId);
+    if (task.deletedAt) {this.openTrash(); return;}
+    this.openTask(task.status, task);
+  }
+  createDocumentTask(source: DocumentSource, status?: string): void {
+    if (this.modal()) return;
+    this.openTask(status); this.draft.title = source.name.slice(0, 100); this.draftDocuments.set([structuredClone(source)]);
+  }
+  documentOver(event: DragEvent): void {
+    if (this.modal() || this.trashOpen() || !this.documentTasks.accepts(event)) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const column = this.view() === 'board' ? target?.closest<HTMLElement>('.kanban-column') : null;
+    const list = this.view() === 'list' ? target?.closest<HTMLElement>('.list-scroll') : null;
+    const area = column ?? list;
+    if (!area || target?.closest('thead')) {this.documentTasks.position.set(null); return;}
+    this.documentTasks.over(event); event.stopPropagation();
+    const current = this.documentTasks.position(), status = column?.dataset['status'];
+    const placeholder = area.querySelector<HTMLElement>('.document-board-placeholder, .document-list-placeholder')?.getBoundingClientRect();
+    if (current?.kind === 'create' && current.status === status && placeholder && event.clientY >= placeholder.top && event.clientY <= placeholder.bottom) return;
+    const cards = [...area.querySelectorAll<HTMLElement>(column ? '.task-card[data-task-id]' : '.task-row[data-task-id]')].map(card => {
+      const bounds = card.getBoundingClientRect(); return {id: card.dataset['taskId']!, top: bounds.top, bottom: bounds.bottom};
+    });
+    const position = documentCardPosition(cards, event.clientY, status);
+    if (JSON.stringify(position) !== JSON.stringify(current)) this.documentTasks.position.set(position);
+  }
+  documentLeave(event: DragEvent): void {
+    const area = event.currentTarget as HTMLElement;
+    if (!(event.relatedTarget instanceof Node) || !area.contains(event.relatedTarget)) this.documentTasks.position.set(null);
+  }
+  documentCreates(beforeId?: string, status?: string): boolean {
+    const position = this.documentTasks.position(); return this.documentTasks.dragging() && position?.kind === 'create' && position.beforeId === beforeId && position.status === status;
+  }
+  documentLinks(taskId: string): boolean {const position = this.documentTasks.position(); return this.documentTasks.dragging() && position?.kind === 'link' && position.taskId === taskId;}
+  async dropDocument(event: DragEvent): Promise<void> {
+    this.documentOver(event);
+    const position = this.documentTasks.position();
+    if (!position || this.modal() || this.trashOpen()) return;
+    const taskId = await this.documentTasks.drop(event, this.emptyTask(position.status ?? this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id), position);
+    this.documentCreated(taskId);
+  }
+  async dropCalendarDocument(entry: {event: DragEvent; position?: CalendarPosition; taskId?: string}): Promise<void> {
+    if (this.modal() || this.trashOpen()) return;
+    const position: DocumentDropPosition = entry.taskId ? {kind: 'link', taskId: entry.taskId} : {kind: 'create'};
+    const taskId = await this.documentTasks.drop(entry.event, this.emptyTask(this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id), position, entry.position);
+    this.documentCreated(taskId);
+  }
+  private documentCreated(taskId?: string): void {
+    if (!taskId) return;
+    if (!this.visibleTasks().some(task => task.id === taskId)) this.documentTasks.notice.update(message => message + '此任務不符合目前篩選，原篩選條件已保留。');
+    else if ((this.view() === 'month' || this.view() === 'week') && !this.calendarShowOrbit()) this.documentTasks.notice.update(message => message + 'Orbit 任務目前隱藏，開啟「Orbit 任務」即可查看。');
   }
   readonly conflictContext = signal<TaskConflictContext | null>(null);
   readonly conflictSaving = signal(false);
@@ -140,19 +207,25 @@ export class App {
   finishPanelResize(): void { if (!this.resizingPanel) return; this.resizingPanel = false; this.persistPanelWidth(); }
   panelResizeKey(event: KeyboardEvent): void { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); this.panelWidth.set(Math.min(520, Math.max(300, this.panelWidth() + (event.key === 'ArrowLeft' ? 20 : -20)))); this.persistPanelWidth(); }
   private persistPanelWidth(): void { try { localStorage.setItem('orbit-side-panel-width-v1', String(this.panelWidth())); } catch { /* Width still applies to the current tab. */ } }
-  boardMailOver(event: DragEvent, column: BoardColumn): boolean {
-    if (this.modal() || !this.mailTasks.over(event)) { this.mailTasks.boardPosition.set(null); return false; }
-    const element = event.currentTarget as HTMLElement, current = this.mailTasks.boardPosition();
-    const placeholder = element.querySelector<HTMLElement>('.mail-board-placeholder')?.getBoundingClientRect();
-    if (current?.status === column.id && placeholder && event.clientY >= placeholder.top && event.clientY <= placeholder.bottom) return true;
-    const cards = [...element.querySelectorAll<HTMLElement>('.task-card[data-task-id]')];
-    const beforeId = cards.find(card => {
-      const bounds = card.getBoundingClientRect();
-      return event.clientY < bounds.top + bounds.height / 2;
-    })?.dataset['taskId'];
-    if (current?.status !== column.id || current.beforeId !== beforeId) this.mailTasks.boardPosition.set({status: column.id, beforeId});
-    return true;
+  private setMailPosition(element: HTMLElement, y: number, status?: string): void {
+    const current = this.mailTasks.boardPosition(), placeholder = element.querySelector<HTMLElement>('.mail-board-placeholder, .mail-list-placeholder')?.getBoundingClientRect();
+    if (current && !current.taskId && current.status === status && placeholder && y >= placeholder.top && y <= placeholder.bottom) return;
+    const cards = [...element.querySelectorAll<HTMLElement>('.task-card[data-task-id], .task-row[data-task-id]')].map(card => {const bounds = card.getBoundingClientRect(); return {id: card.dataset['taskId']!, top: bounds.top, bottom: bounds.top + bounds.height};});
+    const position = documentCardPosition(cards, y, status), next = position.kind === 'link' ? {status, taskId: position.taskId} : {status, beforeId: position.beforeId};
+    if (JSON.stringify(current) !== JSON.stringify(next)) this.mailTasks.boardPosition.set(next);
   }
+  boardMailOver(event: DragEvent, column: BoardColumn): boolean {
+    if (this.modal() || this.trashOpen() || !this.mailTasks.over(event)) {this.mailTasks.boardPosition.set(null); return false;}
+    this.setMailPosition(event.currentTarget as HTMLElement, event.clientY, column.id); return true;
+  }
+  listMailOver(event: DragEvent): boolean {
+    if (this.modal() || this.trashOpen() || (event.target as Element | null)?.closest?.('thead') || !this.mailTasks.over(event)) {this.mailTasks.boardPosition.set(null); return false;}
+    this.setMailPosition(event.currentTarget as HTMLElement, event.clientY); return true;
+  }
+  listMailLeave(event: DragEvent): void {const area = event.currentTarget as HTMLElement; if (!(event.relatedTarget instanceof Node) || !area.contains(event.relatedTarget)) this.mailTasks.boardPosition.set(null);}
+  async dropListMail(event: DragEvent): Promise<void> {if (this.listMailOver(event)) {const position = this.mailTasks.boardPosition(); await this.dropMail(event, undefined, undefined, position?.beforeId, position?.taskId);}}
+  mailCreates(beforeId?: string, status?: string): boolean {const position = this.mailTasks.boardPosition(); return this.mailTasks.dragging() && !!position && !position.taskId && position.status === status && position.beforeId === beforeId;}
+  mailLinks(taskId: string): boolean {return this.mailTasks.dragging() && this.mailTasks.boardPosition()?.taskId === taskId;}
   boardMailLeave(event: DragEvent, status: string): void {
     if (this.mailTasks.boardPosition()?.status !== status) return;
     const next = event.relatedTarget;
@@ -160,13 +233,13 @@ export class App {
   }
   async dropBoardMail(event: DragEvent, column: BoardColumn): Promise<void> {
     if (!this.boardMailOver(event, column)) return;
-    const beforeId = this.mailTasks.boardPosition()?.beforeId;
-    await this.dropMail(event, column.id, undefined, beforeId);
+    const position = this.mailTasks.boardPosition();
+    await this.dropMail(event, column.id, undefined, position?.beforeId, position?.taskId);
   }
-  async dropMail(event: DragEvent, status?: string, position?: CalendarPosition, beforeId?: string): Promise<void> {
+  async dropMail(event: DragEvent, status?: string, position?: CalendarPosition, beforeId?: string, taskId?: string): Promise<void> {
     if (this.modal()) return;
     const initialStatus = status ?? this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id, base = this.emptyTask(initialStatus);
-    await this.mailTasks.drop(event, base, position ? {date: position.day, ...(position.kind === 'time' ? {time: minuteLabel(position.minute ?? 0)} : {})} : {}, beforeId);
+    await this.mailTasks.drop(event, base, position ? {date: position.day, ...(position.kind === 'time' ? {time: minuteLabel(position.minute ?? 0)} : {})} : {}, beforeId, taskId);
     const context = this.mailTasks.undoContext();
     if (context?.original?.id !== base.id || context.generation !== this.store.generation() || context.workspaceId !== this.store.currentWorkspace().id || !this.hasFilters()) return;
     const reminder = this.visibleTasks().some(task => task.id === base.id)
@@ -177,7 +250,7 @@ export class App {
   openMailTask(mail: MailPreview): void {
     if (this.modal()) return;
     this.openTask();
-    try { this.draft = this.mailTasks.draft(mail, this.draft); }
+    try { this.draft = this.mailTasks.draft(mail, this.draft); this.draftDocuments.set([this.mailTasks.source(mail)]); }
     catch (error) { this.formError.set(error instanceof Error ? error.message : '無法建立郵件任務。'); }
   }
   readonly mailPreview = signal<{mail: MailPreview; identity: string; email: string} | null>(null);
@@ -191,7 +264,7 @@ export class App {
   createPreviewTask(mail: MailPreview): void {
     const preview = this.mailPreview();
     if (!preview || this.modal() !== 'mail-preview' || preview.identity !== this.mailTasks.gmail.previewIdentity() || mail.threadId !== preview.mail.threadId) return;
-    this.closeModal(); this.openTask(); this.draft = this.mailTasks.draft(mail, this.draft, preview);
+    this.closeModal(); this.openTask(); this.draft = this.mailTasks.draft(mail, this.draft, preview); this.draftDocuments.set([this.mailTasks.source(mail, preview)]);
   }
   openCreatedMailTask(): void {
     if (this.modal()) return;
@@ -294,12 +367,15 @@ export class App {
   ];
   readonly toast = signal('');
   readonly taskEditContext = signal<TaskEditContext | null>(null);
+  readonly draftDocuments = signal<DocumentSource[]>([]);
+  private readonly documentLinksEditor = viewChild(DocumentLinksEditor);
   readonly taskDraftConflict = computed(() => {
     const context = this.taskEditContext();
     if (this.modal() !== 'task' || !context) return false;
     const workspace = this.store.workspaces().find(item => item.id === context.workspaceId);
     const current = context.original ? workspace?.tasks.find(task => task.id === context.original!.id) ?? null : null;
-    return this.store.generation() !== context.generation || !workspace || JSON.stringify(current) !== JSON.stringify(context.original);
+    return this.store.generation() !== context.generation || !workspace || JSON.stringify(current) !== JSON.stringify(context.original)
+      || !!context.original && JSON.stringify(workspace.documentLinks?.filter(link => link.taskId === context.original!.id) ?? []) !== JSON.stringify(context.documentLinks ?? []);
   });
   readonly projectDescription = '把計畫排進日程，讓每一步都清楚可見。';
   draft: Task = this.emptyTask('todo');
@@ -405,7 +481,7 @@ export class App {
   private validProjectFilter(id: string): string { return id === '' || id === 'all' || this.store.projects().some(project => project.id === id) ? id : 'all'; }
   private validCategoryFilter(id: string): string { return id === '' || id === 'all' || this.store.categories().some(category => category.id === id) ? id : 'all'; }
   private browseSnapshot(): BrowseState {
-    return {view: this.view(), scope: this.scope(), query: this.query(), project: this.projectFilter(), category: this.categoryFilter(), priority: this.priorityFilter(), pinnedOnly: this.pinnedOnly(), recentOnly: this.recentOnly(), deadline: this.deadlineFilter(), deadlineDays: this.deadlineDays(), sort: this.sortKey(), direction: this.sortDirection(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour(), showOrbit: this.calendarShowOrbit(), showGoogle: this.calendarShowGoogle(), progressExpanded: this.progressExpanded(), headerCompact: this.headerCompact(), trashOpen: this.trashOpen(), panel: this.tasksOpen() ? 'tasks' : this.mailOpen() ? 'gmail' : this.remindersOpen() ? 'reminders' : 'closed', panelTab: this.panelTab(), reminderTab: this.reminderTab()};
+    return {view: this.view(), scope: this.scope(), query: this.query(), project: this.projectFilter(), category: this.categoryFilter(), priority: this.priorityFilter(), pinnedOnly: this.pinnedOnly(), recentOnly: this.recentOnly(), deadline: this.deadlineFilter(), deadlineDays: this.deadlineDays(), sort: this.sortKey(), direction: this.sortDirection(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour(), showOrbit: this.calendarShowOrbit(), showGoogle: this.calendarShowGoogle(), progressExpanded: this.progressExpanded(), headerCompact: this.headerCompact(), trashOpen: this.trashOpen(), panel: this.filesOpen() ? 'files' : this.tasksOpen() ? 'tasks' : this.mailOpen() ? 'gmail' : this.remindersOpen() ? 'reminders' : 'closed', panelTab: this.panelTab(), reminderTab: this.reminderTab()};
   }
   private restoreBrowse(state: BrowseState, preserveSharedControls = false): void {
     this.view.set(state.view); this.scope.set(state.scope); this.query.set(state.query);
@@ -417,7 +493,7 @@ export class App {
     this.calendarDate.set(state.calendarDate); this.calendarScrollHour.set(state.calendarScrollHour);
     if (!preserveSharedControls) {
       this.calendarShowOrbit.set(state.showOrbit); this.calendarShowGoogle.set(state.showGoogle);
-      this.mailOpen.set(state.panel === 'gmail'); this.remindersOpen.set(state.panel === 'reminders'); this.tasksOpen.set(state.panel === 'tasks'); this.reminderTab.set(state.reminderTab);
+      this.filesOpen.set(state.panel === 'files'); this.mailOpen.set(state.panel === 'gmail'); this.remindersOpen.set(state.panel === 'reminders'); this.tasksOpen.set(state.panel === 'tasks'); this.reminderTab.set(state.reminderTab);
       this.panelTab.set(state.panel === 'closed' ? state.panelTab : state.panel);
     }
   }
@@ -461,7 +537,7 @@ export class App {
   }
   openReminders(tab: ReminderTab = 'today'): void {
     if (this.modal()) return;
-    this.reminderTab.set(tab); this.sidebarOpen.set(false); this.mailOpen.set(false); this.tasksOpen.set(false); this.remindersOpen.set(true); this.panelTab.set('reminders');
+    this.reminderTab.set(tab); this.sidebarOpen.set(false); this.filesOpen.set(false); this.mailOpen.set(false); this.tasksOpen.set(false); this.remindersOpen.set(true); this.panelTab.set('reminders');
   }
   toggleReminders(): void {
     if (this.modal()) return;
@@ -486,6 +562,7 @@ export class App {
 
   @HostListener('document:keydown.escape')
   escape(): void {
+    if (this.documentLinksEditor()?.pickerOpen()) {this.documentLinksEditor()?.cancelPicker(); return;}
     if (this.projectToDelete()) this.projectToDelete.set(null);
     else if (this.statusToDelete()) this.statusToDelete.set(null);
     else if (this.workspaceToDelete()) this.workspaceToDelete.set(null);
@@ -623,6 +700,7 @@ export class App {
     if (!task) this.trashOpen.set(false);
     const initialStatus = this.statuses().some(item => item.id === status) ? status : this.statuses().find(item => item.kind === 'active')?.id ?? this.statuses()[0].id;
     this.draft = task ? structuredClone(task) : this.emptyTask(initialStatus);
+    this.draftDocuments.set(task ? structuredClone(this.store.documentsForTask(task.id)) : []);
     this.taskEditContext.set(this.store.taskContext(this.draft.id));
     if (!task && this.categoryFilter() !== 'all') this.draft.categoryId = this.categoryFilter();
     this.editing.set(!!task);
@@ -640,6 +718,8 @@ export class App {
 
   async saveTask(publish = false): Promise<void> {
     if (this.store.pendingWrites()) return;
+    const documents = this.documentLinksEditor();
+    if (documents?.hasDraft() && !documents.add()) {this.formError.set('請先確認文件名稱與連結。'); return;}
     const title = this.draft.title.trim();
     if (!title) {
       this.formError.set('請輸入任務名稱。');
@@ -658,12 +738,12 @@ export class App {
     }
     if (this.subtaskDraft.trim()) this.addSubtask();
     const saved = {...this.draft, title, description: this.draft.description.trim()};
-    if (publish && JSON.stringify(saved) === JSON.stringify(this.taskEditContext()?.original) && !this.store.hasUnsavedChanges()) {
+    if (publish && JSON.stringify(saved) === JSON.stringify(this.taskEditContext()?.original) && JSON.stringify(this.draftDocuments().map(source => source.id).sort()) === JSON.stringify(this.store.documentsForTask(saved.id).map(source => source.id).sort()) && !this.store.hasUnsavedChanges()) {
       this.store.refreshFromStorage();
       if (this.taskDraftConflict()) { this.formError.set('任務已更新，請載入最新版本再移轉。'); return; }
       this.draft = structuredClone(saved); this.modal.set('calendar-publish'); return;
     }
-    const result = await this.store.saveTask(saved, this.taskEditContext()!);
+    const result = await this.store.saveTask(saved, this.taskEditContext()!, undefined, this.draftDocuments());
     if (!this.handleResult(result)) return;
     const hidden = !this.visibleTasks().some(task => task.id === this.draft.id);
     const message = this.editing() ? '任務已更新' : '新任務已建立';

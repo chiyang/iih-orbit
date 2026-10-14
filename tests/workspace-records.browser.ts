@@ -4,6 +4,7 @@ import {WorkspaceRecordRepository} from '../src/app/workspace-records';
 import {createBackup} from '../src/app/backup-data';
 import {emptyWorkspace} from '../src/app/workspace-data';
 import {WORKSPACE_STORAGE_KEY} from '../src/app/stored-data';
+import {documentFromUrl} from '../src/app/document-data';
 
 /** Run only on an isolated test origin. These records are synthetic and contain no credentials. */
 export async function runRecordBrowserTests(): Promise<string[]> {
@@ -45,6 +46,27 @@ export async function runRecordBrowserTests(): Promise<string[]> {
       check(JSON.stringify(await repository.read()) === JSON.stringify(prior), '交易中斷不部分寫入或刪除原有紀錄');
       const exported = await first.backupForExport('full');
       check(exported.formatVersion === 5 && exported.data.workspaces[0].tasks.length === 1000, '手動 JSON 備份保持完整及既有格式');
+      const document = documentFromUrl('google-drive', 'https://docs.google.com/document/d/native-test-file/edit', '原生文件測試');
+      await second.snapshotForExport();
+      const linked = await Promise.all([first.linkDocument('task-0', document), second.linkDocument('task-1', document)]);
+      check(linked.every(result => result.ok), '兩個分頁可並行把同一文件加入不同任務');
+      const documentState = await repository.read();
+      check(documentState!.state.workspaces[0].documentSources!.length === 1 && documentState!.state.workspaces[0].documentLinks!.length === 2, '原生交易保存共用來源和兩份獨立關聯');
+      await first.snapshotForExport();
+      const withDocuments = await first.backupForExport('full');
+      check(withDocuments.formatVersion === 6 && withDocuments.data.workspaces[0].documentSources!.length === 1, '新版 JSON 包含來源與關聯，可獨立還原');
+      const documentWrites: string[] = [];
+      IDBObjectStore.prototype.put = function(value, ...args) {if (this.name === 'records') documentWrites.push(value.key); return originalPut.call(this, value, ...args);};
+      try {check((await first.saveTask(first.tasks()[0], first.taskContext('task-0'), undefined, [])).ok, '文件移除以交易保存刪除記錄');}
+      finally {IDBObjectStore.prototype.put = originalPut;}
+      check(documentWrites.some(key => key.includes('documentLinks')) && !documentWrites.some(key => key.includes('task-2')), '關聯移除不重寫其他任務');
+      const beforeDocumentFailure = await repository.read();
+      IDBObjectStore.prototype.put = function(value, ...args) {if (value.key.includes('documentLinks')) throw new DOMException('測試文件寫入失敗', 'QuotaExceededError'); return originalPut.call(this, value, ...args);};
+      try {const result = await first.linkDocument('task-2', document); check(result.ok && !result.persisted && first.hasUnsavedChanges(), '文件寫入失敗顯示未保存，完整內容暫存分頁');}
+      finally {IDBObjectStore.prototype.put = originalPut;}
+      check(JSON.stringify(await repository.read()) === JSON.stringify(beforeDocumentFailure), '文件交易失敗不留下來源、任務或關聯的部分變更');
+      check((await first.linkDocument('task-2', document)).ok && !first.hasUnsavedChanges(), '儲存恢復後可重試完整文件變更');
+      check((await first.importBackup(withDocuments, first.revision())).ok && first.tasksForDocument(document).length === 2, '原生 IndexedDB 還原保留雙向關聯');
       const count = (await repository.read())!.state.workspaces[0].tasks.length;
       IDBObjectStore.prototype.put = function() {throw new DOMException('測試容量不足', 'QuotaExceededError');};
       try {

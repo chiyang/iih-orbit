@@ -14,6 +14,8 @@ import { clearLogoutStorage } from './logout-storage';
 import { loadDeviceIdentity } from './device-data';
 import { GoogleCombinedAuth } from './google-combined-auth';
 import type { GoogleAuth } from './google-auth';
+import { DriveBrowserConnection } from './drive-browser-connection';
+import { DRIVE_BROWSER_SCOPE } from './drive-browser-data';
 
 /** Shared consent and connection state for settings and the direct renewal button. */
 @Injectable({providedIn: 'root'})
@@ -24,6 +26,7 @@ export class GoogleConnections implements OnDestroy {
   readonly gmail = inject(GmailService);
   readonly drive = inject(DriveService);
   readonly combined = inject(GoogleCombinedAuth);
+  readonly files = inject(DriveBrowserConnection);
   private readonly injector = inject(Injector);
   private readonly document = inject(DOCUMENT);
   readonly preparing = signal(false);
@@ -38,9 +41,9 @@ export class GoogleConnections implements OnDestroy {
   readonly message = signal('');
   private destroyed = false;
   private requestVersion = 0;
-  readonly busy = computed(() => this.connectingAll() || this.loggingOut() || this.cleaning() || this.resuming() || this.store.pendingWrites() > 0 || this.calendar.auth.authorizing() || this.writeAuth.authorizing() || this.gmail.auth.authorizing() || this.drive.busy() || this.drive.syncing());
-  readonly allConnected = computed(() => !!this.store.google().clientId && [this.calendar.auth, this.gmail.auth, this.drive.auth, this.writeAuth].every(auth => auth.connected()));
-  readonly renewalNeeded = computed(() => !!this.store.google().clientId && [this.calendar.auth, this.gmail.auth, this.drive.auth, this.writeAuth].some(auth => auth.expired()));
+  readonly busy = computed(() => this.connectingAll() || this.loggingOut() || this.cleaning() || this.resuming() || this.store.pendingWrites() > 0 || this.calendar.auth.authorizing() || this.writeAuth.authorizing() || this.gmail.auth.authorizing() || this.drive.busy() || this.drive.syncing() || this.files.connecting() || this.files.auth.authorizing());
+  readonly allConnected = computed(() => !!this.store.google().clientId && [this.calendar.auth, this.gmail.auth, this.drive.auth, this.writeAuth, this.files.auth].every(auth => auth.connected()));
+  readonly renewalNeeded = computed(() => !!this.store.google().clientId && [this.calendar.auth, this.gmail.auth, this.drive.auth, this.writeAuth, this.files.auth].some(auth => auth.expired()));
   readonly authorizationNeeded = computed(() => this.renewalNeeded() || !!this.store.cloudResume());
   readonly renewalVisible = computed(() => this.authorizationNeeded() || this.connectingAll() || this.resuming());
   readonly canConnect = computed(() => !!this.store.google().clientId && this.combined.ready() && this.drive.online() && !this.busy() && !this.cleanupError() && (!this.drive.runtime().pending || !!this.store.cloudResume()));
@@ -62,12 +65,12 @@ export class GoogleConnections implements OnDestroy {
   async prepare(): Promise<void> {
     if (this.preparing()) return;
     this.preparing.set(true); this.error.set('');
-    try {await Promise.all([this.calendar.auth, this.gmail.auth, this.drive.auth, this.combined].map(auth => auth.prepare()));}
+    try {await Promise.all([this.calendar.auth, this.gmail.auth, this.drive.auth, this.files.auth, this.combined].map(auth => auth.prepare()));}
     catch (error) {this.error.set(error instanceof Error ? error.message : '無法載入 Google 授權元件。');}
     finally {this.preparing.set(false);}
   }
   private accountConfiguration(): string {
-    return JSON.stringify([this.store.generation(), this.store.google().clientId, this.store.google().accountId, this.store.drive().accountId, this.gmail.preferences().accountId]);
+    return JSON.stringify([this.store.generation(), this.store.google().clientId, this.store.google().accountId, this.store.drive().accountId, this.gmail.preferences().accountId, this.files.context()]);
   }
   async connectAll(): Promise<void> {
     const clientId = this.store.google().clientId, generation = this.store.generation();
@@ -75,8 +78,8 @@ export class GoogleConnections implements OnDestroy {
     if (this.drive.runtime().pending && !this.store.cloudResume()) {this.error.set('請先完成 Drive 等待上傳的資料，再一次授權全部服務。'); return;}
     const configuration = this.accountConfiguration();
     const request = ++this.requestVersion;
-    const targets = [this.calendar.auth, this.gmail.auth, this.drive.auth, this.writeAuth];
-    const accounts = [this.store.google().accountId, this.gmail.preferences().accountId, this.store.drive().accountId, this.store.google().accountId];
+    const targets = [this.calendar.auth, this.gmail.auth, this.drive.auth, this.writeAuth, this.files.auth];
+    const accounts = [this.store.google().accountId, this.gmail.preferences().accountId, this.store.drive().accountId, this.store.google().accountId, this.files.account().id];
     const markers = new Map<GoogleAuth, string>();
     targets.forEach((auth, index) => {auth.useSession({clientId, generation, accountId: accounts[index]}); markers.set(auth, auth.authorizationMarker());});
     this.combined.useSession({clientId, generation, accountId: ''});
@@ -95,7 +98,8 @@ export class GoogleConnections implements OnDestroy {
       const services = [
         {name: 'Calendar', scope: CALENDAR_SCOPE, auth: this.calendar.auth, connect: () => this.calendar.connect(async () => account, activate(this.calendar.auth))},
         {name: 'Gmail', scope: GMAIL_SCOPE, auth: this.gmail.auth, connect: () => this.gmail.connect(async () => account, activate(this.gmail.auth))},
-        {name: 'Drive', scope: DRIVE_SCOPE, auth: this.drive.auth, connect: () => this.drive.connect(async () => account, activate(this.drive.auth))}
+        {name: 'Drive', scope: DRIVE_SCOPE, auth: this.drive.auth, connect: () => this.drive.connect(async () => account, activate(this.drive.auth))},
+        {name: 'Drive 檔案瀏覽', scope: DRIVE_BROWSER_SCOPE, auth: this.files.auth, connect: () => this.files.connect(async () => account, activate(this.files.auth))}
       ];
       const approved = services.filter(service => this.combined.hasScope(service.scope));
       if (this.combined.hasScope(CALENDAR_SCOPE)) this.writeAuth.useSession(context);
@@ -188,6 +192,7 @@ export class GoogleConnections implements OnDestroy {
     this.cleaning.set(true); this.cleanupError.set('');
     try {
       this.cancelAll();
+      this.files.disconnect();
       for (const auth of [this.calendar.auth, this.gmail.auth, this.drive.auth, this.writeAuth]) auth.disconnect();
       const cleaned = await Promise.allSettled([this.injector.get(CalendarCache).clear(), this.drive.clearLocalData()]);
       if (generation !== this.store.generation() || !this.store.cloudResume()) return;
@@ -201,6 +206,6 @@ export class GoogleConnections implements OnDestroy {
     } catch (error) {this.cleanupError.set(error instanceof Error ? error.message : '本機資料清理未完成，請重試。');}
     finally {this.cleaning.set(false);}
   }
-  cancelAll(): void {this.requestVersion++; this.combined.disconnect();}
+  cancelAll(): void {this.requestVersion++; this.combined.disconnect(); this.files.cancelAuthorization();}
   ngOnDestroy(): void {this.destroyed = true; this.cancelAll();}
 }

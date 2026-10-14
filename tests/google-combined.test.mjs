@@ -12,14 +12,16 @@ import { createDriveDocument, readDriveFile, versionProperties } from '../src/ap
 import { CALENDAR_SCOPE } from '../src/app/google-data.ts';
 import { GMAIL_SCOPE } from '../src/app/gmail-data.ts';
 import { DRIVE_SCOPE, DRIVE_SESSION_KEY } from '../src/app/drive-data.ts';
+import { DRIVE_BROWSER_SCOPE } from '../src/app/drive-browser-data.ts';
+import {createDocumentSource} from '../src/app/document-data.ts';
 import { GOOGLE_SESSION_KEY } from '../src/app/google-session.ts';
 
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/combined-test-')), output = resolve(directory, 'combined.mjs');
-await build({stdin: {contents: "export {GoogleConnection} from './src/app/google-connection.ts'; export {GoogleConnections} from './src/app/google-connections.ts'; export {GoogleRenewalButton} from './src/app/google-renewal-button.ts'; export {GoogleCombinedAuth, COMBINED_GOOGLE_SCOPE} from './src/app/google-combined-auth.ts'; export {GoogleAuth} from './src/app/google-auth.ts'; export {GmailAuth} from './src/app/gmail-auth.ts'; export {DriveAuth} from './src/app/drive-auth.ts'; export {CalendarWriteAuth} from './src/app/calendar-write-auth.ts'; export {CalendarCache} from './src/app/calendar-cache.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {GmailService} from './src/app/gmail-service.ts'; export {DriveService} from './src/app/drive-service.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const {GoogleConnection, GoogleConnections, GoogleRenewalButton, GoogleCombinedAuth, COMBINED_GOOGLE_SCOPE, GoogleAuth, GmailAuth, DriveAuth, CalendarWriteAuth, CalendarCache, GoogleCalendarService, GmailService, DriveService, BoardStore} = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {GoogleConnection} from './src/app/google-connection.ts'; export {GoogleConnections} from './src/app/google-connections.ts'; export {GoogleRenewalButton} from './src/app/google-renewal-button.ts'; export {GoogleCombinedAuth, COMBINED_GOOGLE_SCOPE} from './src/app/google-combined-auth.ts'; export {GoogleAuth} from './src/app/google-auth.ts'; export {GmailAuth} from './src/app/gmail-auth.ts'; export {DriveAuth} from './src/app/drive-auth.ts'; export {DriveBrowserAuth} from './src/app/drive-browser-auth.ts'; export {DriveBrowserConnection} from './src/app/drive-browser-connection.ts'; export {CalendarWriteAuth} from './src/app/calendar-write-auth.ts'; export {CalendarCache} from './src/app/calendar-cache.ts'; export {GoogleCalendarService} from './src/app/google-calendar.ts'; export {GmailService} from './src/app/gmail-service.ts'; export {DriveService} from './src/app/drive-service.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const {GoogleConnection, GoogleConnections, GoogleRenewalButton, GoogleCombinedAuth, COMBINED_GOOGLE_SCOPE, GoogleAuth, GmailAuth, DriveAuth, DriveBrowserAuth, DriveBrowserConnection, CalendarWriteAuth, CalendarCache, GoogleCalendarService, GmailService, DriveService, BoardStore} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 
 // Exercise real consent, credential storage and connect methods with synthetic API responses.
@@ -40,11 +42,11 @@ async function fixture() {
   };
   const scheduler = {add(effect) {effects.add(effect);}, schedule() {}, remove(effect) {effects.delete(effect);}};
   const injector = createEnvironmentInjector([
-    {provide: DOCUMENT, useValue: {defaultView: {google: {accounts: {oauth2: oauth}}, localStorage: storage, sessionStorage}, addEventListener() {}, removeEventListener() {}}},
+    {provide: DOCUMENT, useValue: {defaultView: {google: {accounts: {oauth2: oauth}}, localStorage: storage, sessionStorage, addEventListener() {}, removeEventListener() {}}, addEventListener() {}, removeEventListener() {}}},
     {provide: BoardStore, useValue: store}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}
   ]);
   const make = Type => runInInjectionContext(injector, () => new Type());
-  const auth = make(GoogleAuth), gmailAuth = make(GmailAuth), driveAuth = make(DriveAuth), writeAuth = make(CalendarWriteAuth), combined = make(GoogleCombinedAuth);
+  const auth = make(GoogleAuth), gmailAuth = make(GmailAuth), driveAuth = make(DriveAuth), fileAuth = make(DriveBrowserAuth), writeAuth = make(CalendarWriteAuth), combined = make(GoogleCombinedAuth);
   let calendarLists = 0, driveLists = 0;
   const calendar = {auth, store, error: signal(''), available: signal([]), message: error => error.message, listCalendars: async () => {calendarLists++;}, refresh: async () => {}};
   calendar.connect = GoogleCalendarService.prototype.connect.bind(calendar);
@@ -53,12 +55,12 @@ async function fixture() {
   const cache = {clear: async () => {}};
   const drive = {auth: driveAuth, store, error: signal(''), busy: signal(false), syncing: signal(false), online: signal(true), runtime: signal({}), files: signal([]), removals: signal([]), catalogFresh: signal(true), clearLocalData: async () => {drive.runtime.set({});}, coordinator: {activate() {}}, loadRuntime: async () => {}, list: async () => {driveLists++;}, schedule() {}, describe: error => error.message};
   drive.connect = DriveService.prototype.connect.bind(drive);
-  const child = createEnvironmentInjector([GoogleConnections, {provide: GoogleCalendarService, useValue: calendar}, {provide: CalendarCache, useValue: cache}, {provide: GmailService, useValue: gmail}, {provide: DriveService, useValue: drive}, {provide: CalendarWriteAuth, useValue: writeAuth}, {provide: GoogleCombinedAuth, useValue: combined}], injector);
+  const child = createEnvironmentInjector([GoogleConnections, DriveBrowserConnection, {provide: DriveBrowserAuth, useValue: fileAuth}, {provide: GoogleCalendarService, useValue: calendar}, {provide: CalendarCache, useValue: cache}, {provide: GmailService, useValue: gmail}, {provide: DriveService, useValue: drive}, {provide: CalendarWriteAuth, useValue: writeAuth}, {provide: GoogleCombinedAuth, useValue: combined}], injector);
   const connection = runInInjectionContext(child, () => new GoogleConnection());
   const flush = () => {for (let round = 0; round < 30 && [...effects].some(effect => effect.dirty); round++) for (const effect of effects) if (effect.dirty) effect.run();};
-  flush(); await Promise.all([auth, gmailAuth, driveAuth, combined].map(auth => auth.prepare()));
+  flush(); await Promise.all([auth, gmailAuth, driveAuth, fileAuth, combined].map(auth => auth.prepare()));
   const reply = async (scopes = COMBINED_GOOGLE_SCOPE) => requests.at(-1).options.callback({access_token: 'synthetic-only-token', expires_in: 3600, scope: scopes});
-  return {connection, button: runInInjectionContext(child, () => new GoogleRenewalButton()), connections: child.get(GoogleConnections), store, calendar, cache, gmail, drive, auth, gmailAuth, driveAuth, writeAuth, combined, requests, values, tabs, reply, flush, counts: () => [calendarLists, driveLists], close() {connection.ngOnDestroy(); child.destroy(); for (const item of [auth, gmailAuth, driveAuth, writeAuth, combined]) item.ngOnDestroy(); injector.destroy(); store.ngOnDestroy(); globalThis.fetch = previousFetch; if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage); else delete globalThis.localStorage;}};
+  return {connection, button: runInInjectionContext(child, () => new GoogleRenewalButton()), connections: child.get(GoogleConnections), store, calendar, cache, gmail, drive, auth, gmailAuth, driveAuth, fileAuth, files: child.get(DriveBrowserConnection), writeAuth, combined, requests, values, tabs, reply, flush, counts: () => [calendarLists, driveLists], close() {connection.ngOnDestroy(); child.destroy(); for (const item of [auth, gmailAuth, driveAuth, fileAuth, writeAuth, combined]) item.ngOnDestroy(); injector.destroy(); store.ngOnDestroy(); globalThis.fetch = previousFetch; if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage); else delete globalThis.localStorage;}};
 }
 
 test('同步並登出成功才清除資料與所有憑證，保留兩個識別並提供 G 登入', async () => {
@@ -76,7 +78,7 @@ test('同步並登出成功才清除資料與所有憑證，保留兩個識別�
     assert.equal(f.store.tasks().length, 0); assert.notEqual(f.store.generation(), generation); assert.equal(f.store.google().clientId, clientId); assert.deepEqual(f.store.cloudResume(), {datasetId});
     assert.equal(f.values.has('orbit-private-preview'), false); assert.equal(f.values.has('orbit-workspaces-v1'), false); assert.equal(f.values.get('another-app-data'), '保留');
     assert.equal(f.tabs.has('iih-orbit-private-session'), false);
-    for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.writeAuth]) assert.equal(auth.connected(), false);
+    for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.fileAuth, f.writeAuth]) assert.equal(auth.connected(), false);
     for (const key of [GOOGLE_SESSION_KEY, 'iih-orbit-gmail-session-v1', DRIVE_SESSION_KEY, 'iih-orbit-calendar-write-session-v1']) assert.equal(f.values.has(key), false);
     assert.equal(f.connections.authorizationNeeded(), true); assert.equal(f.connections.renewalVisible(), true);
   } finally {f.close();}
@@ -196,16 +198,18 @@ test('全部授權僅開一個視窗，讀取與寫入各自接續；取消單�
     assert.equal(f.requests.length, 1); assert.equal(f.connection.busy(), true);
     await f.connection.connectAll(); assert.equal(f.requests.length, 1);
     const requested = f.requests[0].options.scope.split(' ');
-    for (const scope of [CALENDAR_SCOPE, GMAIL_SCOPE, DRIVE_SCOPE, 'https://www.googleapis.com/auth/calendar.events']) assert.ok(requested.includes(scope));
+    for (const scope of [CALENDAR_SCOPE, GMAIL_SCOPE, DRIVE_SCOPE, DRIVE_BROWSER_SCOPE, 'https://www.googleapis.com/auth/calendar.events']) assert.ok(requested.includes(scope));
     assert.equal(f.requests[0].options.include_granted_scopes, false);
     await f.reply(); await connecting;
-    for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.writeAuth]) {assert.equal(auth.connected(), true); assert.equal(auth.account().id, 'account');}
+    for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.fileAuth, f.writeAuth]) {assert.equal(auth.connected(), true); assert.equal(auth.account().id, 'account');}
     assert.deepEqual(f.counts(), [1, 1]); assert.equal(f.store.drive().mode, 'off');
     assert.equal(f.combined.connected(), false); assert.equal(f.connection.connectingAll(), false); assert.equal(f.connection.error(), '');
     assert.equal(f.tabs.has('iih-orbit-combined-session'), false); assert.equal(f.values.has('iih-orbit-combined-session'), false);
     assert.equal(JSON.parse(f.values.get(GOOGLE_SESSION_KEY)).scope, CALENDAR_SCOPE);
     assert.equal(JSON.parse(f.values.get('iih-orbit-gmail-session-v1')).scope, GMAIL_SCOPE);
     assert.equal(JSON.parse(f.values.get(DRIVE_SESSION_KEY)).scope, DRIVE_SCOPE);
+    assert.equal(JSON.parse(f.values.get('iih-orbit-drive-browser-session-v1')).scope, DRIVE_BROWSER_SCOPE);
+    assert.equal(f.files.account().id, 'account');
     assert.ok(f.values.get('iih-orbit-calendar-write-session-v1'));
     for (const key of [GOOGLE_SESSION_KEY, 'iih-orbit-gmail-session-v1', DRIVE_SESSION_KEY, 'iih-orbit-calendar-write-session-v1']) assert.equal(f.tabs.has(key), false);
     f.gmail.disconnect(); assert.equal(f.gmailAuth.connected(), false);
@@ -234,23 +238,24 @@ test('取消全部授權保留原有帳號與服務連線；Drive 待上傳時�
     const saved = f.values.get('orbit-workspaces-v2'), preferences = f.values.get('gmail-preferences');
     const cancelled = f.connection.connectAll(); f.requests.at(-1).options.error_callback({type: 'popup_closed'}); await cancelled;
     assert.match(f.connection.error(), /已關閉/); assert.equal(f.values.get('orbit-workspaces-v2'), saved); assert.equal(f.values.get('gmail-preferences'), preferences);
-    for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.writeAuth]) assert.equal(auth.connected(), true);
+    for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.fileAuth, f.writeAuth]) assert.equal(auth.connected(), true);
     f.drive.runtime.set({pending: {version: 'queued'}}); await f.connection.connectAll(); assert.equal(f.requests.length, 2); assert.match(f.connection.error(), /等待上傳/);
   } finally {f.close();}
 });
 
 test('授權途中設定或個別服務被撤銷時，不套用遲到授權，也不改變帳號設定', async () => {
-  for (const change of ['client', 'revoke']) {
+  for (const change of ['client', 'revoke', 'revoke-files']) {
     const f = await fixture();
     try {
       const connecting = f.connection.connectAll();
       if (change === 'client') await f.store.updateGoogle({clientId: '456-new.apps.googleusercontent.com'});
-      else f.writeAuth.disconnect();
+      else if (change === 'revoke') f.writeAuth.disconnect();
+      else f.files.disconnect();
       const saved = f.values.get('orbit-workspaces-v2');
       await f.reply(); await connecting;
       assert.match(f.connection.error(), /已變更/); assert.equal(f.values.get('orbit-workspaces-v2'), saved);
       assert.equal(f.store.google().accountId, ''); assert.equal(f.gmail.preferences().accountId, ''); assert.equal(f.store.drive().accountId, '');
-      for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.writeAuth, f.combined]) assert.equal(auth.connected(), false);
+      for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.fileAuth, f.writeAuth, f.combined]) assert.equal(auth.connected(), false);
       assert.deepEqual(f.counts(), [0, 0]);
     } finally {f.close();}
   }
@@ -267,7 +272,7 @@ test('設定關閉後的帳號驗證回覆不接續任何服務；拒絕全部�
     f.connection.ngOnDestroy(); await connecting;
     resolveIdentity(Response.json({sub: 'account', email: 'account@example.test'})); await callback;
     assert.equal(f.store.google().accountId, ''); assert.equal(f.gmail.preferences().accountId, ''); assert.equal(f.store.drive().accountId, '');
-    for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.writeAuth, f.combined]) assert.equal(auth.connected(), false);
+    for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.fileAuth, f.writeAuth, f.combined]) assert.equal(auth.connected(), false);
     assert.equal(f.connection.connectingAll(), false);
   } finally {f.close();}
 });
@@ -321,5 +326,64 @@ test('頁首 G 入口直接啟動全部授權，避免重複點擊並回報結�
     await f.reply(); await renewing;
     assert.match(message, /已連線：Calendar、Gmail、Drive/);
     assert.equal(f.connections.renewalNeeded(), false); assert.equal(f.connections.allConnected(), true);
+  } finally {f.close();}
+});
+
+test('唯獨檔案瀏覽權限獲准仍接續連線，沒有讀寫備份或月曆與郵件權限', async () => {
+  const f = await fixture();
+  try {
+    const connecting = f.connections.connectAll(); await f.reply(DRIVE_BROWSER_SCOPE); await connecting;
+    assert.equal(f.fileAuth.connected(), true); assert.equal(f.files.account().email, 'account@example.test');
+    for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.writeAuth]) assert.equal(auth.connected(), false);
+    assert.deepEqual(f.counts(), [0, 0]); assert.equal(f.store.drive().mode, 'off');
+    assert.equal(f.connections.allConnected(), false); assert.match(f.connections.message(), /Drive 檔案瀏覽/); assert.match(f.connections.error(), /Calendar、Gmail、Drive/);
+    assert.equal(JSON.parse(f.values.get('iih-orbit-drive-browser-session-v1')).scope, DRIVE_BROWSER_SCOPE);
+  } finally {f.close();}
+});
+
+test('舊有服務全部獲准但拒絕檔案資訊權限時，檔案瀏覽未連線且清楚提示缺少的服務', async () => {
+  const f = await fixture();
+  try {
+    const connecting = f.connections.connectAll(); await f.reply(COMBINED_GOOGLE_SCOPE.split(' ').filter(scope => scope !== DRIVE_BROWSER_SCOPE).join(' ')); await connecting;
+    for (const auth of [f.auth, f.gmailAuth, f.driveAuth, f.writeAuth]) assert.equal(auth.connected(), true);
+    assert.equal(f.fileAuth.connected(), false); assert.equal(f.files.account().id, ''); assert.equal(f.connections.allConnected(), false);
+    assert.match(f.connections.error(), /尚未取得 Drive 檔案瀏覽 權限/);
+  } finally {f.close();}
+});
+
+test('檔案瀏覽到期也啟動共用重新授權提示；單獨解除不影響備份授權與既有資訊連結', async () => {
+  const f = await fixture();
+  try {
+    const connecting = f.connections.connectAll(); await f.reply(); await connecting;
+    const task = {id: 'linked-task', title: '保留資訊連結', description: '', categoryId: '', projectId: '', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: []};
+    await f.store.saveTask(task);
+    const result = await f.store.linkDocument(task.id, createDocumentSource({provider: 'google-drive', sourceScope: 'drive', fileId: 'file', name: '檔案', url: 'https://drive.google.com/file/d/file/view'}));
+    assert.equal(result.ok, true);
+    const linked = f.store.documentsForTask(task.id);
+    assert.equal(linked.length, 1);
+    f.fileAuth.disconnect('Google 授權已到期，請重新連線。', 'expired');
+    assert.equal(f.connections.renewalNeeded(), true); assert.equal(f.connections.allConnected(), false);
+    assert.equal(f.driveAuth.connected(), true); assert.deepEqual(f.store.documentsForTask(task.id), linked);
+    const renewed = f.connections.connectAll(); await f.reply(); await renewed;
+    assert.equal(f.connections.allConnected(), true); assert.equal(f.connections.renewalNeeded(), false);
+    f.files.disconnect(); assert.equal(f.fileAuth.connected(), false); assert.equal(f.driveAuth.connected(), true);
+    assert.deepEqual(f.store.documentsForTask(task.id), linked);
+  } finally {f.close();}
+});
+
+test('單獨連線檔案瀏覽可取消；關閉設定後遲到的帳號回覆不建立連線', async () => {
+  const f = await fixture();
+  try {
+    const first = f.connection.connectFiles(); assert.equal(f.requests.length, 1); assert.equal(f.connections.busy(), true);
+    assert.ok(f.requests[0].options.scope.includes(DRIVE_BROWSER_SCOPE)); assert.equal(f.requests[0].options.scope.includes(DRIVE_SCOPE), false);
+    f.requests[0].options.error_callback({type: 'popup_closed'}); await first;
+    assert.match(f.files.error(), /已關閉/); assert.equal(f.files.connecting(), false); assert.equal(f.fileAuth.connected(), false);
+    let resolveIdentity;
+    globalThis.fetch = () => new Promise(resolve => {resolveIdentity = resolve;});
+    const connecting = f.connection.connectFiles(), callback = f.reply(DRIVE_BROWSER_SCOPE);
+    f.connection.ngOnDestroy(); await connecting;
+    resolveIdentity(Response.json({sub: 'late-account', email: 'late@example.test'})); await callback;
+    assert.equal(f.fileAuth.connected(), false); assert.equal(f.files.account().id, ''); assert.equal(f.files.connecting(), false);
+    assert.deepEqual(f.counts(), [0, 0]);
   } finally {f.close();}
 });

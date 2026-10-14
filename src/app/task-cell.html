@@ -29,3 +29,4 @@
     @if (field() === 'categoryId') {<i></i>}@if (field() === 'projectId') {<app-icon name="tag" />}@if (field() === 'priority') {<app-icon name="flag" />}<span>{{ display() }}</span>@if (overdue()) {<small>逾期</small>}
   </button>
 }
+@if (field() === 'title' && documentCount()) {<span class="task-information-count"><app-icon name="link" />資訊連結 {{ documentCount() }} 項</span>}

@@ -452,3 +452,27 @@ test('未排程任務可拖至日期或時段，設定截止標記；無效目�
     assert.equal(store.tasks()[0].dueDate, '2026-10-10'); assert.match(calendar.moveError(), /不合法/);
   } finally { close(); }
 });
+
+test('檔案在月曆日期與週時間建立任務，Orbit 活動只關聯，Google 活動阻擋且不冒泡新增', async () => {
+  const external = googleEntry('external', {date: '2026-10-09'}, {date: '2026-10-10'}), f = calendarController([base], [external]), drops = [];
+  try {
+    f.calendar.documentDragging = signal(true); f.calendar.documentDrop.subscribe(entry => drops.push(entry));
+    const event = () => ({...dragEvent(), dataTransfer: {types: ['application/x-orbit-document'], dropEffect: 'none'}});
+    const date = event(); f.calendar.dragOver(date, {kind: 'month', day: '2026-10-09'}); assert.equal(date.prevented(), true); assert.equal(date.stopped(), true); assert.equal(date.dataTransfer.dropEffect, 'copy'); await f.calendar.drop(date, {kind: 'month', day: '2026-10-09'}); assert.deepEqual(drops[0].position, {kind: 'month', day: '2026-10-09'});
+    const timed = event(); await f.calendar.drop(timed, {kind: 'time', day: '2026-10-10', minute: 615}); assert.equal(drops[1].position.minute, 615);
+    const link = event(); f.calendar.documentEntryOver(link, base); assert.equal(f.calendar.documentLinkTaskId(), base.id); assert.equal(f.calendar.dropPosition(), null); f.calendar.documentEntryDrop(link, base); assert.equal(drops[2].taskId, base.id); assert.equal(drops[2].position, undefined);
+    const blocked = event(); f.calendar.documentEntryOver(blocked, external.task); assert.equal(f.calendar.documentBlocked(), true); assert.equal(blocked.dataTransfer.dropEffect, 'none'); assert.equal(blocked.stopped(), true); f.calendar.documentEntryDrop(blocked, external.task); assert.equal(drops.length, 3); assert.equal(blocked.stopped(), true);
+    assert.deepEqual(f.store.tasks(), [base]);
+  } finally {f.close();}
+});
+
+test('郵件可加入月／週既有 Orbit 任務，Google 活動阻擋，空白時段仍建立排程任務', async () => {
+  const external = googleEntry('external-mail', {date: '2026-10-09'}, {date: '2026-10-10'}), f = calendarController([base], [external]), drops = [];
+  try {
+    f.calendar.mailDragging = signal(true); f.calendar.mailDrop.subscribe(entry => drops.push(entry));
+    const event = () => ({...dragEvent(), dataTransfer: {types: ['application/x-iih-orbit-mail'], dropEffect: 'none'}});
+    const link = event(); f.calendar.documentEntryOver(link, base); assert.equal(f.calendar.documentLinkTaskId(), base.id); f.calendar.documentEntryDrop(link, base); assert.equal(drops[0].taskId, base.id); assert.equal(drops[0].position, undefined);
+    const blocked = event(); f.calendar.documentEntryOver(blocked, external.task); assert.equal(blocked.dataTransfer.dropEffect, 'none'); f.calendar.documentEntryDrop(blocked, external.task); assert.equal(drops.length, 1); assert.equal(blocked.stopped(), true);
+    const timed = event(); await f.calendar.drop(timed, {kind: 'time', day: '2026-10-10', minute: 615}); assert.equal(drops[1].position.minute, 615); assert.equal(drops[1].taskId, undefined);
+  } finally {f.close();}
+});

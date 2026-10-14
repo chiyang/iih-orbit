@@ -9,6 +9,8 @@ import { createBackup } from '../src/app/backup-data.ts';
 import { DEFAULT_REMINDERS } from '../src/app/reminder-data.ts';
 import { DEFAULT_DRIVE } from '../src/app/drive-data.ts';
 import { DEFAULT_APPEARANCE } from '../src/app/appearance-data.ts';
+import { documentFromUrl } from '../src/app/document-data.ts';
+import {mailInformationSource} from '../src/app/mail-information-data.ts';
 
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -22,6 +24,80 @@ after(() => rm(directory, {recursive: true, force: true}));
 const task = {id: 'task', title: '既有任務', description: '保留內容', categoryId: '', projectId: '', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: []};
 const legacy = {version: 2, projectName: '原專案', categories: [], tasks: [task, {...task, id: 'done', status: 'done'}]};
 const migratedTasks = legacy.tasks.map(item => ({...item, projectId: 'project-legacy'}));
+
+test('資訊連結數量含 Drive 與郵件，移除／復原／垃圾桶與工作空間切換即時更新', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(), originalWorkspace = store.currentWorkspace().id;
+  const file = documentFromUrl('google-drive', 'https://docs.google.com/document/d/count-file/edit', '報告');
+  const mail = mailInformationSource({id: 'count-mail', subject: '郵件', from: 'sender@example.test', senderEmail: 'sender@example.test'}, 'orbit@example.test', 'account');
+  assert.equal(store.documentCount('task'), 0);
+  await store.linkDocument('task', file); await store.linkDocument('task', mail); await store.linkDocument('task', file);
+  assert.equal(store.documentCount('task'), 2); assert.equal(store.documentCount('done'), 0);
+  await store.saveTask(store.tasks()[0], store.taskContext('task'), undefined, [mail]); assert.equal(store.documentCount('task'), 1);
+  await store.undo(); assert.equal(store.documentCount('task'), 2);
+  await store.deleteTask('task'); assert.equal(store.documentCount('task'), 0);
+  await store.restoreTask('task'); assert.equal(store.documentCount('task'), 2);
+  await store.saveWorkspace('', '另一個空間'); assert.equal(store.documentCount('task'), 0);
+  store.switchWorkspace(originalWorkspace); assert.equal(store.documentCount('task'), 2);
+  assert.equal(new BoardStore().documentCount('task'), 2);
+  store.workspaceState.update(state => ({...state, workspaces: state.workspaces.map(workspace => workspace.id === originalWorkspace ? {...workspace, documentLinks: [...workspace.documentLinks, {...workspace.documentLinks.find(link => !link.removed), id: 'parallel-add'}]} : workspace)}));
+  assert.equal(store.documentCount('task'), 2);
+});
+
+test('任務與多文件一次保存；新分頁、完整還原及工作空間副本保留雙向關聯', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(), source = documentFromUrl('google-drive', 'https://docs.google.com/document/d/document-one/edit', '研究計畫');
+  const second = documentFromUrl('pcloud', 'https://e.pcloud.link/publink/show?code=shared', '研究資料');
+  assert.equal((await store.saveTask(store.tasks()[0], store.taskContext('task'), undefined, [source, second])).ok, true);
+  assert.equal(store.documentsForTask('task').length, 2); assert.equal(store.tasksForDocument(source).length, 1);
+  assert.equal(new BoardStore().documentsForTask('task').length, 2);
+  const exported = await store.backupForExport('full'); assert.equal(exported.formatVersion, 6);
+  assert.equal((await store.importBackup(exported, store.revision())).ok, true); assert.equal(store.documentsForTask('task').length, 2);
+  const copied = await store.backupForExport('workspaces', [store.currentWorkspace().id]);
+  assert.equal((await store.importBackup(copied, store.revision())).ok, true);
+  assert.equal(store.tasksForDocument(source).length, 2); assert.equal(store.documents().length, 2);
+});
+
+test('文件草稿拒絕過期關聯，直接新增可保留另一分頁加入的其他文件', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const first = new BoardStore(), second = new BoardStore(), stale = second.taskContext('task');
+  const source = documentFromUrl('google-drive', 'https://docs.google.com/document/d/document-one/edit', '研究計畫');
+  const other = documentFromUrl('google-drive', 'https://docs.google.com/document/d/document-two/edit', '研究資料');
+  await first.linkDocument('task', source);
+  assert.equal((await second.saveTask(stale.original, stale, undefined, [other])).ok, false);
+  second.refreshFromStorage(); assert.equal((await second.linkDocument('task', other)).ok, true);
+  assert.equal(new BoardStore().documentsForTask('task').length, 2);
+  const generation = second.generation(), context = second.taskContext('task');
+  await second.importBackup(await second.backupForExport('full'), second.revision());
+  assert.notEqual(second.generation(), generation); assert.equal((await second.linkDocument('task', source, context)).ok, false);
+});
+
+test('關聯復原與重做保留刪除記錄，重新加入使用新事件；垃圾桶清空不留下有效懸空關聯', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(), source = documentFromUrl('google-drive', 'https://docs.google.com/document/d/document-one/edit', '研究計畫');
+  await store.saveTask({...store.tasks()[0], title: '第一個編輯'});
+  await store.linkDocument('task', source);
+  const firstId = store.state().documentLinks[0].id;
+  assert.equal(store.undoLabel(), '變更資訊連結'); assert.equal((await store.undo()).ok, true);
+  assert.equal(store.documentsForTask('task').length, 0); assert.equal(store.state().documentLinks[0].removed, true);
+  assert.equal(store.canRedo(), true); assert.equal((await store.redo()).ok, true);
+  assert.equal(store.documentsForTask('task').length, 1); assert.notEqual(store.state().documentLinks.find(link => !link.removed).id, firstId);
+  await store.undo(); assert.equal(store.canUndo(), true); await store.undo(); assert.equal(store.tasks()[0].title, '既有任務');
+  await store.linkDocument('task', source); await store.deleteTask('task');
+  assert.equal(store.tasksForDocument(source).length, 0); assert.equal(store.tasksForDocument(source, true).length, 1);
+  assert.equal((await store.emptyTrash(store.trashContext())).ok, true);
+  assert.equal(store.state().documentLinks.every(link => link.removed), true); assert.equal(store.documents().length, 1);
+  assert.equal(new BoardStore().tasksForDocument(source, true).length, 0);
+});
+
+test('文件拖曳關聯拒絕刪除任務與無效來源，失敗不建立任務或半份關聯', async () => {
+  storage({'orbit-board-v1': JSON.stringify(legacy)});
+  const store = new BoardStore(), source = documentFromUrl('google-drive', 'https://docs.google.com/document/d/document-one/edit', '研究計畫');
+  assert.equal((await store.saveTask(store.tasks()[0], store.taskContext('task'), undefined, [{...source, url: 'javascript:alert(1)'}])).ok, false);
+  assert.equal(store.documents().length, 0);
+  const context = store.taskContext('task'); await store.deleteTask('task');
+  assert.equal((await store.linkDocument('task', source, context)).ok, false); assert.equal(store.documents().length, 0);
+});
 
 test('登出只保留 Client ID 與雲端集合目的地並重置其他資料，舊分頁不能復活任務', async () => {
   storage({'orbit-board-v1': JSON.stringify(legacy)});

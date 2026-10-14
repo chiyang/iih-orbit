@@ -58,7 +58,7 @@ export class DriveBlockCleanup {
     const [versions, pending] = await Promise.all([this.versions(), this.entries('pending-version', check)]); check();
     const ids = new Set<string>(), hashes = new Set<string>(), datasets = new Set<string>();
     for (const file of versions) {
-      if (file.cloud.formatVersion !== 5) continue;
+      if (file.cloud.formatVersion < 5 || file.cloud.purpose === 'manual') continue;
       if (!file.size) {if (now - Date.parse(file.createdTime) < BLOCK_OBSERVATION_MS) datasets.add(file.cloud.datasetId); continue;}
       const manifest = readManifest(await this.transport.api('files/' + file.id, {alt: 'media'}), file.cloud); check();
       for (const ref of manifestReferences(manifest)) ids.add(blockKey(file.cloud.datasetId, ref.id));

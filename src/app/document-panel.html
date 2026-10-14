@@ -1,0 +1,32 @@
+<section class="drive-browser" aria-label="Google Drive 檔案瀏覽器" [class.is-picker]="selectionMode()">
+  <header class="drive-browser-heading">
+    @if (browser.auth.connected() || browser.files().length) {<div class="drive-roots" role="group" aria-label="Drive 來源"><button type="button" [attr.aria-pressed]="!browser.path()[0].shared" [disabled]="browser.busy()" (click)="browser.root()">我的雲端硬碟</button><button type="button" [attr.aria-pressed]="!!browser.path()[0].shared" [disabled]="browser.busy()" (click)="browser.root(true)">與我共用</button></div>}
+    <div class="drive-toolbar-actions"><button type="button" class="drive-icon-button" aria-label="重新整理檔案列表" title="重新整理" [disabled]="!canUse()" (click)="browser.refresh()"><app-icon name="sync" /></button>@if (!selectionMode()) {<button type="button" class="drive-icon-button" aria-label="Google Drive 設定" title="Google Drive 設定" (click)="configure.emit()"><app-icon name="settings" /></button>}</div>
+  </header>
+  @if (!browser.auth.connected()) {
+    <div class="drive-connect"><p>請到「設定 → Google Drive」連線檔案瀏覽。</p>
+      @if (!selectionMode()) {<button type="button" (click)="configure.emit()">開啟 Google Drive 設定</button>}
+    </div>
+  }
+  @if (browser.auth.connected() || browser.files().length) {
+    <nav class="drive-breadcrumbs" aria-label="目前 Drive 位置"><button type="button" class="drive-icon-button" aria-label="返回上層資料夾" [disabled]="browser.path().length < 2 || browser.busy()" (click)="browser.back()"><app-icon name="undo" /></button>@for (folder of browser.path(); track $index) {<button type="button" [disabled]="$last || browser.busy()" (click)="browser.back($index)">{{ folder.name }}</button>@if (!$last) {<span aria-hidden="true">›</span>}}</nav>
+    <div class="drive-search"><input type="search" maxlength="300" aria-label="搜尋目前資料夾" placeholder="搜尋目前資料夾的檔名…" [ngModel]="searchDraft()" [ngModelOptions]="{standalone: true}" (ngModelChange)="searchDraft.set($event)" (keydown.enter)="$event.preventDefault(); search()"><button type="button" [disabled]="browser.busy()" (click)="search()"><app-icon name="search" /><span class="visually-hidden">搜尋</span></button></div>
+    @if (!selectionMode()) {<p class="drive-drag-help">拖到任務中間加入連結；拖到卡片邊緣或空隙建立新任務。也可拖到月曆日期或週曆時段。</p>}
+    <div class="drive-files" role="list" aria-label="檔案與資料夾列表" [attr.aria-busy]="browser.busy()">
+      @for (file of browser.files(); track file.id) {
+        <article class="drive-row" role="listitem" [class.is-folder]="folder(file)" [class.is-selected]="selectionMode() && selected(file)" [attr.draggable]="!selectionMode() && canUse()" (dblclick)="openFolder($event, file)" (dragstart)="drag($event, file)" (dragend)="documents.end()">
+          <app-source-icon class="drive-file-icon" [file]="file" />
+          <div class="drive-file-info"><div class="drive-name-row">@if (folder(file)) {<button type="button" class="drive-file-name" [attr.draggable]="!selectionMode() && canUse()" [attr.aria-label]="'開啟資料夾 ' + file.name" [disabled]="browser.busy()" (click)="browser.open(file)">{{ file.name }}</button>} @else {<span class="drive-file-name">{{ file.name }}</span>}
+            <a class="drive-open-link" [href]="file.url" target="_blank" rel="noopener noreferrer" draggable="false" [attr.aria-label]="'在新分頁開啟 ' + file.name" title="在新分頁開啟" (dragstart)="$event.preventDefault(); $event.stopPropagation()"><app-icon name="external" /></a></div><small>{{ label(file) }}</small></div>
+          <button type="button" class="drive-icon-button" [attr.aria-label]="selectionMode() ? (selected(file) ? '取消選取 ' : '加入 ') + file.name : '從 ' + file.name + ' 建立任務'" [title]="selectionMode() ? selected(file) ? '取消選取' : '加入任務' : '建立任務'" [attr.aria-pressed]="selectionMode() ? selected(file) : null" [disabled]="!canUse()" (click)="choose(file)"><app-icon [name]="selectionMode() && selected(file) ? 'check' : 'plus'" /></button>
+          @let relatedTasks = related(file);
+          @if (relatedTasks.length) {<details class="drive-related"><summary>相關任務（{{ relatedTasks.length }}）</summary>@for (entry of relatedTasks; track entry.workspace.id + ':' + entry.task.id) {@if (selectionMode()) {<div class="drive-related-task">{{ entry.task.title }}</div>} @else {<button type="button" (click)="openTask.emit({workspaceId: entry.workspace.id, task: entry.task})">{{ entry.task.title }}<small>{{ entry.workspace.name }}</small></button>}}</details>}
+        </article>
+      } @empty {@if (!browser.busy()) {<p class="drive-empty">{{ browser.query() ? '此資料夾沒有符合名稱的項目。' : '此資料夾目前沒有可顯示的項目。' }}</p>}}
+      @if (browser.nextPageToken()) {<button type="button" class="drive-more" [disabled]="browser.busy()" (click)="browser.more()">載入更多檔案</button>}
+    </div>
+  }
+  @if (browser.busy()) {<p class="drive-status" role="status">正在讀取檔案列表…</p>}
+  @if (browser.error() || browser.connection.error()) {<p class="drive-error" role="alert">{{ browser.error() || browser.connection.error() }}</p>}
+  @if (browser.notice() || browser.connection.warning() || browser.auth.sessionWarning()) {<p class="drive-status" role="status">{{ browser.notice() || browser.connection.warning() || browser.auth.sessionWarning() }}</p>}
+</section>

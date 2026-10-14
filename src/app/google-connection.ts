@@ -20,19 +20,21 @@ export class GoogleConnection implements OnDestroy {
   readonly gmail = inject(GmailService);
   readonly drive = inject(DriveService);
   readonly combined = inject(GoogleCombinedAuth);
-  readonly configure = output<'calendar' | 'gmail' | 'drive'>();
+  readonly configure = output<'calendar' | 'gmail' | 'drive' | 'drive-files'>();
   readonly draft = linkedSignal(() => this.store.google().clientId || this.gmail.preferences().clientId);
   readonly copying = signal(false);
   readonly copyStatus = linkedSignal({source: this.draft, computation: (): 'idle' | 'success' | 'error' => 'idle'});
   readonly saving = signal(false);
   readonly connections = inject(GoogleConnections);
+  readonly files = this.connections.files;
   readonly preparing = this.connections.preparing;
   readonly connectingAll = this.connections.connectingAll;
   private destroyed = false;
   private startedConsent = false;
+  private startedFileConsent = false;
   readonly error = this.connections.error;
   readonly message = this.connections.message;
-  readonly busy = computed(() => this.saving() || this.connectingAll() || this.store.pendingWrites() > 0 || this.calendar.auth.authorizing() || this.writeAuth.authorizing() || this.gmail.auth.authorizing() || this.drive.busy());
+  readonly busy = computed(() => this.saving() || this.connections.busy());
   readonly unsaved = computed(() => this.draft().trim() !== this.store.google().clientId);
   async copyClientId(): Promise<void> {
     const clientId = this.draft().trim();
@@ -67,10 +69,16 @@ export class GoogleConnection implements OnDestroy {
     try {await this.connections.connectAll();}
     finally {this.startedConsent = false;}
   }
+  async connectFiles(): Promise<void> {
+    if (this.busy() || this.unsaved()) return;
+    this.startedFileConsent = true;
+    try {await this.files.connect();}
+    finally {this.startedFileConsent = false;}
+  }
   disconnectCalendar(): void {
     this.writeAuth.useSession({generation: this.store.generation(), clientId: this.store.google().clientId, accountId: this.store.google().accountId});
     this.writeAuth.disconnect('已解除 Google Calendar 寫入連線。');
     this.calendar.auth.disconnect('已解除月曆連線，保留離線快取。');
   }
-  ngOnDestroy(): void {this.destroyed = true; if (this.startedConsent) this.connections.cancelAll();}
+  ngOnDestroy(): void {this.destroyed = true; if (this.startedConsent) this.connections.cancelAll(); if (this.startedFileConsent) this.files.cancelAuthorization();}
 }
