@@ -76,11 +76,12 @@
 .manage-categories:hover { color: var(--text); }
 .manage-categories app-icon { width: 14px; height: 14px; }
 .sidebar-bottom { margin-top: auto; padding-top: var(--sp18); }
-.little-tip { background: var(--accent-soft); border: 1px solid var(--border); border-radius: 9px; padding: var(--sp17) var(--sp15) var(--sp13); position: relative; overflow: hidden; isolation: isolate; }
-.tip-art { width: 29px; height: 29px; display: grid; place-items: center; color: var(--text-muted); margin-bottom: var(--sp11); background: var(--accent-soft); border-radius: 8px; }
+.little-tip { background: var(--accent-soft); border: 1px solid var(--border); border-radius: 9px; padding: var(--sp12) var(--sp10); position: relative; overflow: clip; isolation: isolate; }
+.tip-heading { display: flex; align-items: center; gap: var(--sp6); }
+.tip-art { width: 20px; height: 20px; flex-shrink: 0; display: grid; place-items: center; color: var(--accent-text); }
 .tip-art app-icon { width: 16px; height: 16px; }
-.little-tip strong { font-size: var(--font-11); font-weight: 600; color: var(--text-muted); display: block; }
-.little-tip p { font-size: var(--font-10); color: var(--text-muted); line-height: 1.8; margin: var(--sp7) 0 var(--sp3); }
+.little-tip strong { min-width: 0; font-size: var(--font-10); font-weight: 600; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; text-wrap: balance; }
+.little-tip p { font-size: var(--font-9); color: var(--text-muted); line-height: 1.7; margin: var(--sp8) 0 var(--sp3); }
 .tip-line { position: absolute; width: 74px; height: 74px; border: 1px solid var(--border); border-radius: 50%; right: -28px; bottom: -32px; box-shadow: 0 0 0 11px var(--border); z-index: -1; pointer-events: none; }
 .profile { display: flex; align-items: center; gap: var(--sp10); padding: var(--sp21) var(--sp3); }
 .profile > span:last-child { min-width: 0; flex: 1; }
