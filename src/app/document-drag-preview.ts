@@ -1,4 +1,5 @@
 import type { DocumentSource } from './models.ts';
+import { sourceDragScroll } from './source-drag-scroll.ts';
 
 export function createDocumentDragPreview(event: DragEvent, source: DocumentSource, onEnd: () => void): () => void {
   const element = (event.currentTarget || event.target) as HTMLElement | null, document = element?.ownerDocument, window = document?.defaultView;
@@ -15,7 +16,8 @@ export function createDocumentDragPreview(event: DragEvent, source: DocumentSour
     preview.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`;
   };
   let finished = false;
-  const cleanup = () => {if (finished) return; finished = true; document.removeEventListener('dragover', move, true); document.removeEventListener('dragend', end, true); document.removeEventListener('drop', cleanup); window.removeEventListener('pagehide', end); preview.remove(); mask.remove();};
+  const stopScrolling = sourceDragScroll(document);
+  const cleanup = () => {if (finished) return; finished = true; stopScrolling(); document.removeEventListener('dragover', move, true); document.removeEventListener('dragend', end, true); document.removeEventListener('drop', cleanup); window.removeEventListener('pagehide', end); preview.remove(); mask.remove();};
   const end = () => {cleanup(); onEnd();};
   document.addEventListener('dragover', move, true); document.addEventListener('dragend', end, true); document.addEventListener('drop', cleanup); window.addEventListener('pagehide', end); move(event);
   try {event.dataTransfer?.setDragImage(mask, 0, 0);} catch { /* The visible preview remains usable. */ }

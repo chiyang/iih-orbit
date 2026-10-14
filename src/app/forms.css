@@ -34,6 +34,8 @@
 .form-field textarea { resize: vertical; min-height: 75px; }
 .form-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: var(--sp16); }
 .form-field select { height: auto; min-height: max(28px, calc(42px * var(--font-scale))); }
+.form-field select.task-color-select { background: var(--category-bg); color: var(--category-text); border-left: 4px solid var(--category-color); }
+.task-color-select option { background: var(--category-bg); color: var(--category-text); }
 .form-field:last-child { margin-bottom: 0; }
 .field-label { display: block; font-size: var(--font-11); color: var(--text-muted); margin-bottom: var(--sp9); }
 .field-label span { margin-left: var(--sp6); font-size: var(--font-9); color: var(--text-soft); font-weight: 400; }

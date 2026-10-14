@@ -13,6 +13,7 @@ p {margin: 0; color: var(--text-muted); font-size: var(--font-11); line-height: 
 .service-account div > span {color: var(--text-muted); font-size: var(--font-10);}
 .service-account strong {font-size: var(--font-11); font-weight: 600; overflow-wrap: anywhere;}
 .service-actions {display: flex; flex-wrap: wrap; gap: var(--sp8);}
+.service-expiry {margin-bottom: var(--sp12);}
 button {min-height: max(28px, calc(36px * var(--font-scale))); padding: var(--sp8) var(--sp12); border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font-size: var(--font-11); line-height: 1.5; cursor: pointer;}
 button:hover:not(:disabled) {background: var(--surface-hover);}
 button:disabled {opacity: .5; cursor: default;}

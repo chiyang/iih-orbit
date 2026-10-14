@@ -23,6 +23,9 @@
 .reminder-panel-loading {padding: var(--sp20); color: var(--text-muted); font-size: var(--font-12);}
 
 .panel-pane > app-document-panel {flex:1;min-height:0;}
+.right-panel.panel-overlay.source-panel-dragging {transform:translateX(calc(100% + 40px));opacity:0;pointer-events:none;box-shadow:none;}
+.source-drop-guide {position:fixed;left:12px;right:12px;bottom:12px;z-index:980;display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--accent-border);border-radius:9px;background:var(--surface);color:var(--text);font-size:var(--font-10);line-height:1.6;pointer-events:none;box-shadow:0 3px 12px rgb(var(--shadow-rgb) / .15);}
+.source-drop-guide button {pointer-events:auto;}
 .document-link-target {outline:2px solid var(--accent-text)!important;outline-offset:-2px;background:var(--accent-soft)!important;}
 .task-card {position:relative;}
 .document-card-feedback {position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border:2px solid var(--accent-text);border-radius:10px;background:color-mix(in srgb,var(--accent-soft) 92%,transparent);color:var(--accent-text);font-size:var(--font-12);font-weight:600;pointer-events:none;z-index:4;padding:12px;text-align:center;}

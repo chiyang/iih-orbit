@@ -237,6 +237,32 @@ test('未套用標籤不保存，重開側欄與切換 Gmail 帳號回到已套�
     assert.deepEqual(reopened.labelDraft(), ['INBOX']); assert.equal(reopened.labelsChanged(), false);
   } finally {panel?.ngOnDestroy(); reopened?.ngOnDestroy(); f.close();}
 });
+test('保存的多標籤在背景更新、授權續期與重新載入後沿用，續期不清除未儲存草稿', async () => {
+  const f = fixture(), pages = []; let panel, restored;
+  const labels = [{id: 'INBOX', name: 'INBOX', type: 'system'}, {id: 'Work', name: '工作', type: 'user'}, {id: 'Home', name: '家務', type: 'user'}];
+  try {
+    f.auth.api = async (path, params) => {
+      if (path === 'labels') return {labels};
+      if (path === 'messages') {pages.push(params.labelIds); return {messages: [{id: params.labelIds || 'all'}]};}
+      const id = path.startsWith('threads/') ? path.slice('threads/thread-'.length) : path.split('/')[1];
+      return path.startsWith('threads/') ? {id: 'thread-' + id, messages: [raw(id)]} : raw(id);
+    };
+    panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(false); f.flush();
+    f.gmail.labels.set(labels); panel.labelDraft.set(['Work', 'Home']); panel.applyLabels(); f.flush();
+    assert.deepEqual(JSON.parse(f.values.get('iih-orbit-gmail-preferences-v1')).selected, ['Work', 'Home']);
+    panel.toggleLabel('INBOX'); f.auth.connectionVersion.update(version => version + 1); f.flush();
+    assert.deepEqual(panel.labelDraft(), ['Work', 'Home', 'INBOX']); assert.equal(panel.labelsChanged(), true);
+    await f.gmail.load(true);
+    assert.deepEqual(pages, ['Work', 'Home']); assert.deepEqual(f.gmail.selected(), ['Work', 'Home']);
+    assert.deepEqual(panel.labelDraft(), ['Work', 'Home', 'INBOX']);
+    restored = runInInjectionContext(f.child, () => new GmailService()); f.flush();
+    assert.deepEqual(restored.selected(), ['Work', 'Home']);
+    await restored.load(true); assert.deepEqual(pages.slice(-2), ['Work', 'Home']);
+    restored.applyLabels([]); f.flush();
+    assert.deepEqual(JSON.parse(f.values.get('iih-orbit-gmail-preferences-v1')).selected, []);
+    await restored.load(true); assert.equal(pages.at(-1), undefined);
+  } finally {panel?.ngOnDestroy(); restored?.ngOnDestroy(); f.close();}
+});
 test('舊 Gmail 標籤回應到達後不能啟動過期搜尋；最新讀取失敗仍可重新更新', async () => {
   const f = fixture(); let release, labelCalls = 0, fail = false; const queries = [];
   try {

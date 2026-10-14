@@ -32,6 +32,7 @@ export class GoogleAuth implements OnDestroy {
   readonly account = signal<GoogleAccount | null>(null);
   readonly message = signal('尚未連線 Google');
   readonly sessionWarning = signal('');
+  readonly validUntil = signal(0);
   private oauth?: OAuthApi;
   private preparation?: Promise<void>;
   private token = '';
@@ -49,7 +50,7 @@ export class GoogleAuth implements OnDestroy {
   private approvedScopes = new Set<string>();
   private readonly bridge: GoogleSessionBridge;
   private readonly wake = () => {this.bridge.verify(); this.refreshHistory();};
-  private readonly storageChanged = (event: StorageEvent) => { if (!event.key || event.key.startsWith(this.sessionOptions.controlPrefix) || event.key === this.historyKey()) this.wake(); };
+  private readonly storageChanged = (event: StorageEvent) => { if (!event.key || event.key.startsWith(this.sessionOptions.controlPrefix) || event.key === this.sessionOptions.storageKey || event.key === this.historyKey()) this.wake(); };
 
   constructor() {
     const window = this.document.defaultView as (Window & {BroadcastChannel?: typeof BroadcastChannel}) | null;
@@ -113,6 +114,7 @@ export class GoogleAuth implements OnDestroy {
     for (const controller of this.controllers) controller.abort();
     this.controllers.clear();
     this.session = session; this.token = session.token; this.expiresAt = session.expiresAt; this.authorizationNonce = '';
+    this.validUntil.set(session.expiresAt);
     this.account.set(session.account); this.connected.set(true); this.authorizing.set(false); this.message.set(message);
     this.rememberHistory(session);
     this.expiryTimer = setTimeout(() => { if (this.session?.id === session.id) this.disconnect('Google 授權已到期，請重新連線。', 'expired'); }, Math.max(0, session.expiresAt - Date.now()));
@@ -283,6 +285,7 @@ export class GoogleAuth implements OnDestroy {
     this.epoch++; this.token = ''; this.expiresAt = 0;
     this.approvedScopes.clear();
     this.session = undefined; this.authorizationNonce = '';
+    this.validUntil.set(0);
     clearTimeout(this.expiryTimer);
     for (const controller of this.controllers) controller.abort();
     this.controllers.clear();

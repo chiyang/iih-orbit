@@ -99,7 +99,10 @@
 .status-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-strong); }
 .save-status.warning { color: var(--warning-text); }
 .save-status.warning .status-dot { background: var(--warning-text); }
-.mobile-menu { display: none; }
+.mobile-menu { display: inline-flex; }
+.breadcrumb .mobile-menu app-icon { width: 17px; height: 17px; }
+.sidebar-collapsed:not(.compact-navigation) .sidebar { display: none; }
+.app-shell.sidebar-collapsed ~ .toast { left: 50%; }
 .project-header { padding: var(--sp39) var(--sp39) var(--sp29); background: var(--section-bg); }
 .project-heading-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp20); }
 .project-heading { display: flex; align-items: center; gap: var(--sp15); min-width: 0; }

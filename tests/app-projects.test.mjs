@@ -48,6 +48,43 @@ function application(fresh = false) {
   return {app, settings, store, values, flush, reopen, guide: () => runInInjectionContext(injector, () => new StartupGuide()), close: () => { clearTimeout(app.toastTimer); injector.destroy(); }};
 }
 
+test('桌面可收合及開啟左側欄，窄畫面沿用遮罩導覽並保留桌面的收合狀態', () => {
+  const f = application(), app = f.app;
+  try {
+    assert.equal(app.sidebarVisible(), true);
+    app.toggleSidebar(); assert.equal(app.sidebarVisible(), false); assert.equal(app.sidebarOpen(), false);
+    app.toggleSidebar(); assert.equal(app.sidebarVisible(), true);
+    app.toggleSidebar(); app.mobileViewport.set(true);
+    assert.equal(app.sidebarVisible(), false);
+    app.toggleSidebar(); assert.equal(app.sidebarVisible(), true); assert.equal(app.sidebarOpen(), true);
+    app.escape(); assert.equal(app.sidebarVisible(), false); assert.equal(app.sidebarCollapsed(), true);
+    app.toggleSidebar(); globalThis.window = {innerWidth: 1440}; app.resize();
+    assert.equal(app.sidebarOpen(), false); assert.equal(app.sidebarVisible(), false);
+    app.toggleSidebar(); assert.equal(app.sidebarVisible(), true);
+    app.tasksOpen.set(true); app.narrowPanelViewport.set(true);
+    assert.equal(app.sidebarVisible(), false);
+    app.toggleSidebar(); assert.equal(app.sidebarVisible(), true);
+    app.escape(); assert.equal(app.tasksOpen(), true); assert.equal(app.sidebarVisible(), false);
+    app.tasksOpen.set(false); assert.equal(app.sidebarVisible(), true);
+  } finally {delete globalThis.window; f.close();}
+});
+
+test('手機來源拖曳先隱藏側欄遮罩並保留來源狀態，結束才真正關閉；桌面與非來源拖曳不受影響', () => {
+  const f = application(), app = f.app;
+  const drag = (types = [DOCUMENT_DRAG_TYPE]) => ({defaultPrevented: false, dataTransfer: {types}, target: {closest: () => ({})}});
+  try {
+    app.panelOverlay.set(true); app.mobileViewport.set(true); app.filesOpen.set(true);
+    assert.equal(app.panelBlocking(), true);
+    app.sourceDragStarted(drag(['text/plain'])); assert.equal(app.sourcePanelDragging(), false);
+    app.sourceDragStarted(drag());
+    assert.equal(app.sourcePanelDragging(), true); assert.equal(app.panelBlocking(), false); assert.equal(app.filesOpen(), true);
+    app.sourceDragFinished(); assert.equal(app.sourcePanelDragging(), false); assert.equal(app.panelOpen(), false);
+    app.filesOpen.set(true); app.panelOverlay.set(false); app.sourceDragStarted(drag());
+    assert.equal(app.sourcePanelDragging(), false); app.sourceDragFinished(); assert.equal(app.filesOpen(), true);
+    app.panelOverlay.set(true); app.sourceDragStarted({...drag(), defaultPrevented: true}); assert.equal(app.panelBlocking(), true);
+  } finally {f.close();}
+});
+
 test('垃圾桶排除任務視圖、專案進度與側欄來源，還原及復原接回任務，精簡模式保留篩選', async () => {
   const f = application();
   try {

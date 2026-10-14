@@ -80,6 +80,9 @@ body:has(.modal-backdrop), body:has(.sidebar.is-open) { overflow: hidden; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+.source-touch-ready { -webkit-touch-callout: none; }
+.source-touch-ready a, .source-touch-ready button:not([data-source-drag-handle]) { -webkit-touch-callout: default; }
+.source-touch-active { user-select: none; -webkit-user-select: none; }
 button { color: inherit; }
 button:disabled { cursor: not-allowed; }
 button:focus-visible, a:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 3px; }

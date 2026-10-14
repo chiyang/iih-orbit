@@ -125,6 +125,27 @@ async function authorizeController(fixture, token = 'session-token') {
   await connection;
 }
 
+test('跨分頁續期漏接通知時，下一次 API 讀取接續新憑證與真實期限，舊到期計時不清除新連線', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: 100000});
+  const first = authController(), originalFetch = globalThis.fetch; let second, expected = 'first-token';
+  globalThis.fetch = async (url, options) => {
+    if (String(url).includes('userinfo')) return Response.json({sub: 'account', email: 'a@example.com'});
+    assert.equal(options.headers.Authorization, 'Bearer ' + expected); return Response.json({items: []});
+  };
+  try {
+    await authorizeController(first, 'first-token'); const originalExpiry = first.auth.validUntil();
+    assert.equal(originalExpiry, Date.now() + (3600 - 30) * 1000);
+    t.mock.timers.tick(120000); await first.auth.request('users/me/calendarList', {}); assert.equal(first.auth.connected(), true);
+    second = authController(tabStorage(), first.control); await authorizeController(second, 'latest-token'); expected = 'latest-token';
+    await first.auth.request('users/me/calendarList', {});
+    assert.equal(first.auth.validUntil(), second.auth.validUntil()); assert.ok(first.auth.validUntil() > originalExpiry);
+    t.mock.timers.tick(originalExpiry - Date.now());
+    assert.equal(first.auth.connected(), true); await first.auth.request('users/me/calendarList', {});
+    const remaining = first.auth.validUntil() - Date.now(); t.mock.timers.tick(remaining);
+    assert.equal(first.auth.connected(), false); assert.equal(first.auth.validUntil(), 0);
+  } finally {second?.close(); first.close(); globalThis.fetch = originalFetch;}
+});
+
 const serviceSessions = [
   {name: 'Calendar 讀取', Type: GoogleAuth, key: GOOGLE_SESSION_KEY, read: auth => auth.request('users/me/calendarList', {})},
   {name: 'Calendar 寫入', Type: CalendarWriteAuth, key: 'iih-orbit-calendar-write-session-v1', read: auth => auth.api('users/me/calendarList')},
@@ -143,6 +164,7 @@ for (const {name, Type, key, read} of serviceSessions) {
       globalThis.fetch = async () => {calls++; throw new TypeError('offline');};
       reopened = authController(tabStorage(), first.control, Type);
       assert.equal(reopened.auth.connected(), true); assert.equal(reopened.auth.expiresAt, expiresAt);
+      assert.equal(reopened.auth.validUntil(), expiresAt);
       assert.equal(reopened.auth.ready(), false); assert.equal(reopened.authorizationRequests(), 0); assert.equal(calls, 1);
       await assert.rejects(read(reopened.auth), /中斷/);
       assert.equal(reopened.auth.connected(), true); assert.equal(first.control.getItem(key), saved);
@@ -151,6 +173,7 @@ for (const {name, Type, key, read} of serviceSessions) {
       assert.equal(reopened.auth.connected(), true); assert.equal(first.control.getItem(key), saved);
       assert.equal(reopened.authorizationRequests(), 0); assert.equal(reopened.sessions.getItem(key), null);
       reopened.auth.disconnect(); reopened.close();
+      assert.equal(reopened.auth.validUntil(), 0);
       reopened = authController(tabStorage(), first.control, Type);
       assert.equal(reopened.auth.connected(), false); assert.equal(first.control.getItem(key), null);
     } finally {reopened?.close(); first.close(); globalThis.fetch = originalFetch;}

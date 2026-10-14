@@ -314,12 +314,10 @@ export class Calendar {
     if (this.documentEvent(event)) {
       event.preventDefault(); event.stopPropagation(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
       this.documentBlocked.set(false); this.documentLinkTaskId.set(''); this.dropPosition.set(position); this.pointer = {x: event.clientX, y: event.clientY};
-      if (!this.dragScrollTimer) this.dragScrollTimer = setInterval(() => this.scrollWhileDragging(), 60);
       return;
     }
     if (this.mailDragging() && event.dataTransfer?.types.includes(GMAIL_MIME)) {
       event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; this.documentBlocked.set(false); this.documentLinkTaskId.set(''); this.dropPosition.set(position); this.pointer = {x: event.clientX, y: event.clientY};
-      if (!this.dragScrollTimer) this.dragScrollTimer = setInterval(() => this.scrollWhileDragging(), 60);
       return;
     }
     if (!this.drag) return;

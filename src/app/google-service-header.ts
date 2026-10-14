@@ -1,7 +1,8 @@
 import { Component, input, output } from '@angular/core';
 import type { GoogleAuth } from './google-auth';
+import { DatePipe } from '@angular/common';
 
-@Component({selector: 'app-google-service-header', templateUrl: './google-service-header.html', styleUrl: './google-service-header.css'})
+@Component({selector: 'app-google-service-header', imports: [DatePipe], templateUrl: './google-service-header.html', styleUrl: './google-service-header.css'})
 export class GoogleServiceHeader {
   readonly title = input.required<string>();
   readonly description = input.required<string>();

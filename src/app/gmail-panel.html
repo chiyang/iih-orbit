@@ -7,7 +7,7 @@
   </div>
   @if (gmail.preferences().accountId) {
     <details #labelSelector class="mail-label-selector" (keydown)="labelMenuKeydown($event)">
-      <summary><app-icon name="tag" /><span><strong>{{ draftLabelNames().join('、') || '所有郵件' }}</strong>@if (labelsChanged()) {<small role="status">未套用</small>}</span><app-icon name="down" /></summary>
+      <summary><app-icon name="tag" /><span><strong>{{ draftLabelNames().join('、') || '所有郵件' }}</strong><small role="status">{{ labelsChanged() ? '尚未儲存' : '已套用・更新時沿用' }}</small></span><app-icon name="down" /></summary>
       <div class="mail-label-options">
         <p>顯示符合任一已選標籤的郵件；所有郵件不含垃圾郵件與垃圾桶，可另選這兩個標籤。</p>
         <div class="mail-actions"><button type="button" (click)="labelDraft.set(['INBOX'])">只看收件匣</button><button type="button" (click)="labelDraft.set([])">所有郵件</button></div>
@@ -17,7 +17,7 @@
         <div class="mail-labels" role="group" aria-label="Gmail 系統標籤，可複選">@for (label of systemLabels(); track label.id) {<button type="button" [class.selected]="labelDraft().includes(label.id)" [attr.aria-pressed]="labelDraft().includes(label.id)" (click)="toggleLabel(label.id)">{{ labelName(label) }}</button>}</div>
       </div>
     </details>
-    @if (labelsChanged()) {<div class="mail-filter-actions" role="group" aria-label="套用標籤篩選"><button type="button" (click)="resetLabels()">取消變更</button><button type="button" class="mail-apply-filter" (click)="applyLabels(labelSelector)">套用篩選</button></div>}
+    @if (labelsChanged()) {<div class="mail-filter-actions" role="group" aria-label="儲存標籤篩選"><button type="button" (click)="resetLabels()">取消變更</button><button type="button" class="mail-apply-filter" (click)="applyLabels(labelSelector)">儲存並套用</button></div>}
     <form class="mail-search" (ngSubmit)="gmail.search(searchDraft())"><label for="mail-search" class="visually-hidden">搜尋 Gmail 郵件</label><input id="mail-search" name="mailSearch" [(ngModel)]="searchDraft" maxlength="500" type="search" placeholder="搜尋郵件、寄件人…"><button type="submit" aria-label="搜尋郵件"><app-icon name="search" /></button>@if (gmail.query()) {<button type="button" (click)="gmail.search('')" aria-label="清除搜尋"><app-icon name="close" /></button>}</form>
   }
   @if (gmail.error()) {<p class="mail-error" role="alert">{{ gmail.error() }}<button type="button" [disabled]="gmail.busy() || !gmail.auth.connected() || !gmail.online()" (click)="gmail.load(true)">重試</button></p>}
@@ -43,10 +43,10 @@
   @if (gmail.hasMore()) {<button class="mail-more" [disabled]="gmail.busy() || !gmail.auth.connected() || !gmail.online()" (click)="gmail.load(false, true)">{{ gmail.busy() ? '讀取中…' : '載入更多郵件' }}</button>}
 </div>
 <ng-template #mailCard let-mail let-unread="unread" let-count="count">
-  <article class="mail-card" [class.unread]="unread" [attr.draggable]="!mailTasks.busy()" (dragstart)="mailTasks.start($event, mail)" (dragend)="mailTasks.end()">
+  <article class="mail-card" [class.unread]="unread" [appSourceTouchDrag]="!mailTasks.busy()" [attr.draggable]="!mailTasks.busy()" (dragstart)="mailTasks.start($event, mail)" (dragend)="mailTasks.end()">
     <div class="mail-sender"><strong>{{ mail.senderName || '寄件人' }}</strong><div class="mail-card-meta"><time>{{ date(mail) }}</time><span class="mail-read-marker" [class.is-unread]="unread" role="img" [attr.aria-label]="unread ? '有未讀郵件' : '已讀郵件'" [attr.title]="unread ? '有未讀郵件' : '已讀郵件'"></span></div></div>
     <p class="sender-email">{{ mail.senderEmail || mail.from || '未提供寄件人地址' }}</p>
-    <button type="button" class="mail-preview-button" (click)="previewMail.emit(mail)" [attr.aria-label]="'預覽郵件：' + mail.subject"><span class="mail-subject">{{ mail.subject }}@if (newThreadIds().has(mail.threadId)) {<small class="new-mail-tag">新郵件</small>}</span><span class="mail-snippet">{{ mail.snippet || '（沒有預覽文字）' }}</span></button>
+    <button type="button" class="mail-preview-button" data-source-drag-handle (click)="previewMail.emit(mail)" [attr.aria-label]="'預覽郵件：' + mail.subject"><span class="mail-subject">{{ mail.subject }}@if (newThreadIds().has(mail.threadId)) {<small class="new-mail-tag">新郵件</small>}</span><span class="mail-snippet">{{ mail.snippet || '（沒有預覽文字）' }}</span></button>
     <div class="mail-card-details"><div class="mail-tags">@for (label of labels(mail); track label.id) {<span>{{ labelName(label) }}</span>}</div>@if (count > 1) {<button type="button" class="mail-thread-count" (click)="toggleThread(mail)" [attr.aria-expanded]="expanded().has(mail.threadId)" [attr.aria-controls]="'mail-replies-' + mail.threadId" [attr.aria-label]="(expanded().has(mail.threadId) ? '收合' : '展開') + '討論串，共 ' + count + ' 封郵件'"><app-icon name="mail" />{{ count }} 封<app-icon name="down" [class.expanded]="expanded().has(mail.threadId)" /></button>}</div>
     <div class="mail-card-actions"><a [href]="link(mail)" target="_blank" rel="noopener noreferrer" draggable="false">在 Gmail 開啟 ↗</a><button [disabled]="mailTasks.busy()" (click)="createTask.emit(mail)"><app-icon name="plus" />建立任務</button></div>
   </article>

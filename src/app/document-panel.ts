@@ -7,9 +7,10 @@ import { DriveBrowser } from './drive-browser';
 import { driveFileLabel, isDriveFolder, sourceFromDriveEntry, type DriveBrowserEntry } from './drive-browser-data';
 import { DocumentTasks } from './document-tasks';
 import {SourceIcon} from './source-icon';
+import { SourceTouchDrag } from './source-touch-drag';
 
 @Component({
-  selector: 'app-document-panel', imports: [FormsModule, Icon, SourceIcon], templateUrl: './document-panel.html', styleUrl: './document-panel.css'
+  selector: 'app-document-panel', imports: [FormsModule, Icon, SourceIcon, SourceTouchDrag], templateUrl: './document-panel.html', styleUrl: './document-panel.css'
 })
 export class DocumentPanel {
   readonly store = inject(BoardStore);

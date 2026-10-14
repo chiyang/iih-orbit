@@ -33,7 +33,7 @@ import type { WorkspaceTemplateId } from './workspace-templates';
 import { CalendarPublish } from './calendar-publish';
 import { GmailPanel } from './gmail-panel';
 import { MailTasks } from './mail-tasks';
-import type { MailPreview } from './gmail-data';
+import { GMAIL_MIME, type MailPreview } from './gmail-data';
 import type { CalendarPosition } from './calendar-move';
 import { MailPreview as MailPreviewDialog } from './mail-preview';
 import { MarkdownEditor } from './markdown-editor';
@@ -58,6 +58,7 @@ import type { DocumentSource } from './models';
 import { DocumentPanel } from './document-panel';
 import { DocumentTasks } from './document-tasks';
 import { documentCardPosition, type DocumentDropPosition } from './drive-browser-data';
+import { DOCUMENT_DRAG_TYPE } from './document-data';
 
 type Modal = 'intro' | 'task' | 'task-conflict' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'empty-trash' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | 'logout' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
@@ -83,6 +84,8 @@ export class App {
   readonly mailVisit = signal(0);
   readonly panelOpen = computed(() => this.mailOpen() || this.remindersOpen() || this.tasksOpen() || this.filesOpen());
   readonly panelOverlay = signal(window.innerWidth <= 700);
+  readonly sourcePanelDragging = signal(false);
+  readonly panelBlocking = computed(() => this.panelOverlay() && this.panelOpen() && !this.sourcePanelDragging());
   readonly narrowPanelViewport = signal(window.innerWidth <= 1100);
   readonly compactNavigation = computed(() => this.mobileViewport() || this.panelOpen() && this.narrowPanelViewport());
   readonly panelWidth = signal(this.readPanelWidth());
@@ -91,6 +94,22 @@ export class App {
   openMail(): void { if (!this.modal()) { this.sidebarOpen.set(false); this.filesOpen.set(false); this.tasksOpen.set(false); this.remindersOpen.set(false); this.mailOpen.set(true); this.panelTab.set('gmail'); this.mailVisit.update(visit => visit + 1); } }
   toggleMail(): void { if (this.mailOpen()) this.closePanel(); else this.openMail(); }
   closePanel(): void { this.filesOpen.set(false); this.documentTasks.end(); this.mailOpen.set(false); this.remindersOpen.set(false); this.tasksOpen.set(false); }
+  @HostListener('document:dragstart', ['$event'])
+  sourceDragStarted(event: DragEvent): void {
+    const types = event.dataTransfer?.types ?? [];
+    if (!event.defaultPrevented && this.panelOverlay() && this.panelOpen() && (types.includes(GMAIL_MIME) || types.includes(DOCUMENT_DRAG_TYPE))
+      && (event.target as Element | null)?.closest?.('#right-panel')) this.sourcePanelDragging.set(true);
+  }
+  @HostListener('document:dragend')
+  @HostListener('window:pagehide')
+  sourceDragFinished(): void {
+    if (!this.sourcePanelDragging()) return;
+    this.sourcePanelDragging.set(false); this.closePanel();
+  }
+  cancelSourceDrag(): void {
+    if (this.mailOpen()) this.mailTasks.end();
+    this.documentTasks.end(); this.sourceDragFinished();
+  }
   openTaskPanel(): void {
     if (this.modal()) return;
     this.sidebarOpen.set(false); this.filesOpen.set(false); this.mailOpen.set(false); this.remindersOpen.set(false); this.tasksOpen.set(true); this.panelTab.set('tasks');
@@ -165,14 +184,18 @@ export class App {
     this.documentOver(event);
     const position = this.documentTasks.position();
     if (!position || this.modal() || this.trashOpen()) return;
+    const mobileDrag = this.sourcePanelDragging();
     const taskId = await this.documentTasks.drop(event, this.emptyTask(position.status ?? this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id), position);
     this.documentCreated(taskId);
+    if (mobileDrag && this.documentTasks.notice()) this.notify(this.documentTasks.notice());
   }
   async dropCalendarDocument(entry: {event: DragEvent; position?: CalendarPosition; taskId?: string}): Promise<void> {
     if (this.modal() || this.trashOpen()) return;
     const position: DocumentDropPosition = entry.taskId ? {kind: 'link', taskId: entry.taskId} : {kind: 'create'};
+    const mobileDrag = this.sourcePanelDragging();
     const taskId = await this.documentTasks.drop(entry.event, this.emptyTask(this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id), position, entry.position);
     this.documentCreated(taskId);
+    if (mobileDrag && this.documentTasks.notice()) this.notify(this.documentTasks.notice());
   }
   private documentCreated(taskId?: string): void {
     if (!taskId) return;
@@ -238,14 +261,17 @@ export class App {
   }
   async dropMail(event: DragEvent, status?: string, position?: CalendarPosition, beforeId?: string, taskId?: string): Promise<void> {
     if (this.modal()) return;
+    const mobileDrag = this.sourcePanelDragging();
     const initialStatus = status ?? this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id, base = this.emptyTask(initialStatus);
     await this.mailTasks.drop(event, base, position ? {date: position.day, ...(position.kind === 'time' ? {time: minuteLabel(position.minute ?? 0)} : {})} : {}, beforeId, taskId);
     const context = this.mailTasks.undoContext();
-    if (context?.original?.id !== base.id || context.generation !== this.store.generation() || context.workspaceId !== this.store.currentWorkspace().id || !this.hasFilters()) return;
-    const reminder = this.visibleTasks().some(task => task.id === base.id)
-      ? '目前有篩選條件，原篩選條件已保留。'
-      : '此任務不符合目前篩選，暫時不會顯示。原篩選條件已保留。';
-    this.mailTasks.notice.update(message => `${message} ${reminder}`);
+    if (context?.original?.id === base.id && context.generation === this.store.generation() && context.workspaceId === this.store.currentWorkspace().id && this.hasFilters()) {
+      const reminder = this.visibleTasks().some(task => task.id === base.id)
+        ? '目前有篩選條件，原篩選條件已保留。'
+        : '此任務不符合目前篩選，暫時不會顯示。原篩選條件已保留。';
+      this.mailTasks.notice.update(message => `${message} ${reminder}`);
+    }
+    if (mobileDrag && this.mailTasks.notice()) this.notify(this.mailTasks.notice());
   }
   openMailTask(mail: MailPreview): void {
     if (this.modal()) return;
@@ -344,6 +370,8 @@ export class App {
     {key: 'dueDate', label: '截止日期'}
   ];
   readonly sidebarOpen = signal(false);
+  readonly sidebarCollapsed = signal(false);
+  readonly sidebarVisible = computed(() => this.compactNavigation() ? this.sidebarOpen() : !this.sidebarCollapsed());
   readonly mobileViewport = signal(window.innerWidth <= 700);
   readonly modal = signal<Modal>(null);
   readonly logoutSaving = signal(false);
@@ -562,6 +590,7 @@ export class App {
 
   @HostListener('document:keydown.escape')
   escape(): void {
+    if (this.sourcePanelDragging()) {this.cancelSourceDrag(); return;}
     if (this.documentLinksEditor()?.pickerOpen()) {this.documentLinksEditor()?.cancelPicker(); return;}
     if (this.projectToDelete()) this.projectToDelete.set(null);
     else if (this.statusToDelete()) this.statusToDelete.set(null);
@@ -579,6 +608,13 @@ export class App {
     this.mobileViewport.set(window.innerWidth <= 700);
     this.panelOverlay.set(window.innerWidth <= 700);
     this.narrowPanelViewport.set(window.innerWidth <= 1100);
+    if (!this.compactNavigation()) this.sidebarOpen.set(false);
+  }
+
+  toggleSidebar(): void {
+    if (this.modal()) return;
+    if (this.compactNavigation()) this.sidebarOpen.update(open => !open);
+    else {this.sidebarOpen.set(false); this.sidebarCollapsed.update(collapsed => !collapsed);}
   }
 
   category(id: string): Category {

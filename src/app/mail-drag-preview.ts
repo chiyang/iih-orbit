@@ -1,4 +1,5 @@
 import type { MailPreview } from './gmail-data';
+import { sourceDragScroll } from './source-drag-scroll.ts';
 
 // Render the card in the page; native drag-image snapshots vary between browsers.
 export function createMailDragPreview(event: DragEvent, mail: MailPreview, onEnd?: () => void): () => void {
@@ -32,8 +33,10 @@ export function createMailDragPreview(event: DragEvent, mail: MailPreview, onEnd
     if (!event.relatedTarget && (event.clientX <= 0 || event.clientY <= 0 || event.clientX >= window.innerWidth || event.clientY >= window.innerHeight)) preview.style.visibility = 'hidden';
   };
   let cleaned = false;
+  const stopScrolling = sourceDragScroll(document);
   const cleanup = () => {
     if (cleaned) return; cleaned = true;
+    stopScrolling();
     document.removeEventListener('dragover', move, true); document.removeEventListener('dragleave', leave, true);
     document.removeEventListener('drop', cleanup); document.removeEventListener('dragend', finish, true); window.removeEventListener('pagehide', finish);
     preview.remove(); mask.remove();

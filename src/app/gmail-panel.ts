@@ -7,9 +7,10 @@ import { MailTasks } from './mail-tasks';
 import { gmailMessageLink, mailLabelName, MailLabel, MailPreview } from './gmail-data';
 import { Icon } from './icon';
 import { mapMailRequests } from './gmail-api';
+import { SourceTouchDrag } from './source-touch-drag';
 
 interface ThreadView {messages: MailPreview[]; busy: boolean; error: string}
-@Component({selector: 'app-gmail-panel', imports: [FormsModule, Icon, NgTemplateOutlet], templateUrl: './gmail-panel.html', styleUrl: './gmail-panel.css'})
+@Component({selector: 'app-gmail-panel', imports: [FormsModule, Icon, NgTemplateOutlet, SourceTouchDrag], templateUrl: './gmail-panel.html', styleUrl: './gmail-panel.css'})
 export class GmailPanel {
   readonly gmail = inject(GmailService);
   readonly notifications = inject(GmailNotifications);
@@ -21,7 +22,10 @@ export class GmailPanel {
   readonly previewMail = output<MailPreview>();
   readonly configure = output<void>();
   readonly searchDraft = linkedSignal(() => this.gmail.query());
-  readonly labelDraft = linkedSignal(() => { this.gmail.previewIdentity(); return [...this.gmail.selected()]; });
+  readonly labelDraft = linkedSignal(() => {
+    this.gmail.store.generation(); this.gmail.clientId(); this.gmail.preferences().accountId;
+    return [...this.gmail.selected()];
+  });
   readonly labelsChanged = computed(() => JSON.stringify([...this.labelDraft()].sort()) !== JSON.stringify([...this.gmail.selected()].sort()));
   readonly draftLabelNames = computed(() => this.labelDraft().map(id => {const label = this.gmail.labelIndex().get(id); return label ? mailLabelName(label) : id === 'INBOX' ? '收件匣' : '暫不可用的標籤';}));
   readonly userLabels = computed(() => this.gmail.labels().filter(label => label.type === 'user'));

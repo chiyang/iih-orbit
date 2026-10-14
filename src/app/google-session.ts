@@ -132,8 +132,21 @@ export class GoogleSessionBridge {
   }
   private controlKey(context: GoogleSessionContext): string { return this.options.controlPrefix + JSON.stringify([context.generation, context.clientId]); }
 
+  private restoreShared(): boolean {
+    if (!this.options.sharedStorage || this.callbacks.busy() || !this.context?.accountId) return false;
+    try {
+      const saved = this.valid(JSON.parse(this.storage?.getItem(this.options.storageKey) ?? 'null'));
+      if (!saved) return false;
+      this.requestId = '';
+      if (this.callbacks.current()?.id !== saved.id) this.callbacks.receive(saved, true);
+      return true;
+    } catch {this.warn(); return false;}
+  }
+
   verify(request = true): void {
     if (this.closed) return;
+    // A frozen tab or unavailable BroadcastChannel must still adopt a valid renewed credential.
+    if (this.restoreShared()) return;
     const current = this.callbacks.current(), pending = this.callbacks.pendingNonce();
     if (current && current.nonce && !this.valid(current)) {
       this.forget(); this.requestId = '';
@@ -153,6 +166,8 @@ export class GoogleSessionBridge {
     const message = value as {type?: string; context?: GoogleSessionContext; nonce?: string; message?: string; sender?: string; requestId?: string; target?: string; session?: unknown};
     if (!message.context || !sameScope(this.context, message.context)) return;
     if (message.type === 'clear' && message.nonce && message.nonce === this.marker()) {
+      // A renewal's clear message may arrive after its replacement credential was saved.
+      if (this.restoreShared()) return;
       this.forget(); this.requestId = ''; this.callbacks.clear(message.message || 'Google 已在其他分頁解除連線。');
     } else if (sameContext(this.context, message.context)) {
       if (message.type === 'request' && message.sender !== this.tabId && typeof message.sender === 'string' && typeof message.requestId === 'string') {
@@ -161,7 +176,7 @@ export class GoogleSessionBridge {
       } else if (message.type === 'session' && message.target === this.tabId && this.requestId && message.requestId === this.requestId && !this.callbacks.busy()) {
         const session = this.valid(message.session);
         if (session) { this.requestId = ''; this.callbacks.receive(session, true); this.remember(session, false); }
-      } else if (message.type === 'available' && !this.valid(this.callbacks.current())) this.requestPeers();
+      } else if (message.type === 'available' && !this.valid(this.callbacks.current()) && !this.restoreShared()) this.requestPeers();
     }
   }
   private send(message: unknown): void { try { this.channel?.postMessage(message); } catch { /* Reload restoration still works without tab messaging. */ } }

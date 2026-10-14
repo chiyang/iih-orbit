@@ -163,3 +163,20 @@ test('共用瀏覽器憑證的舊分頁取消或解除，不得刪除新版授�
   second.disconnect(); assert.equal(local.getItem(GOOGLE_SESSION_KEY), null);
   first.bridge.close(); second.bridge.close(); reopened.bridge.close();
 });
+
+test('沒有分頁訊息通道或舊清除通知晚到時，驗證仍接續共用儲存的新憑證，真正解除仍生效', () => {
+  const local = storage(), options = {scope: CALENDAR_SCOPE, storageKey: GOOGLE_SESSION_KEY, controlPrefix: 'shared-control:', sharedStorage: true};
+  const first = tab(local, undefined, local, options), second = tab(local, undefined, local, options);
+  try {
+    first.bridge.activate(context); const original = first.login(); second.bridge.activate(context); const latest = second.login();
+    assert.notEqual(original.nonce, latest.nonce);
+    first.bridge.verify(false);
+    assert.equal(first.current()?.id, latest.id); assert.equal(first.current()?.expiresAt, latest.expiresAt);
+    first.bridge.verify(); assert.equal(first.current()?.id, latest.id);
+    const receiving = tab(local, messaging(), local, options); receiving.bridge.activate(context);
+    receiving.channel.onmessage({data: {type: 'clear', context, nonce: latest.nonce, message: '開始重新授權'}});
+    assert.equal(receiving.current()?.id, latest.id); assert.equal(JSON.parse(local.getItem(GOOGLE_SESSION_KEY)).id, latest.id);
+    second.disconnect(); first.bridge.verify(); receiving.bridge.verify();
+    assert.equal(first.current(), undefined); assert.equal(receiving.current(), undefined); receiving.bridge.close();
+  } finally {first.bridge.close(); second.bridge.close();}
+});
