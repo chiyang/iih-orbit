@@ -6,6 +6,7 @@ import {createRequire} from 'node:module';
 import {mkdir, mkdtemp, rm} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
 import {createDriveDocument, readDriveFile, versionGraph, versionProperties} from '../src/app/drive-data.ts';
 import {mergeDriveBackups} from '../src/app/drive-merge.ts';
 import {createBackup} from '../src/app/backup-data.ts';
@@ -18,6 +19,14 @@ await build({stdin: {contents: "export {DriveService} from './src/app/drive-serv
 const {DriveService, DrivePanel, DriveAuth, BoardStore, DriveCollectionDeleted} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 const settle = async () => {for (let i = 0; i < 10; i++) await new Promise(resolve => setImmediate(resolve));};
+async function waitForSync(sync, index = 0) {
+  const started = performance.now();
+  while (sync.mock.calls.length <= index) {
+    assert.ok(performance.now() - started < 5000, '預期的自動同步未開始');
+    await delay(1);
+  }
+  return sync.mock.calls[index].result;
+}
 
 // Signal controllers use memory storage, synthetic lifecycle events and API replies;
 // no browser, user data, Google credentials or rendered page is accessed.
@@ -402,15 +411,17 @@ test('刪除非目前集合保留現有同步連結與其他待上傳佇列，�
   } finally {f.close();}
 });
 
-test('確認期間雲端更新、待上傳變更或重新授權都拒絕刪除；刪除失敗保持自動處理關閉且可重新確認繼續', async () => {
+test('確認期間雲端更新、待上傳變更或重新授權都拒絕刪除；刪除失敗保持自動處理關閉且可重新確認繼續', async t => {
   const f = await fixture();
   try {
     await f.service.start('full', [], 'sync'); const dataset = f.service.runtime().link.datasetId;
     const first = await f.service.prepareRemoval(dataset); await f.store.saveTask({...f.store.tasks()[0], title: '確認後又更新'}); await f.service.sync();
     assert.equal(await f.service.remove(first), false); assert.equal(f.store.drive().mode, 'sync'); assert.equal(f.documents.size, 2); assert.match(f.service.error(), /雲端集合已更新/);
-    const second = await f.service.prepareRemoval(dataset); f.auth.connectionVersion.update(value => value + 1); assert.equal(await f.service.remove(second), false); assert.equal(f.documents.size, 2); await settle();
+    const second = await f.service.prepareRemoval(dataset), sync = t.mock.method(f.service, 'sync', f.service.sync.bind(f.service));
+    f.auth.connectionVersion.update(value => value + 1); assert.equal(await f.service.remove(second), false); assert.equal(f.documents.size, 2);
+    assert.equal(await waitForSync(sync), 'complete');
     const pendingReview = await f.service.prepareRemoval(dataset), save = f.api.save;
-    f.api.save = async () => {throw new Error('離線');}; await f.store.saveTask({...f.store.tasks()[0], title: '確認之後才進入佇列'}); await f.service.sync();
+    f.api.save = async () => {throw new Error('離線');}; await f.store.saveTask({...f.store.tasks()[0], title: '確認之後才進入佇列'}); assert.equal(await f.service.sync(), 'failed');
     assert.ok(f.service.runtime().pending); assert.equal(await f.service.remove(pendingReview), false); assert.equal(f.store.drive().mode, 'sync'); assert.equal(f.documents.size, 2); assert.match(f.service.error(), /待上傳內容已變更/);
     f.api.save = save; await f.service.retry();
     const third = await f.service.prepareRemoval(dataset), trash = f.api.trashCollection;
@@ -1118,8 +1129,9 @@ test('重新授權既有集合立即同步，不等待修改延遲或手動雲�
     await f.store.updateDrive({debounceSeconds: 60, pollMinutes: 0});
     f.auth.disconnect(); await settle();
     await f.store.saveTask({...f.store.tasks()[0], title: '授權後立即備份的修改'}); await settle();
-    const count = f.documents.size;
-    f.auth.connected.set(true); f.auth.connectionVersion.update(value => value + 1); await settle();
+    const count = f.documents.size, sync = t.mock.method(f.service, 'sync', f.service.sync.bind(f.service));
+    f.auth.connected.set(true); f.auth.connectionVersion.update(value => value + 1);
+    assert.equal(await waitForSync(sync), 'complete');
     assert.equal(f.documents.size, count + 1);
     assert.equal([...f.documents.values()].at(-1).data.workspaces[0].tasks[0].title, '授權後立即備份的修改');
     assert.ok(f.service.lastSyncAt()); assert.equal(f.service.error(), '');
@@ -1132,13 +1144,13 @@ test('授權仍顯示連線時換入新憑證，等本機儲存與目前作業�
   try {
     await f.service.start('full', [], 'sync'); await f.service.sync(); await settle();
     await f.store.saveTask({...f.store.tasks()[0], title: '更新憑證期間的修改'}); await settle();
-    const count = f.documents.size;
+    const count = f.documents.size, sync = t.mock.method(f.service, 'sync', f.service.sync.bind(f.service));
     f.service.localBusy.set(true); f.store.pendingWrites.set(1);
-    f.auth.connectionVersion.update(value => value + 1); await settle(); assert.equal(f.documents.size, count);
-    f.service.localBusy.set(false); await settle(); assert.equal(f.documents.size, count);
-    f.store.pendingWrites.set(0); await settle(); assert.equal(f.documents.size, count + 1); assert.ok(f.service.lastSyncAt());
+    f.auth.connectionVersion.update(value => value + 1); await settle(); assert.equal(f.documents.size, count); assert.equal(sync.mock.callCount(), 0);
+    f.service.localBusy.set(false); await settle(); assert.equal(f.documents.size, count); assert.equal(sync.mock.callCount(), 0);
+    f.store.pendingWrites.set(0); assert.equal(await waitForSync(sync), 'complete'); assert.equal(f.documents.size, count + 1); assert.ok(f.service.lastSyncAt());
     await f.store.updateDrive({mode: 'off'}); await f.store.saveTask({...f.store.tasks()[0], title: '暫停仍保留本機'}); await settle();
-    f.auth.connectionVersion.update(value => value + 1); await settle(); assert.equal(f.documents.size, count + 1); assert.equal(f.store.drive().mode, 'off');
+    f.auth.connectionVersion.update(value => value + 1); await settle(); assert.equal(f.documents.size, count + 1); assert.equal(f.store.drive().mode, 'off'); assert.equal(sync.mock.callCount(), 1);
   } finally {f.close(); t.mock.timers.reset();}
 });
 
@@ -1158,12 +1170,13 @@ test('同步接收雲端後延後執行的變更通知，不清除已核對相�
   } finally {f.pauseEffects(false); f.close();}
 });
 
-test('已恢復有效授權的服務載入既有集合後立即核對，沒有集合或登入尚未接回時不建立空備份', async () => {
+test('已恢復有效授權的服務載入既有集合後立即核對，沒有集合或登入尚未接回時不建立空備份', async t => {
   const f = await fixture();
   try {
     f.auth.connectionVersion.update(value => value + 1); await settle(); assert.equal(f.documents.size, 0);
     await f.service.start('full', [], 'sync'); await f.service.sync(); await settle();
-    const count = f.documents.size, peer = f.create(); await settle();
+    const count = f.documents.size, peer = f.create(), sync = t.mock.method(peer, 'sync', peer.sync.bind(peer));
+    assert.equal(await waitForSync(sync), 'complete');
     assert.ok(peer.lastSyncAt()); assert.equal(f.documents.size, count);
     const datasetId = f.service.runtime().link.datasetId;
     await f.store.transact(data => ({...data, cloudResume: {datasetId}}));
@@ -1179,13 +1192,18 @@ test('兩個分頁同時續接授權，取得鎖的分頁上傳一次，另一�
   const f = await fixture(), upload = Promise.withResolvers(), entered = Promise.withResolvers();
   try {
     await f.service.start('full', [], 'sync'); await f.service.sync(); await settle();
-    const peer = f.create(); await settle(); const save = f.api.save, count = f.documents.size;
+    const peer = f.create(), peerSync = t.mock.method(peer, 'sync', peer.sync.bind(peer));
+    assert.equal(await waitForSync(peerSync), 'complete'); peerSync.mock.resetCalls();
+    const sync = t.mock.method(f.service, 'sync', f.service.sync.bind(f.service)), save = f.api.save, count = f.documents.size;
     f.auth.disconnect(); await settle();
     await f.store.saveTask({...f.store.tasks()[0], title: '兩個分頁續接的最新內容'}); await settle();
     f.api.save = async (...args) => {entered.resolve(); await upload.promise; return save(...args);};
     f.auth.connected.set(true); f.auth.connectionVersion.update(value => value + 1);
     await entered.promise; await settle(); assert.equal(f.documents.size, count);
-    upload.resolve(); await settle(); t.mock.timers.tick(250); await settle();
+    upload.resolve();
+    const results = await Promise.all([waitForSync(sync), waitForSync(peerSync)]);
+    await settle(); t.mock.timers.tick(250);
+    for (const [index, observer] of [sync, peerSync].entries()) if (results[index] === 'failed') assert.equal(await waitForSync(observer, 1), 'complete');
     assert.equal(f.documents.size, count + 1); assert.ok(f.service.lastSyncAt()); assert.ok(peer.lastSyncAt());
     assert.equal(f.service.error(), ''); assert.equal(peer.error(), '');
   } finally {upload.resolve(); await settle(); f.close(); t.mock.timers.reset();}
@@ -1202,9 +1220,10 @@ test('上傳完成後又有本機修改時回報待同步，依修改延遲自�
     assert.equal(await f.service.sync(), 'pending');
     assert.equal(f.service.lastSyncAt(), ''); assert.match(f.service.message(), /已排程自動同步/);
     assert.equal(f.store.tasks()[0].title, '同步尾聲才加入的新修改');
-    f.api.list = list; const count = f.documents.size;
+    f.api.list = list; const count = f.documents.size, sync = t.mock.method(f.service, 'sync', f.service.sync.bind(f.service));
     t.mock.timers.tick(14999); await settle(); assert.equal(f.documents.size, count); assert.equal(f.service.lastSyncAt(), '');
-    t.mock.timers.tick(1); await settle(); assert.equal(f.documents.size, count + 1); assert.ok(f.service.lastSyncAt());
+    assert.equal(sync.mock.callCount(), 0);
+    t.mock.timers.tick(1); assert.equal(await waitForSync(sync), 'complete'); assert.equal(f.documents.size, count + 1); assert.ok(f.service.lastSyncAt());
     assert.match(f.service.message(), /已完成/);
     assert.equal([...f.documents.values()].at(-1).data.workspaces[0].tasks[0].title, '同步尾聲才加入的新修改');
   } finally {f.close(); t.mock.timers.reset();}
