@@ -39,7 +39,8 @@ async function fixture() {
   // Sync scenarios start with explicit test data, independent of the empty first-use experience.
   await store.saveTask({id: 'sync-task', title: '同步測試任務', description: '模擬內容', categoryId: '', projectId: '', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: []});
   await store.updateGoogle({clientId: '123-example.apps.googleusercontent.com'}); await store.updateDrive({accountId: 'account', email: 'a@example.com'});
-  const effects = new Set(), scheduler = {add(e) {effects.add(e); queueMicrotask(() => this.flush());}, schedule() {queueMicrotask(() => this.flush());}, remove(e) {effects.delete(e);}, flush() {for (let i = 0; i < 30 && [...effects].some(e => e.dirty); i++) for (const e of effects) if (e.dirty) e.run();}};
+  let effectsPaused = false;
+  const effects = new Set(), scheduler = {add(e) {effects.add(e); queueMicrotask(() => this.flush());}, schedule() {queueMicrotask(() => this.flush());}, remove(e) {effects.delete(e);}, flush() {if (effectsPaused) return; for (let i = 0; i < 30 && [...effects].some(e => e.dirty); i++) for (const e of effects) if (e.dirty) e.run();}};
   const auth = {connected: signal(true), connectionVersion: signal(0), ready: signal(true), preparing: signal(false), authorizing: signal(false), account: signal({id: 'account', email: 'a@example.com'}), sessionWarning: signal(''), useSession() {}, cancelRequests() {}, prepare: async () => {}, disconnect() {this.connected.set(false); this.connectionVersion.update(v => v + 1);}};
   const api = {
     removals: async () => [...removed.values()].map(file => structuredClone(file)),
@@ -87,7 +88,7 @@ async function fixture() {
     const injector = createEnvironmentInjector([{provide: DriveService, useValue: service}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
     injectors.push(injector); return runInInjectionContext(injector, () => new DrivePanel());
   }
-  return {service, create, panel, store, auth, api, stored, documents, retired, removed, navigator, async event(name) {for (const fn of listeners.get(name) ?? []) fn({}); await settle();}, close() {for (const s of services) s.ngOnDestroy(); for (const i of injectors) i.destroy(); store.ngOnDestroy(); for (const [key, descriptor] of originals) {if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];}}};
+  return {service, create, panel, store, auth, api, stored, documents, retired, removed, navigator, pauseEffects(value) {effectsPaused = value; if (!value) scheduler.flush();}, async event(name) {for (const fn of listeners.get(name) ?? []) fn({}); await settle();}, close() {for (const s of services) s.ngOnDestroy(); for (const i of injectors) i.destroy(); store.ngOnDestroy(); for (const [key, descriptor] of originals) {if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];}}};
 }
 
 test('登出檢查點讀回驗證，離線保留資料；舊部分範圍升級完整備份後可登出', async () => {
@@ -407,7 +408,7 @@ test('確認期間雲端更新、待上傳變更或重新授權都拒絕刪除�
     await f.service.start('full', [], 'sync'); const dataset = f.service.runtime().link.datasetId;
     const first = await f.service.prepareRemoval(dataset); await f.store.saveTask({...f.store.tasks()[0], title: '確認後又更新'}); await f.service.sync();
     assert.equal(await f.service.remove(first), false); assert.equal(f.store.drive().mode, 'sync'); assert.equal(f.documents.size, 2); assert.match(f.service.error(), /雲端集合已更新/);
-    const second = await f.service.prepareRemoval(dataset); f.auth.connectionVersion.update(value => value + 1); assert.equal(await f.service.remove(second), false); assert.equal(f.documents.size, 2);
+    const second = await f.service.prepareRemoval(dataset); f.auth.connectionVersion.update(value => value + 1); assert.equal(await f.service.remove(second), false); assert.equal(f.documents.size, 2); await settle();
     const pendingReview = await f.service.prepareRemoval(dataset), save = f.api.save;
     f.api.save = async () => {throw new Error('離線');}; await f.store.saveTask({...f.store.tasks()[0], title: '確認之後才進入佇列'}); await f.service.sync();
     assert.ok(f.service.runtime().pending); assert.equal(await f.service.remove(pendingReview), false); assert.equal(f.store.drive().mode, 'sync'); assert.equal(f.documents.size, 2); assert.match(f.service.error(), /待上傳內容已變更/);
@@ -1109,7 +1110,89 @@ test('即時同步只在目前內容與雲端基準一致時回報完成；稍�
   } finally {f.close();}
 });
 
-test('上傳完成後又有本機修改時回報待同步，不讓斷網前按鈕顯示完成', async () => {
+test('重新授權既有集合立即同步，不等待修改延遲或手動雲端檢查', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync'); await f.service.sync(); await settle();
+    await f.store.updateDrive({debounceSeconds: 60, pollMinutes: 0});
+    f.auth.disconnect(); await settle();
+    await f.store.saveTask({...f.store.tasks()[0], title: '授權後立即備份的修改'}); await settle();
+    const count = f.documents.size;
+    f.auth.connected.set(true); f.auth.connectionVersion.update(value => value + 1); await settle();
+    assert.equal(f.documents.size, count + 1);
+    assert.equal([...f.documents.values()].at(-1).data.workspaces[0].tasks[0].title, '授權後立即備份的修改');
+    assert.ok(f.service.lastSyncAt()); assert.equal(f.service.error(), '');
+  } finally {f.close(); t.mock.timers.reset();}
+});
+
+test('授權仍顯示連線時換入新憑證，等本機儲存與目前作業完成後立即同步；暫停不啟動', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync'); await f.service.sync(); await settle();
+    await f.store.saveTask({...f.store.tasks()[0], title: '更新憑證期間的修改'}); await settle();
+    const count = f.documents.size;
+    f.service.localBusy.set(true); f.store.pendingWrites.set(1);
+    f.auth.connectionVersion.update(value => value + 1); await settle(); assert.equal(f.documents.size, count);
+    f.service.localBusy.set(false); await settle(); assert.equal(f.documents.size, count);
+    f.store.pendingWrites.set(0); await settle(); assert.equal(f.documents.size, count + 1); assert.ok(f.service.lastSyncAt());
+    await f.store.updateDrive({mode: 'off'}); await f.store.saveTask({...f.store.tasks()[0], title: '暫停仍保留本機'}); await settle();
+    f.auth.connectionVersion.update(value => value + 1); await settle(); assert.equal(f.documents.size, count + 1); assert.equal(f.store.drive().mode, 'off');
+  } finally {f.close(); t.mock.timers.reset();}
+});
+
+test('同步接收雲端後延後執行的變更通知，不清除已核對相同修訂的完成狀態', async () => {
+  const f = await fixture();
+  try {
+    await f.service.start('full', [], 'sync'); await f.service.sync(); await settle();
+    const root = [...f.documents.values()][0], incoming = structuredClone(root);
+    incoming.data.workspaces[0].tasks[0].title = '來自另一台電腦的內容';
+    const remote = await createDriveDocument(incoming, root.cloud.datasetId, [root.cloud.versionId], 'sync');
+    f.documents.set('remote-update', remote); f.pauseEffects(true);
+    assert.equal(await f.service.sync(), 'complete'); const completed = f.service.lastSyncAt(); assert.ok(completed);
+    f.pauseEffects(false); await settle();
+    assert.equal(f.store.tasks()[0].title, '來自另一台電腦的內容'); assert.equal(f.service.lastSyncAt(), completed);
+    assert.equal(f.service.debounce, undefined); assert.equal(f.documents.size, 2);
+    await f.store.saveTask({...f.store.tasks()[0], title: '完成後真正的新修改'}); await settle(); assert.equal(f.service.lastSyncAt(), '');
+  } finally {f.pauseEffects(false); f.close();}
+});
+
+test('已恢復有效授權的服務載入既有集合後立即核對，沒有集合或登入尚未接回時不建立空備份', async () => {
+  const f = await fixture();
+  try {
+    f.auth.connectionVersion.update(value => value + 1); await settle(); assert.equal(f.documents.size, 0);
+    await f.service.start('full', [], 'sync'); await f.service.sync(); await settle();
+    const count = f.documents.size, peer = f.create(); await settle();
+    assert.ok(peer.lastSyncAt()); assert.equal(f.documents.size, count);
+    const datasetId = f.service.runtime().link.datasetId;
+    await f.store.transact(data => ({...data, cloudResume: {datasetId}}));
+    f.auth.disconnect(); await settle();
+    await f.store.saveTask({...f.store.tasks()[0], title: '尚未接回前保留的新任務'}); await settle();
+    f.auth.connected.set(true); f.auth.connectionVersion.update(value => value + 1); await settle();
+    assert.equal(f.documents.size, count); assert.equal(f.store.tasks()[0].title, '尚未接回前保留的新任務');
+  } finally {f.close();}
+});
+
+test('兩個分頁同時續接授權，取得鎖的分頁上傳一次，另一頁在作業結束後自動核對完成', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const f = await fixture(), upload = Promise.withResolvers(), entered = Promise.withResolvers();
+  try {
+    await f.service.start('full', [], 'sync'); await f.service.sync(); await settle();
+    const peer = f.create(); await settle(); const save = f.api.save, count = f.documents.size;
+    f.auth.disconnect(); await settle();
+    await f.store.saveTask({...f.store.tasks()[0], title: '兩個分頁續接的最新內容'}); await settle();
+    f.api.save = async (...args) => {entered.resolve(); await upload.promise; return save(...args);};
+    f.auth.connected.set(true); f.auth.connectionVersion.update(value => value + 1);
+    await entered.promise; await settle(); assert.equal(f.documents.size, count);
+    upload.resolve(); await settle(); t.mock.timers.tick(250); await settle();
+    assert.equal(f.documents.size, count + 1); assert.ok(f.service.lastSyncAt()); assert.ok(peer.lastSyncAt());
+    assert.equal(f.service.error(), ''); assert.equal(peer.error(), '');
+  } finally {upload.resolve(); await settle(); f.close(); t.mock.timers.reset();}
+});
+
+test('上傳完成後又有本機修改時回報待同步，依修改延遲自動接續，完成前不顯示勾選', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
   const f = await fixture();
   try {
     await f.service.start('full', [], 'sync');
@@ -1117,10 +1200,14 @@ test('上傳完成後又有本機修改時回報待同步，不讓斷網前按�
     const list = f.api.list, version = f.service.runtime().link.baseVersionId; let injected = false;
     f.api.list = async (...args) => {if (!injected && version !== f.service.runtime().link.baseVersionId) {injected = true; await f.store.saveTask({...f.store.tasks()[0], title: '同步尾聲才加入的新修改'});} return list(...args);};
     assert.equal(await f.service.sync(), 'pending');
-    assert.equal(f.service.lastSyncAt(), ''); assert.match(f.service.message(), /再次同步/);
+    assert.equal(f.service.lastSyncAt(), ''); assert.match(f.service.message(), /已排程自動同步/);
     assert.equal(f.store.tasks()[0].title, '同步尾聲才加入的新修改');
-    f.api.list = list; assert.equal(await f.service.sync(), 'complete');
-  } finally {f.close();}
+    f.api.list = list; const count = f.documents.size;
+    t.mock.timers.tick(14999); await settle(); assert.equal(f.documents.size, count); assert.equal(f.service.lastSyncAt(), '');
+    t.mock.timers.tick(1); await settle(); assert.equal(f.documents.size, count + 1); assert.ok(f.service.lastSyncAt());
+    assert.match(f.service.message(), /已完成/);
+    assert.equal([...f.documents.values()].at(-1).data.workspaces[0].tasks[0].title, '同步尾聲才加入的新修改');
+  } finally {f.close(); t.mock.timers.reset();}
 });
 
 test('雲端仍須整份選擇、上傳失敗與離線均不回報同步完成', async () => {

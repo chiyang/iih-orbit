@@ -63,6 +63,19 @@ test('同步成功提示包含已保存的任務衝突；新修改未完成及�
   } finally {f.close();}
 });
 
+test('正常上傳中的暫存版本不亮紅點；完成後的任務衝突保留紅點與同步勾選，提示各自原因', () => {
+  const f = syncButton();
+  try {
+    f.drive.runtime.set({link: {}, pending: {}}); f.drive.syncing.set(true);
+    assert.equal(f.button.attention(), false); assert.equal(f.button.icon(), 'sync');
+    f.drive.syncing.set(false); assert.equal(f.button.attention(), true); assert.match(f.button.description(), /等待上傳/);
+    f.drive.runtime.set({link: {}}); f.drive.lastSyncAt.set('2026-10-14T12:00:00Z'); f.drive.store.taskConflicts.set([{}]);
+    assert.equal(f.button.attention(), true); assert.equal(f.button.icon(), 'circleCheck'); assert.match(f.button.description(), /目前內容已同步.*1 個衝突任務/);
+    f.drive.error.set('上傳失敗'); assert.equal(f.button.icon(), 'sync'); assert.match(f.button.description(), /上次同步未完成.*上傳失敗/);
+    f.drive.error.set(''); f.drive.runtime.set({link: {}, conflict: ['one']}); assert.equal(f.button.icon(), 'sync'); assert.match(f.button.description(), /雲端有不同內容待選擇/);
+  } finally {f.close();}
+});
+
 async function notifications() {
   const originals = new Map(['window', 'document', 'navigator', 'localStorage'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const values = new Map(), effects = new Set(), requests = [];

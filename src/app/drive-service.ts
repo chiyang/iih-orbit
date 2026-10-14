@@ -68,6 +68,9 @@ export class DriveService implements OnDestroy {
   private epoch = 0;
   private destroyed = false;
   private suspended = false;
+  private confirmedRevision = '';
+  private readonly reconnectPending = signal(false);
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
   private debounce?: ReturnType<typeof setTimeout>;
   private lastPoll = 0;
   private maintenanceTimer?: ReturnType<typeof setTimeout>;
@@ -83,8 +86,8 @@ export class DriveService implements OnDestroy {
     void this.loadRuntime(); this.poll();
   };
   private readonly storage = (event: StorageEvent) => { if (!event.key || event.key.startsWith(SYNC_PREFIX)) this.coordinator.refresh(); };
-  private readonly hide = () => { this.suspended = true; this.epoch++; clearTimeout(this.debounce); this.debounce = undefined; this.coordinator.suspend(); this.auth.cancelRequests(); };
-  private readonly show = (event: PageTransitionEvent) => { if (event.persisted) { this.suspended = false; this.coordinator.resume(); this.wake(); this.schedule(); } };
+  private readonly hide = () => { this.suspended = true; this.epoch++; clearTimeout(this.debounce); this.debounce = undefined; clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; this.coordinator.suspend(); this.auth.cancelRequests(); };
+  private readonly show = (event: PageTransitionEvent) => { if (event.persisted) { this.suspended = false; this.coordinator.resume(); this.wake(); if (this.auth.connected()) this.reconnectPending.set(true); this.schedule(); } };
 
   constructor() {
     let syncChannel: BroadcastChannel | undefined;
@@ -107,13 +110,36 @@ export class DriveService implements OnDestroy {
           const reset = !!this.generation && generation !== this.generation; this.generation = generation;
           this.context = context; this.epoch++; this.auth.cancelRequests(); this.runtimeReady.set(false); this.runtime.set({}); this.files.set([]); this.removals.set([]); this.missingCollection.set(''); this.error.set('');
           this.catalogState.set('idle'); this.catalogConnection.set(''); this.catalogError.set(''); this.cleanupError.set(''); this.catalogCheckedAt.set('');
-          this.lastSyncAt.set('');
+          this.confirmedRevision = ''; this.lastSyncAt.set(''); clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined;
           this.coordinator.activate(context);
           void (reset ? this.repository.clear() : Promise.resolve()).then(() => this.loadRuntime()).catch(error => this.error.set(this.describe(error)));
         }
       });
     });
-    effect(() => { this.store.revision(); this.auth.connected(); untracked(() => {this.lastSyncAt.set(''); this.schedule();}); });
+    effect(() => {
+      const revision = this.store.revision();
+      untracked(() => {if (revision !== this.confirmedRevision) {this.lastSyncAt.set(''); this.schedule();}});
+    });
+    effect(() => {
+      const connected = this.auth.connected(); this.auth.connectionVersion();
+      untracked(() => {
+        clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined;
+        this.confirmedRevision = ''; this.lastSyncAt.set(''); this.reconnectPending.set(connected);
+        if (!connected) {clearTimeout(this.debounce); this.debounce = undefined;}
+      });
+    });
+    effect(() => {
+      if (!this.reconnectPending()) return;
+      const ready = this.runtimeReady(), state = this.runtime(), mode = this.store.drive().mode;
+      const unavailable = this.unavailable(), busy = this.busy() || this.syncing(), writes = this.store.pendingWrites();
+      const available = this.autoReady();
+      untracked(() => {
+        if (ready && (!state.link || mode === 'off' || state.conflict?.length || unavailable)) {this.reconnectPending.set(false); return;}
+        if (!ready || busy || writes || !available) return;
+        // Renewal and restored credentials have no edit debounce, but still wait for storage and the shared lock.
+        this.reconnectPending.set(false); void this.syncAfterReconnect();
+      });
+    });
     this.timer = setInterval(() => { void this.loadRuntime(); this.poll(); }, 30000);
     window.addEventListener('online', this.wake); window.addEventListener('offline', this.wake); window.addEventListener('focus', this.wake);
     window.addEventListener('storage', this.storage); window.addEventListener('pagehide', this.hide); window.addEventListener('pageshow', this.show);
@@ -125,9 +151,22 @@ export class DriveService implements OnDestroy {
     try { const value = await this.repository.read(context); if (context === this.context && epoch === this.epoch) {const firstLink = !this.runtime().link && !!value.link; this.runtime.set(value); this.runtimeReady.set(true); if (firstLink) this.schedule();} }
     catch (error) { if (context === this.context && epoch === this.epoch) this.error.set(this.describe(error)); }
   }
+  private async syncAfterReconnect(): Promise<void> {
+    const context = this.context, connection = this.auth.connectionVersion();
+    const current = () => !this.destroyed && !this.suspended && context === this.context && connection === this.auth.connectionVersion() && this.auth.connected();
+    const result = await this.sync(false);
+    // Another tab can win the lock between the readiness check and run(). Keep this tab's request.
+    if (result === 'failed' && !this.error() && current()) {
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = undefined;
+        if (current()) this.reconnectPending.set(true);
+      }, 250);
+    }
+  }
   private schedule(): void {
     clearTimeout(this.debounce); this.debounce = undefined;
     if (!this.autoReady()) return;
+    if (this.lastSyncAt() && this.confirmedRevision === this.store.revision() && !this.runtime().pending) return;
     this.debounce = setTimeout(() => {
       this.debounce = undefined;
       if (this.busy() || this.syncing()) this.schedule(); else void this.sync(false);
@@ -375,11 +414,13 @@ export class DriveService implements OnDestroy {
           const hash = await syncHash(snapshot.backup);
           if (context !== this.context || generation !== this.store.generation()) return 'failed';
           if (this.runtime().pending || hash !== saved.baseHash || snapshot.revision !== this.store.revision() || this.store.hasUnsavedChanges()) {
-            if (manual) this.message.set('仍有新的修改等待同步，請再次同步後再斷網。');
+            this.message.set('同步期間又有新的修改，已排程自動同步；請等完成後再斷網。');
             this.schedule(); return 'pending';
           }
+          this.confirmedRevision = snapshot.revision;
+          clearTimeout(this.debounce); this.debounce = undefined;
           this.lastSyncAt.set(new Date().toISOString());
-          if (manual) this.message.set('已完成本次雲端更新。');
+          this.message.set('已完成本次雲端更新。');
           return 'complete';
         } catch (error) {if (context === this.context && generation === this.store.generation()) this.error.set(this.describe(error)); return 'failed';}
       }
@@ -469,7 +510,7 @@ export class DriveService implements OnDestroy {
   }
   private describe(error: unknown): string { return error instanceof Error ? error.message : 'Drive 操作未完成，本機資料保留。'; }
   ngOnDestroy(): void {
-    this.destroyed = true; this.epoch++; clearTimeout(this.debounce); this.debounce = undefined; clearTimeout(this.maintenanceTimer); clearTimeout(this.blockCleanupTimer); clearInterval(this.timer); this.coordinator.close(); this.channel?.close(); this.auth.cancelRequests();
+    this.destroyed = true; this.epoch++; clearTimeout(this.debounce); this.debounce = undefined; clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined; clearTimeout(this.maintenanceTimer); clearTimeout(this.blockCleanupTimer); clearInterval(this.timer); this.coordinator.close(); this.channel?.close(); this.auth.cancelRequests();
     window.removeEventListener('online', this.wake); window.removeEventListener('offline', this.wake); window.removeEventListener('focus', this.wake);
     window.removeEventListener('storage', this.storage); window.removeEventListener('pagehide', this.hide); window.removeEventListener('pageshow', this.show);
   }
