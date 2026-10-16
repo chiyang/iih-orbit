@@ -1,4 +1,4 @@
-import { readBackup, type OrbitBackup } from './backup-data.ts';
+import { backupFormat, readBackup, type OrbitBackup } from './backup-data.ts';
 import { sharedAppearance } from './appearance-data.ts';
 import { canonical, versionGraph, type DriveFile } from './drive-data.ts';
 import { DEFAULT_GOOGLE, type CalendarSource } from './google-data.ts';
@@ -6,8 +6,8 @@ import { readWorkspaceState } from './workspace-data.ts';
 import { scheduleError } from './task-schedule.ts';
 import type { Task, TaskConflict, TaskConflictVersion } from './models.ts';
 import { taskVersionKey } from './task-conflict-data.ts';
-import { mergeDocumentLinks, mergeDocumentSources, reconcileDocumentTasks } from './document-data.ts';
-import type { DocumentLink, DocumentSource } from './models.ts';
+import { documentsForTask, mergeDocumentLinks, mergeDocumentSources, reconcileDocumentTasks } from './document-data.ts';
+import type { DocumentDetail, DocumentLink, DocumentOrder, DocumentSource } from './models.ts';
 
 type RecordValue = Record<string, unknown>;
 const object = (value: unknown): value is RecordValue => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -61,7 +61,8 @@ class Merger {
   private readonly deferTasks: boolean;
   private readonly versionKeys: Map<string, (string | undefined)[]>;
   private readonly pendingTasks: Map<string, (TaskConflict | undefined)[]>;
-  constructor(preferred: number | undefined, deferTasks = false, versionKeys = new Map<string, (string | undefined)[]>(), pendingTasks = new Map<string, (TaskConflict | undefined)[]>()) {this.preferred = preferred; this.deferTasks = deferTasks; this.versionKeys = versionKeys; this.pendingTasks = pendingTasks;}
+  private readonly documentStates: Map<string, DocumentLink[]>;
+  constructor(preferred: number | undefined, deferTasks = false, versionKeys = new Map<string, (string | undefined)[]>(), pendingTasks = new Map<string, (TaskConflict | undefined)[]>(), documentStates = new Map<string, DocumentLink[]>()) {this.preferred = preferred; this.deferTasks = deferTasks; this.versionKeys = versionKeys; this.pendingTasks = pendingTasks; this.documentStates = documentStates;}
   private conflict(path: string, values: unknown[]): unknown {
     this.conflicts.add(path);
     return structuredClone(values[this.preferred ?? 0]);
@@ -69,6 +70,8 @@ class Merger {
   merge(base: unknown, values: unknown[], path: string): unknown {
     if (path.endsWith('.documentLinks')) return mergeDocumentLinks([base ?? [], ...values.map(value => value ?? [])] as DocumentLink[][]);
     if (path.endsWith('.documentSources')) return mergeDocumentSources([base ?? [], ...values.map(value => value ?? [])] as DocumentSource[][]);
+    if (path.endsWith('.documentDetails')) return this.documentDetails(base as DocumentDetail[] ?? [], values.map(value => value as DocumentDetail[] ?? []), path);
+    if (path.endsWith('.documentOrders')) return this.documentOrders(base as DocumentOrder[] ?? [], values.map(value => value as DocumentOrder[] ?? []), path);
     const changed = values.filter(value => !same(value, base));
     if (!changed.length) return structuredClone(base);
     if (changed.every(value => same(value, changed[0]))) return structuredClone(changed[0]);
@@ -112,6 +115,33 @@ class Merger {
     }
     // Missing vs. modified entities and concurrent additions with the same ID require a choice.
     return this.conflict(path, values);
+  }
+  private documentDetails(base: DocumentDetail[], values: DocumentDetail[][], path: string): DocumentDetail[] {
+    const links = this.documentStates.get(path.slice(0, path.lastIndexOf('.'))) ?? [];
+    const active = new Set(links.filter(link => !link.removed).map(link => link.id));
+    const index = (items: DocumentDetail[]) => new Map(items.map(item => [item.id, item]));
+    const original = index(base), branches = values.map(index), result: DocumentDetail[] = [];
+    for (const id of [...new Set([base, ...values].flatMap(items => items.map(item => item.id)))].sort()) {
+      const before = original.get(id), variants = branches.map(branch => branch.get(id));
+      const chosen = variants[this.preferred ?? 0] ?? before ?? variants.find(item => !!item)!;
+      const live = links.filter(link => !link.removed && link.taskId === chosen.taskId && link.documentId === chosen.documentId).map(link => link.id).sort();
+      if (!live.length) {result.push(structuredClone(chosen)); continue;}
+      const current = (item: DocumentDetail | undefined) => item?.linkIds.some(link => active.has(link));
+      const initial = current(before) ? before!.description : '';
+      const description = this.merge(initial, variants.map(item => current(item) ? item!.description : initial), path + '[' + id + '].description') as string;
+      result.push({...chosen, linkIds: live, description});
+    }
+    return result;
+  }
+  private documentOrders(base: DocumentOrder[], values: DocumentOrder[][], path: string): DocumentOrder[] {
+    const links = this.documentStates.get(path.slice(0, path.lastIndexOf('.'))) ?? [];
+    const ids = [...new Set([base, ...values].flatMap(items => items.map(item => item.id)))].sort();
+    return ids.map(id => {
+      const active = new Set(links.filter(link => !link.removed && link.taskId === id).map(link => link.documentId));
+      const order = (items: DocumentOrder[]) => (items.find(item => item.id === id)?.documentIds ?? []).filter(key => active.has(key)).map(key => ({id: key}));
+      const merged = this.entities(order(base), values.map(order), path + '[' + id + ']');
+      return {id, documentIds: merged.map(item => item['id'] as string)};
+    });
   }
   private entities(base: RecordValue[], values: RecordValue[][], path: string): RecordValue[] {
     const index = (items: RecordValue[]) => new Map(items.map(item => [item['id'] as string, item]));
@@ -239,9 +269,19 @@ export function mergeDriveBackups(baseInput: OrbitBackup, inputs: OrbitBackup[],
       return choice && taskVersionKey(choice.task) === taskVersionKey(current?.tasks.find(task => task.id === id) ?? null) ? choice.key : undefined;
     }));
   }
-  const projections = backups.map(content);
+  const allWorkspaces = [base, ...backups].flatMap(backup => backup.data.workspaces);
+  const modernDocuments = new Set(allWorkspaces.filter(workspace => workspace.version === 6).map(workspace => workspace.id));
+  const documentStates = new Map([...modernDocuments].map(id => ['data.workspaces[' + id + ']', mergeDocumentLinks(allWorkspaces.filter(workspace => workspace.id === id).map(workspace => workspace.documentLinks ?? []))]));
+  const project = (backup: OrbitBackup): RecordValue => {
+    const projection = content(backup);
+    projection['workspaces'] = (projection['workspaces'] as OrbitBackup['data']['workspaces']).map(workspace => modernDocuments.has(workspace.id)
+      ? {...workspace, version: 6, documentSources: workspace.documentSources ?? [], documentLinks: workspace.documentLinks ?? [], documentDetails: workspace.documentDetails ?? [],
+        documentOrders: workspace.documentOrders ?? workspace.tasks.map(task => ({id: task.id, documentIds: documentsForTask(workspace, task.id).map(source => source.id)}))} : workspace);
+    return projection;
+  };
+  const projections = backups.map(project);
   const unsafe = deferTasks ? normalizeResolvedTasks(base, backups, projections) : [];
-  const merger = new Merger(preferred, deferTasks, versionKeys, pendingTasks), merged = merger.merge(content(base), projections, 'data') as RecordValue;
+  const merger = new Merger(preferred, deferTasks, versionKeys, pendingTasks, documentStates), merged = merger.merge(project(base), projections, 'data') as RecordValue;
   unsafe.forEach(path => merger.conflicts.add(path));
   let workspaces = merged['workspaces'] as OrbitBackup['data']['workspaces'];
   workspaces = workspaces.map(workspace => {
@@ -280,7 +320,7 @@ export function mergeDriveBackups(baseInput: OrbitBackup, inputs: OrbitBackup[],
     merger.conflicts.add('data.sources.references');
     calendars = sources(selected).map(source => ({...source, id: identities.get(calendarKey(source))!, workspaceIds: source.workspaceIds.filter(id => workspaceIds.includes(id))})).filter(source => source.workspaceIds.length);
   }
-  const candidate: OrbitBackup = {...local, formatVersion: workspaces.some(workspace => workspace.version === 5) ? 6 : 5, data: {version: 1, activeWorkspaceId: workspaceIds.includes(local.data.activeWorkspaceId) ? local.data.activeWorkspaceId : workspaceIds[0], workspaces},
+  const candidate: OrbitBackup = {...local, formatVersion: backupFormat(workspaces), data: {version: 1, activeWorkspaceId: workspaceIds.includes(local.data.activeWorkspaceId) ? local.data.activeWorkspaceId : workspaceIds[0], workspaces},
     ...(local.kind === 'full' ? {preferences: merged['preferences'] as OrbitBackup['preferences'], reminders: merged['reminders'] as OrbitBackup['reminders'],
       google: {...(local.google ?? DEFAULT_GOOGLE), refreshMinutes: merged['refreshMinutes'] as typeof DEFAULT_GOOGLE.refreshMinutes ?? DEFAULT_GOOGLE.refreshMinutes, sources: calendars},
       ...(local.drive ? {drive: {...local.drive, workspaceIds: local.drive.workspaceIds.filter(id => workspaceIds.includes(id))}} : {})}

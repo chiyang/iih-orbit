@@ -24,4 +24,4 @@ app-rich-content { display: block; min-width: 0; }
 .orbit-rich-content th { background: var(--surface-soft); font-weight: 600; }
 .orbit-rich-content hr { border: 0; border-top: 1px solid var(--border); margin: 1.5em 0; }
 
-.mail-rich-content {max-width: 760px; margin-inline: auto;} .mail-rich-content table {table-layout: auto; width: auto; max-width: 100%;} .mail-rich-content td {border: 0; padding: var(--sp4) var(--sp8);} .mail-rich-content th {border: 0; border-bottom: 1px solid var(--border);} .mail-rich-content div {margin-block: .45em;} .mail-rich-content a {overflow-wrap: anywhere;}
+.mail-rich-content {max-width: 760px; margin-inline: 0; text-align: left;} .mail-rich-content table {table-layout: auto; width: auto; max-width: 100%;} .mail-rich-content td {border: 0; padding: var(--sp4) var(--sp8);} .mail-rich-content th {border: 0; border-bottom: 1px solid var(--border);} .mail-rich-content div {margin-block: .45em;} .mail-rich-content a {overflow-wrap: anywhere;}

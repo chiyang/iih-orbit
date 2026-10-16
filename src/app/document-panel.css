@@ -2,6 +2,10 @@
 .drive-browser{display:flex;flex:1;min-height:0;flex-direction:column;padding:16px;gap:12px;overflow-y:auto}
 .drive-browser-heading{display:flex;justify-content:space-between;align-items:center;gap:6px}
 .drive-toolbar-actions{display:flex;gap:6px;margin-left:auto}
+.drive-source-switch{display:flex;align-items:center;gap:8px;min-width:0}
+.drive-source-switch select{flex:1;min-width:0;width:100%;padding:8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font:inherit;font-size:var(--font-11)}
+.drive-source-switch span{flex-shrink:0;color:var(--text-muted);font-size:var(--font-10)}
+.drive-source-switch select:focus-visible{outline:2px solid var(--accent-text);outline-offset:2px}
 .drive-browser p{margin:0;line-height:1.7;font-size:var(--font-11);color:var(--text-muted)}button{font:inherit;font-size:var(--font-11);color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:8px 10px;cursor:pointer}button:hover{background:var(--surface-hover)}button:disabled{opacity:.5;cursor:default}button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent-text);outline-offset:2px}
 .drive-connect{display:flex;flex-wrap:wrap;gap:8px;padding:12px;background:var(--surface-soft);border:1px solid var(--border);border-radius:9px}
 .drive-connect p{width:100%}

@@ -4,6 +4,12 @@ import {DriveBrowserApi, DRIVE_BROWSER_FIELDS, DRIVE_FOLDER_MIME, DRIVE_SHORTCUT
 import {documentFromUrl} from '../src/app/document-data.ts';
 
 const raw = (id, extra = {}) => ({id, name: id, mimeType: 'application/pdf', ...extra});
+test('保存位置列表以伺服器資料夾篩選搭配完整分頁，排除檔案、捷徑、垃圾桶與備份', async () => {
+  const calls = [], api = new DriveBrowserApi({api: async (...args) => {calls.push(args); return {files: [raw('folder', {mimeType: DRIVE_FOLDER_MIME}), raw('file'), raw('shortcut', {mimeType: DRIVE_SHORTCUT_MIME, shortcutDetails: {targetId: 'target', targetMimeType: DRIVE_FOLDER_MIME}}), raw('trash', {mimeType: DRIVE_FOLDER_MIME, trashed: true}), raw('backup', {mimeType: DRIVE_FOLDER_MIME, name: 'IIH Orbit'})], nextPageToken: 'next'};}});
+  const page = await api.list({id: 'folder-root', name: '共用', driveId: 'shared-drive', resourceKey: 'resource-key'}, "研究'資料", 'previous', undefined, true);
+  assert.deepEqual(page.files.map(file => file.id), ['folder']); assert.equal(page.nextPageToken, 'next');
+  assert.match(calls[0][1].q, /and mimeType = 'application\/vnd.google-apps.folder'/); assert.equal(calls[0][1].pageToken, 'previous'); assert.equal(calls[0][1].corpora, 'drive'); assert.equal(calls[0][3], 'folder-root/resource-key');
+});
 test('Drive API 只讀當前資料夾，選取 metadata 欄位、分頁與共用硬碟參數並轉義搜尋字串', async () => {
   const calls = [], api = new DriveBrowserApi({api: async (...args) => {calls.push(args); return {files: [raw('file')], nextPageToken: 'page-two'};}}), signal = new AbortController().signal;
   const page = await api.list({id: 'folder', name: 'folder', driveId: 'shared-drive', resourceKey: 'key'}, "A'B\\C", 'page-one', signal);

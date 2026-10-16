@@ -1,3 +1,4 @@
+import {sourceOpenUrl} from './source-file-type';
 import { Component, computed, effect, inject, input, linkedSignal, output, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BoardStore } from './board-store';
@@ -8,11 +9,13 @@ import { driveFileLabel, isDriveFolder, sourceFromDriveEntry, type DriveBrowserE
 import { DocumentTasks } from './document-tasks';
 import {SourceIcon} from './source-icon';
 import { SourceTouchDrag } from './source-touch-drag';
+import {DocumentLinkStatus} from './document-link-status';
 
 @Component({
-  selector: 'app-document-panel', imports: [FormsModule, Icon, SourceIcon, SourceTouchDrag], templateUrl: './document-panel.html', styleUrl: './document-panel.css'
+  selector: 'app-document-panel', imports: [FormsModule, Icon, SourceIcon, SourceTouchDrag, DocumentLinkStatus], templateUrl: './document-panel.html', styleUrl: './document-panel.css'
 })
 export class DocumentPanel {
+  readonly openUrl = sourceOpenUrl;
   readonly store = inject(BoardStore);
   readonly browser = inject(DriveBrowser);
   readonly documents = inject(DocumentTasks);
@@ -24,12 +27,19 @@ export class DocumentPanel {
   readonly configure = output<void>();
   readonly openTask = output<{workspaceId: string; task: Task}>();
   readonly searchDraft = linkedSignal(() => this.browser.query());
-  readonly canUse = computed(() => this.browser.auth.connected() && !this.browser.busy() && !this.documents.busy());
+  readonly canUse = computed(() => this.browser.auth.connected() && !this.browser.selectedConnection().connecting() && !this.browser.busy() && !this.documents.busy());
   readonly folder = isDriveFolder;
   readonly label = driveFileLabel;
+  private readonly references = computed(() => new Map(this.browser.visibleFiles().map(file => [file.id, sourceFromDriveEntry(file)])));
+  reference(file: DriveBrowserEntry): DocumentSource {return this.references().get(file.id)!;}
   constructor() {
-    effect(() => {const active = this.active(); this.browser.connection.context(); this.browser.auth.connected(); untracked(() => {if (active) void this.browser.activate();});});
-    effect(() => {this.active(); this.browser.files(); this.browser.auth.connectionVersion(); untracked(() => this.documents.validate());});
+    effect(() => {const active = this.active(); this.browser.sourceContext(); this.browser.auth.connected(); this.browser.selectedConnection().connecting(); untracked(() => {if (active) void this.browser.activate();});});
+    effect(() => {this.active(); this.browser.visibleFiles(); this.browser.auth.connectionVersion(); untracked(() => this.documents.validate());});
+  }
+  async reconnect(): Promise<void> {
+    const source = this.browser.selectedConnection();
+    if (source.connecting() || !source.auth.ready()) return;
+    if (await source.connect()) await this.browser.activate();
   }
   source(file: DriveBrowserEntry): DocumentSource {return this.browser.source(file);}
   related(file: DriveBrowserEntry) {return this.store.tasksForDocument(sourceFromDriveEntry(file));}

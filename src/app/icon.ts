@@ -48,6 +48,7 @@ const PATHS: Record<string, string> = {
   grip: 'M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01',
   sort: 'M8 3v18m-4-4 4 4 4-4M16 21V3m-4 4 4-4 4 4',
   week: 'M3 5h18v16H3zM16 3v4M8 3v4M3 11h18M7 14v3M12 14v3M17 14v3',
+  gantt: 'M3 3v18h18M7 6h7v3H7zM11 12h9v3h-9zM6 18h8',
   settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z',
   sync: 'M20 11a8 8 0 0 0-14-5L3 9m0-6v6h6M4 13a8 8 0 0 0 14 5l3-3m0 6v-6h-6',
   conflict: 'M4 3v5a4 4 0 0 0 4 4h8a4 4 0 0 1 4 4v5M20 3v5a4 4 0 0 1-4 4H8a4 4 0 0 0-4 4v5M1 18l3 3 3-3M17 6l3-3 3 3',

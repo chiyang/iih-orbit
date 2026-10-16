@@ -96,6 +96,9 @@ summary {cursor: pointer;}
 .choose-version .version-info {flex: 1 1 170px;}
 .version-use {display: inline-flex; align-items: center; gap: var(--sp5); padding: var(--sp4) var(--sp8); border-radius: 5px; background: var(--accent-soft); color: var(--accent-text); white-space: nowrap;}
 .preview ul {padding-left: var(--sp20);}
+.information-preview {display:grid;gap:var(--sp12);margin-top:var(--sp12);overflow-wrap:anywhere;}
+.information-preview ol {padding-left:var(--sp24);}
+.information-preview p {white-space:pre-wrap;margin:var(--sp5) 0 var(--sp12);}
 .preview-options {display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp16); margin-top: var(--sp20);}
 .preview-options > div {min-width: 0;}
 .preview-options button {max-width: 100%;}

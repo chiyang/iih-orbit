@@ -21,6 +21,12 @@ const raw = (id, date = 1000, labels = ['INBOX']) => ({id, threadId: 'thread-' +
 const preview = readMailPreview(raw('mail'));
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 after(() => Object.defineProperty(globalThis, 'navigator', originalNavigator));
+// Controller-only fixtures have no rendered view or Angular after-render service.
+function appController(injector) {
+  const previous = globalThis.ngServerMode; globalThis.ngServerMode = true;
+  try {return runInInjectionContext(injector, () => new App());}
+  finally {if (previous === undefined) delete globalThis.ngServerMode; else globalThis.ngServerMode = previous;}
+}
 function browserStorage() {
   let serial = Promise.resolve();
   const locks = {request(_name, operation) {const result = serial.then(operation); serial = result.catch(() => {}); return result;}};
@@ -483,7 +489,7 @@ test('郵件拖入看板按游標選擇欄位及插入位置，placeholder 內�
     const previousServerMode = globalThis.ngServerMode; globalThis.ngServerMode = true;
     try {
       for (const id of ['a', 'b', 'c']) await f.store.saveTask({...base, id, title: id, status: id === 'c' ? 'done' : 'todo'});
-      const app = runInInjectionContext(child, () => new App()); app.view.set('board'); app.priorityFilter.set('medium');
+      const app = appController(child); app.view.set('board'); app.priorityFilter.set('medium');
       f.gmail.messages.set([preview]);
       const element = dom.window.document.getElementById(placement.status), column = app.columns().find(column => column.id === placement.status);
       for (const [index, card] of [...dom.window.document.querySelectorAll('.task-card')].entries()) card.getBoundingClientRect = () => ({top: 100 + index * 120, height: 80});
@@ -519,7 +525,7 @@ test('看板郵件落點離開、取消及切換工作空間後清除；插入�
   const previousServerMode = globalThis.ngServerMode; globalThis.ngServerMode = true;
   try {
     await f.store.saveTask({...base, id: 'anchor', title: '既有任務'});
-    const app = runInInjectionContext(child, () => new App()), column = app.columns().find(column => column.id === 'todo');
+    const app = appController(child), column = app.columns().find(column => column.id === 'todo');
     const element = dom.window.document.getElementById('todo'); element.firstElementChild.getBoundingClientRect = () => ({top: 100, height: 100});
     f.gmail.messages.set([preview]);
     const start = () => {const dragging = Object.assign(event(), {currentTarget: dom.window.document.getElementById('mail'), clientX: 100, clientY: 100}); f.tasks.start(dragging, preview); return {...dragging, currentTarget: element, clientY: 100};};
@@ -565,7 +571,7 @@ test('月／週放下郵件先讀取來源再清理預覽；拖曳影像移除�
   const previousServerMode = globalThis.ngServerMode; globalThis.ngServerMode = true;
   let calendar;
   try {
-    const app = runInInjectionContext(child, () => new App());
+    const app = appController(child);
     calendar = runInInjectionContext(child, () => new Calendar()); calendar.mailDragging = f.tasks.dragging;
     const source = dom.window.document.querySelector('#source'), destination = dom.window.document.querySelector('#destination');
     source.addEventListener('dragend', () => f.tasks.end());
@@ -605,7 +611,7 @@ test('郵件拖放建立後提醒目前篩選，保留瀏覽條件；被排除�
   const f = fixture(), child = createEnvironmentInjector([{provide: UiPreferences, useValue: {scale: () => 1, textSize: () => 'standard'}}], f.child);
   const previousServerMode = globalThis.ngServerMode; globalThis.ngServerMode = true;
   try {
-    const app = runInInjectionContext(child, () => new App());
+    const app = appController(child);
     await f.store.saveCategory({id: 'custom', name: '自訂分類', color: 'violet'});
     f.gmail.messages.set([preview]);
     const filters = [
@@ -662,7 +668,7 @@ test('右側欄切換不改動工作區視圖，郵件建立按鈕填入獨立�
   const f = fixture(); f.gmail.messages.set([preview]);
   const child = createEnvironmentInjector([{provide: UiPreferences, useValue: {textSize: () => 'standard'}}], f.child);
   try {
-    const app = runInInjectionContext(child, () => new App()); app.view.set('week'); app.openMail(); assert.equal(app.mailOpen(), true); assert.equal(app.remindersOpen(), false);
+    const app = appController(child); app.view.set('week'); app.openMail(); assert.equal(app.mailOpen(), true); assert.equal(app.remindersOpen(), false);
     app.narrowPanelViewport.set(true); assert.equal(app.compactNavigation(), true); app.sidebarOpen.set(true); app.escape(); assert.equal(app.sidebarOpen(), false); assert.equal(app.mailOpen(), true); app.narrowPanelViewport.set(false);
     app.openReminders('tomorrow'); assert.equal(app.mailOpen(), false); assert.equal(app.remindersOpen(), true); assert.equal(app.view(), 'week');
     app.openMail(); app.openMailTask(preview); assert.equal(app.modal(), 'task'); assert.equal(app.draft.title, preview.subject); assert.equal(app.draft.projectId, 'project'); assert.equal(app.editing(), false); assert.equal(app.draft.startDate, '');
@@ -827,7 +833,7 @@ test('側欄已開啟 Gmail 時點擊新郵件徽章重用快取，過期更新�
   try {
     f.gmail.messages.set([preview]);
     f.auth.api = async path => path === 'labels' ? {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]} : path === 'messages' ? {messages: [{id: 'mail', threadId: preview.threadId}]} : path.startsWith('threads/') ? {id: preview.threadId, messages: [raw('mail')]} : raw('mail');
-    const app = runInInjectionContext(child, () => new App()); app.openMail();
+    const app = appController(child); app.openMail();
     panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(true); panel.visible = signal(true); panel.visit = app.mailVisit; f.flush();
     await new Promise(resolve => setImmediate(resolve)); f.flush();
     const visits = f.panelViews.length;
@@ -929,12 +935,12 @@ test('完整內文只短暫保留在記憶體，不進 localStorage 或備份；
     await assert.rejects(pending, /帳號已變更/); await assert.rejects(f.reader.read(preview, identity), /帳號已變更/);
   } finally {f.close();}
 });
-test('描述專注模式 Escape 先返回完整任務，保留草稿；預覽視窗可建立任務但拒絕舊帳號來源', () => {
+test('描述專注模式 Escape 保留編輯狀態與草稿；預覽視窗可建立任務但拒絕舊帳號來源', () => {
   const f = fixture(); f.gmail.messages.set([preview]);
   const child = createEnvironmentInjector([{provide: UiPreferences, useValue: {textSize: () => 'standard'}}], f.child);
   try {
-    const app = runInInjectionContext(child, () => new App()); app.openTask(); app.draft.description = '**草稿**\n[連結](https://example.test)'; app.descriptionFocused.set(true);
-    app.escape(); assert.equal(app.modal(), 'task'); assert.equal(app.descriptionFocused(), false); assert.match(app.draft.description, /草稿/); app.escape(); assert.equal(app.modal(), null);
+    const app = appController(child); app.openTask(); app.draft.description = '**草稿**\n[連結](https://example.test)'; app.descriptionFocused.set(true);
+    app.escape(); assert.equal(app.modal(), 'task'); assert.equal(app.descriptionFocused(), true); assert.match(app.draft.description, /草稿/); app.escape(); assert.equal(app.modal(), 'task'); app.cancelTaskEdit();
     app.openMailPreview(preview); assert.equal(app.modal(), 'mail-preview'); f.gmail.messages.set([]); app.createPreviewTask(preview); assert.equal(app.modal(), 'task'); assert.match(app.draft.description, /在 Gmail 開啟原信/);
     f.gmail.messages.set([preview]);
     app.closeModal(); app.openMailPreview(preview); f.gmail.preferences.set({...f.gmail.preferences(), accountId: 'other'}); app.createPreviewTask(preview); assert.equal(app.modal(), 'mail-preview');
@@ -1033,7 +1039,7 @@ test('篩選只命中回覆時仍以真正首封呈現討論串，分頁不更�
     assert.equal(cache.entries[0].summaries[0].mail.id, 'original'); assert.equal(JSON.stringify(cache).includes('DO-NOT-COPY'), false);
     f.auth.disconnect(); f.flush(); assert.equal(f.gmail.threads()[0].mail.id, 'original'); assert.equal(f.tasks.draft(f.gmail.threads()[0].mail, base).title, '原始活動邀請');
     const child = createEnvironmentInjector([{provide: UiPreferences, useValue: {textSize: () => 'standard'}}], f.child);
-    try {const app = runInInjectionContext(child, () => new App()); app.openMailPreview(f.gmail.threads()[0].mail); assert.equal(app.modal(), 'mail-preview'); app.closeModal();} finally {child.destroy();}
+    try {const app = appController(child); app.openMailPreview(f.gmail.threads()[0].mail); assert.equal(app.modal(), 'mail-preview'); app.closeModal();} finally {child.destroy();}
     f.gmail.disconnect(); f.flush(); assert.equal(f.gmail.threads().length, 0);
   } finally {f.close();}
 });
@@ -1127,7 +1133,7 @@ test('封數按鈕按需展開回覆，每封可拖曳及複製；收合、預�
     const drag = event(); f.tasks.start(drag, reply); await f.tasks.drop(drag, base, {date: '2026-10-10', time: '10:00'});
     assert.equal(f.store.tasks()[0].title, '第一封回覆的內容'); assert.equal(f.store.tasks()[0].startTime, '10:00');
     const child = createEnvironmentInjector([{provide: UiPreferences, useValue: {textSize: () => 'standard'}}], f.child);
-    try {const app = runInInjectionContext(child, () => new App()); app.openMailPreview(reply); assert.equal(app.mailPreview().mail.id, reply.id); app.closeModal();} finally {child.destroy();}
+    try {const app = appController(child); app.openMailPreview(reply); assert.equal(app.mailPreview().mail.id, reply.id); app.closeModal();} finally {child.destroy();}
     await f.reader.thread(lead, f.gmail.previewIdentity()); assert.equal(fullReads, 1);
     await panel.toggleThread(lead); assert.equal(f.gmail.isListed(reply), false);
     await panel.toggleThread(lead); assert.equal(fullReads, 1); assert.equal(f.gmail.isListed(reply), true);
@@ -1161,7 +1167,7 @@ test('郵件預覽直接開啟討論串並重用快取；Gmail 連線入口集�
     await new Promise(resolve => setImmediate(resolve)); assert.equal(viewer.threadOpen(), true); assert.equal(viewer.messages().length, 2); viewer.ngOnDestroy();
     reopened = runInInjectionContext(f.child, () => new MailPreviewDialog()); reopened.mail = signal(preview); reopened.identity = signal(f.gmail.previewIdentity()); reopened.email = signal('me@example.test'); f.flush();
     await new Promise(resolve => setImmediate(resolve)); assert.equal(reopened.threadOpen(), true); assert.equal(reads, 1); assert.equal(bodyReads, 1);
-    const app = runInInjectionContext(child, () => new App()); panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(false);
+    const app = appController(child); panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(false);
     panel.configure.subscribe(() => app.openSettings('google')); panel.configure.emit(); assert.equal(app.settingsTab(), 'google'); assert.equal(app.modal(), 'settings');
     const settings = runInInjectionContext(child, () => new Settings()); assert.ok(settings.tabs.some(tab => tab.id === 'gmail')); settings.activeTab.set('gmail');
     settings.tabKeydown({key: 'ArrowRight', preventDefault() {}, currentTarget: {closest: () => null}}); assert.equal(settings.activeTab(), 'drive-files');
@@ -1225,7 +1231,7 @@ test('郵件邊緣建立與按鈕草稿都帶資訊連結，偽造／過期拖�
   const f = fixture(); f.gmail.messages.set([preview]);
   const child = createEnvironmentInjector([{provide: UiPreferences, useValue: {textSize: () => 'standard'}}], f.child);
   try {
-    const app = runInInjectionContext(child, () => new App()); app.openMailTask(preview); assert.equal(app.draftDocuments()[0].provider, 'gmail'); app.closeModal();
+    const app = appController(child); app.openMailTask(preview); assert.equal(app.draftDocuments()[0].provider, 'gmail'); app.closeModal();
     const drag = event(); f.tasks.start(drag, preview); await f.tasks.drop(drag, base); assert.equal(f.store.documentsForTask(base.id)[0].provider, 'gmail');
     const forged = event(); forged.dataTransfer.setData(GMAIL_MIME, 'forged'); f.tasks.start(event(), preview); await f.tasks.drop(forged, {...base, id: 'bad'}, {}, undefined, base.id); assert.equal(f.store.tasks().length, 1);
     const deleted = event(); f.tasks.start(deleted, preview); await f.store.deleteTask(base.id); await f.tasks.drop(deleted, base, {}, undefined, base.id); assert.match(f.tasks.notice(), /更新或刪除/); assert.equal(f.store.tasks().length, 0);

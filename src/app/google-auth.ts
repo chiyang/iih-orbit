@@ -1,19 +1,22 @@
 import { DOCUMENT } from '@angular/common';
-import { inject, Injectable, OnDestroy, signal } from '@angular/core';
+import { inject, Injectable, InjectionToken, OnDestroy, signal } from '@angular/core';
 import { CALENDAR_SCOPE } from './google-data';
 import { GoogleHttpError, readGoogleHttpError } from './google-api';
 import { GOOGLE_SESSION_KEY, GoogleSession, GoogleSessionBridge, GoogleSessionContext, SessionChannel, SessionOptions } from './google-session';
 
 interface TokenResponse {access_token?: string; expires_in?: number; error?: string; scope?: string}
 interface OAuthApi {
-  initTokenClient(options: {client_id: string; scope: string; include_granted_scopes: boolean; callback: (response: TokenResponse) => void; error_callback: (error: {type: string}) => void}): {requestAccessToken(options: {prompt: string}): void};
+  initTokenClient(options: {client_id: string; scope: string; include_granted_scopes: boolean; callback: (response: TokenResponse) => void; error_callback: (error: {type: string}) => void}): {requestAccessToken(options: {prompt: string; login_hint?: string}): void};
   hasGrantedAllScopes(response: TokenResponse, ...scopes: string[]): boolean;
 }
 export interface GoogleAccount {id: string; email: string}
+export interface GoogleAuthorizationOptions {selectAccount?: boolean; expectedAccountId?: string; loginHint?: string}
+export const GOOGLE_AUTH_SESSION = new InjectionToken<{options: SessionOptions; channel: string}>('Google auth session');
 interface AuthorizationHistory extends GoogleSessionContext {version: 1; expiresAt: number; nonce: string}
 
 @Injectable({providedIn: 'root'})
 export class GoogleAuth implements OnDestroy {
+  protected readonly sessionConfiguration = inject(GOOGLE_AUTH_SESSION, {optional: true});
   protected get sessionOptions(): SessionOptions { return {scope: CALENDAR_SCOPE, storageKey: GOOGLE_SESSION_KEY, controlPrefix: 'iih-orbit-google-session-control-v1:'}; }
   protected get sessionPersistence(): 'tab' | 'browser' | 'memory' { return 'browser'; }
   protected get sessionChannel(): string { return 'iih-orbit-google-session'; }
@@ -166,7 +169,7 @@ export class GoogleAuth implements OnDestroy {
   }
 
   /** Called directly by a click after the library is ready, preserving the popup user gesture. */
-  authorize(clientId: string): Promise<GoogleAccount> {
+  authorize(clientId: string, authorization: GoogleAuthorizationOptions = {}): Promise<GoogleAccount> {
     if (!this.oauth || this.authorizing()) return Promise.reject(new Error('請等待 Google 授權元件載入完成。'));
     if (this.sessionContext && clientId !== this.sessionContext.clientId) return Promise.reject(new Error('Client ID 已變更，請使用目前設定重新連線。'));
     this.disconnect(undefined, 'renew');
@@ -193,6 +196,7 @@ export class GoogleAuth implements OnDestroy {
             if (epoch !== this.epoch) return;
             if (nonce && !this.bridge.isCurrent(nonce)) { this.clearLocal('Google 授權已在其他分頁取消或更新。'); return; }
             if (!identity.sub || !identity.email) throw new Error('無法確認 Google 帳號，請重新授權帳號識別權限。');
+            if (authorization.expectedAccountId && identity.sub !== authorization.expectedAccountId) throw new Error('Google 回傳的帳號與此來源不同。請重新授權原帳號，或明確使用「切換帳號」。');
             const account = {id: identity.sub, email: identity.email};
             const session: GoogleSession = {version: 1, id: crypto.randomUUID(), clientId, generation: this.sessionContext?.generation ?? '', account, scope: this.sessionOptions.scope, token: this.token, expiresAt: this.expiresAt, nonce};
             this.pendingReject = undefined;
@@ -207,7 +211,7 @@ export class GoogleAuth implements OnDestroy {
           }
         }
       };
-      try { this.oauth!.initTokenClient(options).requestAccessToken({prompt: 'select_account'}); }
+      try { this.oauth!.initTokenClient(options).requestAccessToken({prompt: authorization.selectAccount === false ? '' : 'select_account', ...(authorization.loginHint ? {login_hint: authorization.loginHint} : {})}); }
       catch { finishError('無法啟動 Google 授權，請重新嘗試。'); }
     });
   }

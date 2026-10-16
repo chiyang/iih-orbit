@@ -54,7 +54,7 @@ export async function runRecordBrowserTests(): Promise<string[]> {
       check(documentState!.state.workspaces[0].documentSources!.length === 1 && documentState!.state.workspaces[0].documentLinks!.length === 2, '原生交易保存共用來源和兩份獨立關聯');
       await first.snapshotForExport();
       const withDocuments = await first.backupForExport('full');
-      check(withDocuments.formatVersion === 6 && withDocuments.data.workspaces[0].documentSources!.length === 1, '新版 JSON 包含來源與關聯，可獨立還原');
+      check(withDocuments.formatVersion === 7 && withDocuments.data.workspaces[0].documentSources!.length === 1, '新版 JSON 包含來源、關聯與排列，可獨立還原');
       const documentWrites: string[] = [];
       IDBObjectStore.prototype.put = function(value, ...args) {if (this.name === 'records') documentWrites.push(value.key); return originalPut.call(this, value, ...args);};
       try {check((await first.saveTask(first.tasks()[0], first.taskContext('task-0'), undefined, [])).ok, '文件移除以交易保存刪除記錄');}

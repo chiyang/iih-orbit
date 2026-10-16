@@ -9,14 +9,14 @@ import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {JSDOM} from 'jsdom';
 import {COLUMNS} from '../src/app/models.ts';
-import {DRIVE_FOLDER_MIME, readDriveBrowserEntry, sourceFromDriveEntry} from '../src/app/drive-browser-data.ts';
+import {DRIVE_FOLDER_MIME, DRIVE_METADATA_FIELDS, readDriveBrowserEntry, sourceFromDriveEntry} from '../src/app/drive-browser-data.ts';
 import {DOCUMENT_DRAG_TYPE} from '../src/app/document-data.ts';
 
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/drive-browser-test-')), output = resolve(directory, 'controller.mjs');
-await build({stdin: {contents: "export {DriveBrowser} from './src/app/drive-browser.ts'; export {DriveBrowserAuth} from './src/app/drive-browser-auth.ts'; export {DriveBrowserConnection} from './src/app/drive-browser-connection.ts'; export {DocumentTasks} from './src/app/document-tasks.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const {DriveBrowser, DriveBrowserAuth, DriveBrowserConnection, DocumentTasks, BoardStore} = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {GoogleHttpError} from './src/app/google-api.ts'; export {DocumentMetadataService} from './src/app/document-metadata-service.ts'; export {DriveBrowser} from './src/app/drive-browser.ts'; export {DriveBrowserAuth} from './src/app/drive-browser-auth.ts'; export {DriveBrowserConnection} from './src/app/drive-browser-connection.ts'; export {DocumentTasks} from './src/app/document-tasks.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const {GoogleHttpError, DocumentMetadataService, DriveBrowser, DriveBrowserAuth, DriveBrowserConnection, DocumentTasks, BoardStore} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 const raw = (id, folder = false) => ({id, name: id, mimeType: folder ? DRIVE_FOLDER_MIME : 'application/pdf'});
 const base = {id: 'existing', title: '原任務', description: '', categoryId: '', projectId: '', status: 'todo', priority: 'medium', startDate: '', dueDate: '', startTime: '', dueTime: '', subtasks: []};
@@ -25,7 +25,7 @@ function fixture(api = async () => ({files: [raw('folder', true), raw('file')]})
   globalThis.localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: key => values.delete(key)};
   const store = new BoardStore(), dom = new JSDOM('', {url: 'https://example.test'}), effects = new Set(), calls = [];
   const auth = {connectionVersion: signal(0), connected: signal(true), authorizing: signal(false), account: signal(null), ready: signal(true), message: signal(''), useSession() {}, disconnect() {this.connected.set(false); this.authorizing.set(false); this.connectionVersion.update(v => v + 1);}, prepare: async () => {}, authorize: async () => ({id: 'new-account', email: 'new@example.test'}), api: (...args) => {calls.push(args); return api(...args);}};
-  const injector = createEnvironmentInjector([DriveBrowserConnection, {provide: BoardStore, useValue: store}, {provide: DOCUMENT, useValue: dom.window.document}, {provide: DriveBrowserAuth, useValue: auth}, {provide: ɵEffectScheduler, useValue: {add: e => effects.add(e), schedule() {}, remove: e => effects.delete(e)}}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
+  const injector = createEnvironmentInjector([DocumentMetadataService, DriveBrowserConnection, {provide: BoardStore, useValue: store}, {provide: DOCUMENT, useValue: dom.window.document}, {provide: DriveBrowserAuth, useValue: auth}, {provide: ɵEffectScheduler, useValue: {add: e => effects.add(e), schedule() {}, remove: e => effects.delete(e)}}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   globalThis.ngServerMode = true;
   let browser, documents;
   try {runInInjectionContext(injector, () => {browser = new DriveBrowser(); documents = new DocumentTasks();});} finally {delete globalThis.ngServerMode;}
@@ -45,6 +45,65 @@ test('只載入直接子項，回上層與重開使用五分鐘快取，手動�
     t.mock.timers.tick(60001); await f.browser.activate(); assert.equal(f.calls.length, 3);
     await f.browser.refresh(); assert.equal(f.calls.length, 4); t.mock.timers.tick(300001); await f.browser.activate(); assert.equal(f.calls.length, 5);
     assert.equal(f.values.has('iih-orbit-drive-browser-cache'), false); assert.equal(f.store.currentWorkspace().version, 4);
+  } finally {f.close();}
+});
+
+test('側欄與選檔共用顯示快取，查驗及清理不改任務內容／用途／順序或連線', async () => {
+  let name = '原始檔名';
+  const f = fixture(async path => path === 'files' ? {files: [{...raw('file'), name, parents: ['my-root']}]} : {...raw(path.slice(6)), name: '查驗新名稱', parents: ['my-root']}); let picker;
+  try {
+    await f.browser.activate(); const source = f.browser.source(f.browser.files()[0]); await f.store.linkDocument(base.id, source);
+    await f.store.saveTask(f.store.tasks()[0], f.store.taskContext(base.id), undefined, [source], [{documentId: source.id, description: '任務用途'}]);
+    const saved = JSON.stringify(f.store.workspaceState()), revision = f.store.revision();
+    picker = runInInjectionContext(f.injector, () => new DriveBrowser()); f.flush();
+    await f.browser.metadata.manager.refresh([source], '', true);
+    assert.equal(f.browser.display(source).name, '查驗新名稱'); assert.equal(picker.display(source).name, '查驗新名稱');
+    await f.browser.activate(); assert.equal(f.browser.display(source).name, '查驗新名稱');
+    assert.equal(JSON.stringify(f.store.workspaceState()), saved); assert.equal(f.store.revision(), revision);
+    const path = structuredClone(f.browser.path()); f.browser.metadata.clear();
+    assert.equal(f.browser.metadata.stats().checked, 0); assert.equal(f.browser.metadata.stats().lists, 0);
+    assert.deepEqual(f.browser.path(), path); assert.equal(f.auth.connected(), true); assert.equal(f.store.revision(), revision);
+    assert.match(f.browser.metadata.notice(), /已清除/); name = '重新載入名稱'; await f.browser.activate(); assert.equal(f.browser.files()[0].name, name);
+    assert.equal(f.store.descriptionsForTask(base.id)[0].description, '任務用途');
+  } finally {picker?.ngOnDestroy(); f.close();}
+});
+
+test('手動查驗所選來源遇到限流時，保留其他來源的成功結果並明確回饋', async () => {
+  const f = fixture();
+  try {
+    const metadata = f.browser.metadata, source = sourceFromDriveEntry(readDriveBrowserEntry(raw('file')));
+    const connection = (id, api) => ({id, key: id, label: id, available: true, version: 1, api});
+    metadata.manager.setConnections([
+      connection('default', {get: async () => {throw new GoogleHttpError(429, '檔案', {retryAfterMs: 60000});}}),
+      connection('fallback', {get: async id => readDriveBrowserEntry(raw(id === 'root' ? 'my-root' : id, id === 'root'))})
+    ]);
+    await metadata.manager.refresh([source], 'fallback');
+    await metadata.refresh([source], 'default');
+    assert.equal(metadata.view(source, 'default').status, 'available');
+    assert.match(metadata.view(source, 'default').alternate, /配額或服務忙碌/);
+    assert.match(metadata.notice(), /1 項所選來源查驗未完成，保留其他來源資訊/);
+    assert.equal(f.store.revision(), 'legacy');
+  } finally {f.close();}
+});
+
+test('畫面先啟用、來源 effect 後執行時，第一份列表不會被初始化取消而顯示空白', async () => {
+  const f = fixture(); let picker;
+  try {
+    picker = runInInjectionContext(f.injector, () => new DriveBrowser());
+    const request = picker.activate(); f.flush(); await request;
+    assert.equal(picker.files().length, 2); assert.equal(picker.busy(), false); assert.equal(picker.error(), '');
+  } finally {picker?.ngOnDestroy(); f.close();}
+});
+
+test('只排程可見引用，共用正在進行的查驗，停止觀察後不再排程，暖快取零查詢', async () => {
+  const f = fixture(async path => ({...raw(path === 'files/root' ? 'my-root' : path.slice(6), path === 'files/root'), parents: []}));
+  try {
+    const metadata = f.browser.metadata, element = f.dom.window.document.createElement('div'), first = sourceFromDriveEntry(readDriveBrowserEntry(raw('file'))), hidden = sourceFromDriveEntry(readDriveBrowserEntry(raw('hidden')));
+    const a = metadata.watch(element, first, ''), b = metadata.watch(element, first, ''), c = metadata.watch(element, hidden, '');
+    a.visible(true); b.visible(true); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.calls.filter(call => call[0] === 'files/file').length, 1); assert.equal(f.calls.some(call => call[0] === 'files/hidden'), false);
+    const requests = f.calls.length; a.visible(true); b.visible(true); await new Promise(resolve => setImmediate(resolve)); assert.equal(f.calls.length, requests);
+    a.stop(); b.stop(); c.stop(); assert.equal(f.store.revision(), 'legacy');
   } finally {f.close();}
 });
 test('資料夾載入失敗保留原列表與路徑，搜尋範圍與共用列表只按需請求', async () => {
@@ -120,6 +179,10 @@ test('檔案授權 API 限制為 GET files，resource keys 正確傳送，拒絕
   const calls = [], auth = Object.create(DriveBrowserAuth.prototype); auth.fetchJson = async (...args) => {calls.push(args); return {};};
   await auth.api('files', {fields: 'files(id,name)'}, undefined, 'folder/key'); assert.match(calls[0][0], /^https:\/\/www.googleapis.com\/drive\/v3\/files\?/); assert.equal(calls[0][1].headers['X-Goog-Drive-Resource-Keys'], 'folder/key');
   for (const args of [['files/x', {}], ['files', {alt: 'media'}], ['files', {fields: '*'}], ['files', {}, undefined, 'bad/header/value']]) assert.throws(() => auth.api(...args));
+  await auth.api('files/file', {fields: DRIVE_METADATA_FIELDS, supportsAllDrives: 'true'}, undefined, 'file/key');
+  assert.match(calls[1][0], /\/files\/file\?/); assert.equal(calls[1][1].headers['X-Goog-Drive-Resource-Keys'], 'file/key');
+  assert.throws(() => auth.api('files/file', {fields: DRIVE_METADATA_FIELDS, alt: 'media'}));
+  assert.throws(() => auth.api('files/file/export', {fields: DRIVE_METADATA_FIELDS}));
 });
 
 test('跨共用硬碟的資料夾捷徑用 target ID 導覽，不沿用捷徑所在硬碟範圍', async () => {

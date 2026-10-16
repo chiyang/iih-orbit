@@ -24,6 +24,19 @@ await build({stdin: {contents: "export {GoogleConnection} from './src/app/google
 const {GoogleConnection, GoogleConnections, GoogleRenewalButton, GoogleCombinedAuth, COMBINED_GOOGLE_SCOPE, GoogleAuth, GmailAuth, DriveAuth, DriveBrowserAuth, DriveBrowserConnection, CalendarWriteAuth, CalendarCache, GoogleCalendarService, GmailService, DriveService, BoardStore} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 
+test('頁首續期使用已知帳號提示，額外檔案來源不被合併授權或取消操作覆蓋', async () => {
+  const f = await fixture();
+  try {
+    let pending = f.connections.connectAll(); await f.reply(); await pending; f.flush();
+    const id = await f.files.addSource('額外來源'), source = f.files.source(id); await source.prepare();
+    pending = source.connect(); await f.reply(DRIVE_BROWSER_SCOPE); assert.equal(await pending, true);
+    const token = f.values.get('iih-orbit-drive-source-' + id + '-session-v1');
+    pending = f.connections.connectAll(true); assert.equal(f.requests.at(-1).prompt.prompt, ''); assert.equal(f.requests.at(-1).prompt.login_hint, 'account');
+    await f.reply(); await pending;
+    assert.equal(source.auth.connected(), true); assert.equal(f.values.get('iih-orbit-drive-source-' + id + '-session-v1'), token);
+  } finally {f.close();}
+});
+
 // Exercise real consent, credential storage and connect methods with synthetic API responses.
 // Service constructors and their background network jobs are not started; no browser is used.
 async function fixture() {

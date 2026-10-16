@@ -1,0 +1,54 @@
+<h3>Google Drive</h3>
+<p>管理檔案側欄與任務選檔的來源。每個來源獨立連線，側欄與選檔視窗各自記住瀏覽位置。</p>
+@for (source of files.sources(); track source.id) {
+  <section class="google-service" [attr.aria-label]="source.name()">
+    <div class="service-heading"><h4>{{ source.name() }}</h4><span [class.connected]="source.auth.connected()">{{ files.status(source) }}</span></div>
+    @if (source.account().email) {<p class="service-account">{{ source.account().email }}</p>}
+    @if (source.id === files.id) {<p class="google-note">使用主要 Google Client ID，可由「一次授權全部服務」連線。</p>}
+    @else {<details class="source-details"><summary>連線資料</summary><p class="source-client">{{ source.clientId() }}</p></details>}
+    <div class="google-actions">
+      @if (source.clientId()) {
+        <button type="button" class="google-primary" [disabled]="busy() || !source.auth.ready()" (click)="connect(source)">{{ source.connecting() ? '等待授權…' : source.account().id ? '重新授權' : '連線' }}</button>
+        @if (source.account().id) {<button type="button" [disabled]="busy() || !source.auth.ready()" (click)="connect(source, true)">切換帳號</button>}
+        @if (!source.auth.ready()) {<button type="button" [disabled]="busy() || source.auth.preparing()" (click)="prepare(source)">{{ source.auth.preparing() ? '準備連線…' : '重新準備連線' }}</button>}
+      }
+      @if (source.auth.connected()) {<button type="button" [disabled]="busy()" (click)="source.disconnect()">解除連線</button>}
+      <button type="button" [disabled]="busy()" (click)="edit(source)">編輯來源</button>
+      @if (source.id !== files.id) {<button type="button" [disabled]="busy()" (click)="removing.set(source.id)">移除來源</button>}
+    </div>
+    @if (source.error()) {<p class="google-error" role="alert">{{ source.error() }}</p>}
+    @if (source.warning() || source.auth.sessionWarning()) {<p class="google-note" role="status">{{ source.warning() || source.auth.sessionWarning() }}</p>}
+    @if (!source.auth.connected() && source.auth.message()) {<p class="google-status" role="status">{{ source.auth.message() }}</p>}
+  </section>
+}
+@if (editId() !== null) {
+  <form class="source-editor" (ngSubmit)="save()">
+    <h4>{{ editId() ? '編輯來源' : '新增檔案來源' }}</h4>
+    <label class="google-field">來源名稱<input type="text" name="sourceName" maxlength="100" required [ngModel]="draftName()" (ngModelChange)="draftName.set($event)" [disabled]="busy()"></label>
+    <label class="google-field">Google OAuth Client ID<input type="text" name="sourceClient" maxlength="300" required [ngModel]="draftClient()" (ngModelChange)="draftClient.set($event)" [disabled]="busy() || editId() === files.id"></label>
+    <p class="google-note">{{ editId() === files.id ? '主要來源的 Client ID 請到 Google 連線設定修改。' : '可沿用主要 Client ID，或填入另一個允許目前網站來源的 Client ID。帳號在連線時選擇。' }}</p>
+    <div class="google-actions"><button type="button" [disabled]="busy()" (click)="editId.set(null)">取消</button><button type="submit" class="google-primary" [disabled]="busy() || !draftName().trim() || editId() !== files.id && !draftClient().trim()">{{ saving() ? '保存中…' : '保存來源' }}</button></div>
+  </form>
+}
+@if (removing()) {
+  <div class="source-removal" role="alert"><strong>移除來源「{{ files.source(removing()).name() }}」？</strong><p>此瀏覽器會解除來源連線；任務中的資訊連結及 Google 原檔保留。</p><div class="google-actions"><button type="button" [disabled]="busy()" (click)="removing.set('')">取消</button><button type="button" [disabled]="busy()" (click)="remove()">確認移除來源</button></div></div>
+}
+@if (files.sourceError()) {<p class="google-error" role="alert">{{ files.sourceError() }}</p>}
+@if (files.sourceNotice()) {<p class="google-status" role="status">{{ files.sourceNotice() }}</p>}
+<div class="google-actions"><button type="button" [disabled]="busy() || editId() !== null" (click)="edit()">新增檔案來源</button><button type="button" [disabled]="busy()" (click)="configure.emit()">Google 連線設定</button></div>
+<p class="google-note">額外來源各自授權；檔案來源設定保存在此瀏覽器。瀏覽會排除 Orbit 備份資料夾，備份帳號仍由遠端同步設定管理。</p>
+<section class="google-service" aria-label="檔案顯示快取">
+  <div class="service-heading"><h4>檔案顯示快取</h4><span>{{ metadata.stats().expired }} 筆已過期</span></div>
+  <p class="google-note">檔案資訊 {{ metadata.stats().checked }} 項、目錄列表 {{ metadata.stats().lists }} 份。清除後可重新載入；任務內容、用途、順序與來源連線保留。</p>
+  <div class="google-actions"><button type="button" [disabled]="!metadata.stats().expired" (click)="metadata.clear(true)">清除過期快取</button><button type="button" [disabled]="!metadata.stats().checked && !metadata.stats().nodes && !metadata.stats().lists" (click)="metadata.clear()">清除全部檔案快取</button></div>
+  @if (metadata.notice()) {<p class="google-status" role="status">{{ metadata.notice() }}</p>}
+</section>
+<section class="google-service" aria-label="無使用的文件來源">
+  <div class="service-heading"><h4>無使用的文件來源</h4><span>{{ cleanable() }} 筆可整理</span></div>
+  <p class="google-note">核對全部工作空間，只整理沒有任何引用的本機來源紀錄。垃圾桶、衝突、復原／重做、草稿與關聯歷史需要的來源保留；雲端原檔不變。</p>
+  @if (cleanupPreview().length) {<details class="source-details"><summary>查看整理範圍與保留原因（{{ cleanupPreview().length }} 項）</summary>@for (item of cleanupPreview().slice(0, 50); track item.workspaceId + item.documentId) {<p>{{ item.name }} · {{ item.workspaceName }}：{{ item.reasons.length ? '保留：' + item.reasons.join('、') : '可安全整理' }}</p>}@if (cleanupPreview().length > 50) {<p>目前顯示前 50 項；整理會重新核對全部項目。</p>}</details>}
+  <button type="button" [disabled]="busy() || !cleanable()" (click)="cleanDocuments()">整理可安全移除的來源</button>
+  @if (cleanupNotice()) {<p class="google-status" role="status">{{ cleanupNotice() }}</p>}
+</section>
+<app-document-create-recovery />
+@if (creation.message()) {<p class="google-status" role="status">{{ creation.message() }}</p>}

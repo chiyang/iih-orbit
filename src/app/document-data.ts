@@ -1,4 +1,4 @@
-import type { BoardState, DocumentLink, DocumentProvider, DocumentSource, Task, Workspace } from './models.ts';
+import type { BoardState, DocumentDescription, DocumentDetail, DocumentLink, DocumentOrder, DocumentProvider, DocumentSource, Task, Workspace } from './models.ts';
 
 export const DOCUMENT_PROVIDERS: {id: DocumentProvider; label: string}[] = [
   {id: 'google-drive', label: 'Google Drive'},
@@ -7,12 +7,24 @@ export const DOCUMENT_PROVIDERS: {id: DocumentProvider; label: string}[] = [
   {id: 'microsoft-365', label: 'Microsoft 365'}
 ];
 export const DOCUMENT_DRAG_TYPE = 'application/x-orbit-document';
+export const DOCUMENT_DESCRIPTION_LIMIT = 1000;
+export const documentDetailId = (taskId: string, documentId: string): string => JSON.stringify([taskId, documentId]);
 const text = (value: unknown, limit = 1000): value is string => typeof value === 'string' && !!value.trim() && value.length <= limit;
 const identity = (source: Pick<DocumentSource, 'provider' | 'sourceScope' | 'fileId' | 'locator'>): string | undefined =>
   source.fileId ? JSON.stringify([source.provider, source.sourceScope, 'id', source.fileId])
     : source.locator ? JSON.stringify([source.provider, source.sourceScope, 'path', source.locator]) : undefined;
 export const documentIdentity = (source: DocumentSource): string => identity(source) ?? source.id;
 export const documentProviderLabel = (provider: DocumentProvider): string => DOCUMENT_PROVIDERS.find(item => item.id === provider)?.label ?? provider;
+const SOURCE_LOCATION_PREFIX = '來源：';
+/** Keep a portable display snapshot without making a local connection part of identity. */
+export function documentLocationSnapshot(label: string, location: string): string {
+  return (SOURCE_LOCATION_PREFIX + label + (location ? ' / ' + location : '')).slice(0, 1500);
+}
+export function documentLocationLabel(source: DocumentSource): string {
+  const label = documentProviderLabel(source.provider), location = source.location;
+  if (source.provider === 'google-drive' && location?.startsWith(SOURCE_LOCATION_PREFIX)) return location.slice(SOURCE_LOCATION_PREFIX.length).trim() || label;
+  return label + (location ? ' · ' + location : '');
+}
 
 const safeUrl = (url: URL): boolean => {
   const sensitive = ['access_token', 'refresh_token', 'id_token', 'client_secret', 'authorization'];
@@ -95,7 +107,50 @@ export function readDocumentData(board: BoardState, taskIds: Set<string>): {docu
 
 export function documentsForTask(board: BoardState, taskId: string): DocumentSource[] {
   const ids = new Set(board.documentLinks?.filter(link => link.taskId === taskId && !link.removed).map(link => link.documentId));
-  return (board.documentSources ?? []).filter(source => ids.has(source.id));
+  const sources = (board.documentSources ?? []).filter(source => ids.has(source.id));
+  const order = new Map(board.documentOrders?.find(item => item.id === taskId)?.documentIds.map((id, index) => [id, index]));
+  return sources.sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
+}
+export function descriptionsForTask(board: BoardState, taskId: string): DocumentDescription[] {
+  const active = new Set(board.documentLinks?.filter(link => link.taskId === taskId && !link.removed).map(link => link.id));
+  const details = new Map(board.documentDetails?.filter(item => item.taskId === taskId && item.linkIds.some(id => active.has(id))).map(item => [item.documentId, item.description]));
+  return documentsForTask(board, taskId).map(source => ({documentId: source.id, description: details.get(source.id) ?? ''}));
+}
+export const taskInformationKey = (board: BoardState, taskId: string): string => JSON.stringify(descriptionsForTask(board, taskId));
+
+/** Build once for history and activity tracking instead of scanning every source for every task. */
+export function indexTaskInformation(board: BoardState): Map<string, DocumentDescription[]> {
+  const ids = taskDocumentIds(board), active = new Set(board.documentLinks?.filter(link => !link.removed).map(link => link.id));
+  const details = new Map(board.documentDetails?.map(item => [item.id, item]));
+  const orders = new Map(board.documentOrders?.map(item => [item.id, new Map(item.documentIds.map((id, index) => [id, index]))]));
+  const sourceOrder = new Map(board.documentSources?.map((source, index) => [source.id, index]));
+  return new Map([...ids].map(([taskId, documents]) => {
+    const order = orders.get(taskId);
+    documents.sort((a, b) => (order?.get(a) ?? Infinity) - (order?.get(b) ?? Infinity) || (sourceOrder.get(a) ?? 0) - (sourceOrder.get(b) ?? 0));
+    return [taskId, documents.map(documentId => {
+      const item = details.get(documentDetailId(taskId, documentId));
+      return {documentId, description: item?.linkIds.some(id => active.has(id)) ? item.description : ''};
+    })];
+  }));
+}
+
+export function readDocumentPresentations(board: BoardState): {documentDetails: DocumentDetail[]; documentOrders: DocumentOrder[]} | null {
+  if (!Array.isArray(board.documentDetails) || !Array.isArray(board.documentOrders) || board.documentDetails.length > 200000 || board.documentOrders.length > 100000) return null;
+  const links = new Map(board.documentLinks?.map(link => [link.id, link])), sources = new Set(board.documentSources?.map(source => source.id));
+  const details: DocumentDetail[] = [], orders: DocumentOrder[] = [];
+  for (const item of board.documentDetails) {
+    if (!item || !text(item.taskId, 1000) || !sources.has(item.documentId) || item.id !== documentDetailId(item.taskId, item.documentId)
+      || typeof item.description !== 'string' || item.description.length > DOCUMENT_DESCRIPTION_LIMIT || !Array.isArray(item.linkIds) || !item.linkIds.length
+      || item.linkIds.length > 200000 || new Set(item.linkIds).size !== item.linkIds.length
+      || item.linkIds.some(id => {const link = links.get(id); return !link || link.taskId !== item.taskId || link.documentId !== item.documentId;})) return null;
+    details.push({id: item.id, taskId: item.taskId, documentId: item.documentId, linkIds: [...item.linkIds], description: item.description});
+  }
+  for (const item of board.documentOrders) {
+    if (!item || !text(item.id, 1000) || !Array.isArray(item.documentIds) || item.documentIds.length > 100000
+      || new Set(item.documentIds).size !== item.documentIds.length || item.documentIds.some(id => !sources.has(id))) return null;
+    orders.push({id: item.id, documentIds: [...item.documentIds]});
+  }
+  return new Set(details.map(item => item.id)).size === details.length && new Set(orders.map(item => item.id)).size === orders.length ? {documentDetails: details, documentOrders: orders} : null;
 }
 export function taskDocumentIds(board: BoardState): Map<string, string[]> {
   const ids = new Map<string, Set<string>>();
@@ -128,7 +183,7 @@ export function tasksForDocument(workspaces: readonly Workspace[], document: Doc
 }
 
 /** Removing an observed addition never erases its identity; re-adding creates a new addition. */
-export function setTaskDocuments(board: BoardState, taskId: string, documents: readonly DocumentSource[], newId = () => crypto.randomUUID()): BoardState {
+export function setTaskDocuments(board: BoardState, taskId: string, documents: readonly DocumentSource[], newId = () => crypto.randomUUID(), descriptions?: readonly DocumentDescription[]): BoardState {
   if (!board.tasks.some(task => task.id === taskId && !task.deletedAt)) throw new Error('任務已刪除或不存在，文件關聯未變更。');
   const selected = new Map(documents.map(source => {const valid = readDocumentSource(source); if (!valid) throw new Error('文件來源不合法，原有資料保留。'); return [valid.id, valid] as const;}));
   if (!selected.size && !board.documentSources) return board;
@@ -136,7 +191,21 @@ export function setTaskDocuments(board: BoardState, taskId: string, documents: r
   selected.forEach((source, id) => {if (!sources.has(id)) sources.set(id, source);});
   const links: DocumentLink[] = (board.documentLinks ?? []).map(link => link.taskId === taskId && !link.removed && !selected.has(link.documentId) ? {...link, removed: true} : {...link});
   for (const source of selected.values()) if (!links.some(link => link.taskId === taskId && link.documentId === source.id && !link.removed)) links.push({id: newId(), taskId, documentId: source.id});
-  return {...board, version: 5, documentSources: [...sources.values()], documentLinks: links};
+  const changed: BoardState = {...board, version: board.version === 6 ? 6 : 5, documentSources: [...sources.values()], documentLinks: links};
+  if (descriptions === undefined && board.version !== 6) return changed;
+  const notes = descriptions ?? descriptionsForTask(board, taskId).filter(item => selected.has(item.documentId));
+  if (notes.some(item => !selected.has(item.documentId) || typeof item.description !== 'string' || item.description.length > DOCUMENT_DESCRIPTION_LIMIT)
+    || new Set(notes.map(item => item.documentId)).size !== notes.length) throw new Error('連結用途說明最多 1000 字，請確認後再儲存。');
+  const previous = new Map(descriptionsForTask(board, taskId).map(item => [item.documentId, item.description]));
+  const details = new Map(board.documentDetails?.map(item => [item.id, item]));
+  for (const source of selected.values()) {
+    const id = documentDetailId(taskId, source.id);
+    details.set(id, {id, taskId, documentId: source.id, linkIds: links.filter(link => link.taskId === taskId && link.documentId === source.id && !link.removed).map(link => link.id).sort(),
+      description: notes.find(item => item.documentId === source.id)?.description ?? previous.get(source.id) ?? ''});
+  }
+  const order = {id: taskId, documentIds: [...selected.keys()]};
+  const orders = board.documentOrders?.some(item => item.id === taskId) ? board.documentOrders.map(item => item.id === taskId ? order : item) : [...board.documentOrders ?? [], order];
+  return {...changed, version: 6, documentDetails: [...details.values()], documentOrders: orders};
 }
 
 export function reconcileDocumentTasks<T extends BoardState>(board: T): T {

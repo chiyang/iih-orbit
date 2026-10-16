@@ -10,7 +10,9 @@ export const DRIVE_BROWSER_SCOPE = 'https://www.googleapis.com/auth/drive.metada
 export const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
 export const DRIVE_SHORTCUT_MIME = 'application/vnd.google-apps.shortcut';
 export const DRIVE_BROWSER_PAGE_SIZE = 100;
-export const DRIVE_BROWSER_FIELDS = 'id,name,mimeType,webViewLink,modifiedTime,size,parents,driveId,resourceKey,appProperties,shortcutDetails(targetId,targetMimeType,targetResourceKey)';
+export const DRIVE_METADATA_FIELDS = 'id,name,mimeType,webViewLink,parents,driveId,resourceKey,trashed,shortcutDetails(targetId,targetMimeType,targetResourceKey)';
+export const DRIVE_BROWSER_FIELDS = DRIVE_METADATA_FIELDS + ',modifiedTime,size,appProperties';
+export const DRIVE_FOLDER_FIELDS = DRIVE_METADATA_FIELDS + ',appProperties,capabilities(canAddChildren)';
 const ORBIT_BACKUP_FILTER = `not (mimeType = '${DRIVE_FOLDER_MIME}' and ((appProperties has { key='orbit' and value='v1' } and appProperties has { key='type' and value='folder' }) or name = 'IIH Orbit'))`;
 export const validBrowserId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(id);
 export interface DriveBrowserEntry {
@@ -22,6 +24,8 @@ export interface DriveBrowserEntry {
   size?: string;
   driveId?: string;
   resourceKey?: string;
+  parents?: string[];
+  trashed?: boolean;
   shortcut?: {id: string; mimeType: string; resourceKey?: string};
 }
 export interface DriveBrowserFolder {id: string; name: string; driveId?: string; resourceKey?: string; shared?: true}
@@ -33,12 +37,13 @@ export function driveFileLabel(file: DriveBrowserEntry): string {
   return sourceFileLabel(file);
 }
 export function readDriveBrowserEntry(value: unknown): DriveBrowserEntry {
-  const file = value as {id: string; name: string; mimeType: string; webViewLink?: string; modifiedTime?: string; size?: string; driveId?: string; resourceKey?: string; shortcutDetails?: {targetId: string; targetMimeType: string; targetResourceKey?: string}};
+  const file = value as {id: string; name: string; mimeType: string; webViewLink?: string; modifiedTime?: string; size?: string; driveId?: string; resourceKey?: string; parents?: string[]; trashed?: boolean; shortcutDetails?: {targetId: string; targetMimeType: string; targetResourceKey?: string}};
   if (!file || !validBrowserId(file.id) || typeof file.name !== 'string' || !file.name.trim() || file.name.length > 300
     || typeof file.mimeType !== 'string' || !file.mimeType || file.mimeType.length > 200
     || file.modifiedTime !== undefined && !Number.isFinite(Date.parse(file.modifiedTime))
     || file.size !== undefined && (typeof file.size !== 'string' || !/^\d{1,20}$/.test(file.size))
-    || file.driveId !== undefined && !validBrowserId(file.driveId) || file.resourceKey !== undefined && !validBrowserId(file.resourceKey)) throw new Error('Drive 檔案資訊不完整，原列表保留。');
+    || file.driveId !== undefined && !validBrowserId(file.driveId) || file.resourceKey !== undefined && !validBrowserId(file.resourceKey)
+    || file.trashed !== undefined && typeof file.trashed !== 'boolean' || file.parents !== undefined && (!Array.isArray(file.parents) || file.parents.length > 100 || file.parents.some(id => !validBrowserId(id)) || new Set(file.parents).size !== file.parents.length)) throw new Error('Drive 檔案資訊不完整，原列表保留。');
   const target = file.shortcutDetails;
   if (target && (!validBrowserId(target.targetId) || typeof target.targetMimeType !== 'string' || !target.targetMimeType || target.targetMimeType.length > 200
     || target.targetResourceKey !== undefined && !validBrowserId(target.targetResourceKey))) throw new Error('Drive 捷徑資訊不完整。');
@@ -49,6 +54,7 @@ export function readDriveBrowserEntry(value: unknown): DriveBrowserEntry {
   return {id: file.id, name: file.name, mimeType: file.mimeType, url,
     ...(file.modifiedTime === undefined ? {} : {modifiedTime: file.modifiedTime}), ...(file.size === undefined ? {} : {size: file.size}),
     ...(file.driveId === undefined ? {} : {driveId: file.driveId}), ...(file.resourceKey === undefined ? {} : {resourceKey: file.resourceKey}),
+    ...(file.parents === undefined ? {} : {parents: [...file.parents]}), ...(file.trashed === undefined ? {} : {trashed: file.trashed}),
     ...(target ? {shortcut: {id: target.targetId, mimeType: target.targetMimeType, ...(target.targetResourceKey ? {resourceKey: target.targetResourceKey} : {})}} : {})};
 }
 export function sourceFromDriveEntry(file: DriveBrowserEntry, location = ''): DocumentSource {
@@ -59,11 +65,17 @@ export function sourceFromDriveEntry(file: DriveBrowserEntry, location = ''): Do
 export class DriveBrowserApi {
   private readonly transport: DriveBrowserTransport;
   constructor(transport: DriveBrowserTransport) {this.transport = transport;}
-  async list(folder: DriveBrowserFolder, search = '', pageToken = '', signal?: AbortSignal): Promise<DriveBrowserPage> {
+  async get(id: string, resourceKey = '', signal?: AbortSignal): Promise<DriveBrowserEntry> {
+    if (!validBrowserId(id) || resourceKey && !validBrowserId(resourceKey)) throw new Error('Drive 檔案識別不合法。');
+    const file = readDriveBrowserEntry(await this.transport.api('files/' + id, {fields: DRIVE_METADATA_FIELDS, supportsAllDrives: 'true'}, signal, resourceKey ? id + '/' + resourceKey : undefined));
+    if (id !== 'root' && file.id !== id || id === 'root' && file.mimeType !== DRIVE_FOLDER_MIME) throw new Error('Drive 回覆的檔案識別不符，已保留原資訊。');
+    return file;
+  }
+  async list(folder: DriveBrowserFolder, search = '', pageToken = '', signal?: AbortSignal, foldersOnly = false): Promise<DriveBrowserPage> {
     if (!validBrowserId(folder.id) || folder.driveId !== undefined && !validBrowserId(folder.driveId) || folder.resourceKey !== undefined && !validBrowserId(folder.resourceKey)
       || search.length > 300 || pageToken.length > 4000) throw new Error('Drive 目錄或查詢資訊不合法。');
     const escape = (value: string) => value.replaceAll('\\', '\\\\').replaceAll("'", "\\'");
-    const q = `${folder.shared ? 'sharedWithMe = true' : "'" + folder.id + "' in parents"} and trashed = false and ${ORBIT_BACKUP_FILTER}${search.trim() ? " and name contains '" + escape(search.trim()) + "'" : ''}`;
+    const q = `${folder.shared ? 'sharedWithMe = true' : "'" + folder.id + "' in parents"} and trashed = false and ${ORBIT_BACKUP_FILTER}${foldersOnly ? " and mimeType = '" + DRIVE_FOLDER_MIME + "'" : ''}${search.trim() ? " and name contains '" + escape(search.trim()) + "'" : ''}`;
     const result = await this.transport.api('files', {q, spaces: 'drive', corpora: folder.driveId ? 'drive' : 'user', ...(folder.driveId ? {driveId: folder.driveId} : {}),
       supportsAllDrives: 'true', includeItemsFromAllDrives: 'true', pageSize: String(DRIVE_BROWSER_PAGE_SIZE), orderBy: 'folder,name_natural', fields: 'nextPageToken,incompleteSearch,files(' + DRIVE_BROWSER_FIELDS + ')', ...(pageToken ? {pageToken} : {})}, signal, folder.resourceKey ? folder.id + '/' + folder.resourceKey : undefined) as {files?: unknown[]; nextPageToken?: unknown; incompleteSearch?: unknown};
     if (!result || !Array.isArray(result.files) || result.files.length > DRIVE_BROWSER_PAGE_SIZE || result.incompleteSearch
@@ -74,7 +86,7 @@ export class DriveBrowserApi {
     // App metadata also identifies a renamed backup folder; names cover legacy folders.
     const visible = files.filter((file, index) => {
       const properties = (result.files![index] as {appProperties?: Record<string, unknown>}).appProperties;
-      return !isDriveFolder(file) || !(file.name.trim().toLowerCase() === 'iih orbit' || properties?.['orbit'] === 'v1' && properties?.['type'] === 'folder');
+      return (!foldersOnly || file.mimeType === DRIVE_FOLDER_MIME && !file.trashed) && (!isDriveFolder(file) || !(file.name.trim().toLowerCase() === 'iih orbit' || properties?.['orbit'] === 'v1' && properties?.['type'] === 'folder'));
     });
     return {files: visible, nextPageToken: result.nextPageToken as string ?? ''};
   }

@@ -1,3 +1,4 @@
+import { taskInformationKey } from './document-data';
 import { A11yModule } from '@angular/cdk/a11y';
 import { CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup } from '@angular/cdk/drag-drop';
 import { CdkScrollable } from '@angular/cdk/scrolling';
@@ -54,18 +55,23 @@ import { CloudLogoutConfirm } from './cloud-logout-confirm';
 import { Tooltip } from './tooltip';
 import { PanelButton, type PanelActivation } from './panel-button';
 import { DocumentLinksEditor } from './document-links-editor';
-import type { DocumentSource } from './models';
+import type { DocumentDescription, DocumentSource } from './models';
 import { DocumentPanel } from './document-panel';
 import { DocumentTasks } from './document-tasks';
 import { documentCardPosition, type DocumentDropPosition } from './drive-browser-data';
 import { DOCUMENT_DRAG_TYPE } from './document-data';
+import {DescriptionKeyboard} from './description-keyboard';
+import {TaskEditDrafts, type LocalTaskDraft, type TaskDraftSnapshot} from './task-edit-drafts';
+import {WorkspaceOverview} from './workspace-overview';
+import {Gantt} from './gantt';
+import type {OverviewSelection} from './workspace-overview-data';
 
-type Modal = 'intro' | 'task' | 'task-conflict' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'empty-trash' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | 'logout' | null;
+type Modal = 'intro' | 'task' | 'task-conflict' | 'overview-list' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'purge-task' | 'empty-trash' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | 'logout' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView, TaskConflictEditor, GoogleRenewalButton, DriveSyncButton, CloudLogoutButton, CloudResumeNotice, CloudLogoutConfirm, Tooltip, PanelButton, DocumentLinksEditor, DocumentPanel],
+  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView, TaskConflictEditor, GoogleRenewalButton, DriveSyncButton, CloudLogoutButton, CloudResumeNotice, CloudLogoutConfirm, Tooltip, PanelButton, DocumentLinksEditor, DocumentPanel, WorkspaceOverview, Gantt],
   templateUrl: './app.html',
   styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css', './document-dialog.css', './startup.css', './task-shortcuts.css', './workspace-controls.css']
 })
@@ -87,10 +93,16 @@ export class App {
   readonly sourcePanelDragging = signal(false);
   readonly panelBlocking = computed(() => this.panelOverlay() && this.panelOpen() && !this.sourcePanelDragging());
   readonly narrowPanelViewport = signal(window.innerWidth <= 1100);
-  readonly compactNavigation = computed(() => this.mobileViewport() || this.panelOpen() && this.narrowPanelViewport());
+  readonly panelViewportWidth = signal(window.innerWidth);
+  readonly compactNavigation = computed(() => this.mobileViewport() || this.panelOpen() && (this.narrowPanelViewport() || this.panelViewportWidth() - this.effectivePanelWidth() < 900));
   readonly panelWidth = signal(this.readPanelWidth());
+  readonly panelMaxWidth = computed(() => {
+    const width = this.panelViewportWidth();
+    return Math.max(300, Math.min(Math.max(800, Math.floor(width * 0.45)), width - 480));
+  });
+  readonly effectivePanelWidth = computed(() => Math.min(this.panelWidth(), this.panelMaxWidth()));
   private resizingPanel = false;
-  private readPanelWidth(): number { try { return Math.min(520, Math.max(300, Number(localStorage.getItem('orbit-side-panel-width-v1')) || 360)); } catch { return 360; } }
+  private readPanelWidth(): number { try { const width = Number(localStorage.getItem('orbit-side-panel-width-v1')) || 360; return Number.isFinite(width) ? Math.max(300, width) : 360; } catch { return 360; } }
   openMail(): void { if (!this.modal()) { this.sidebarOpen.set(false); this.filesOpen.set(false); this.tasksOpen.set(false); this.remindersOpen.set(false); this.mailOpen.set(true); this.panelTab.set('gmail'); this.mailVisit.update(visit => visit + 1); } }
   toggleMail(): void { if (this.mailOpen()) this.closePanel(); else this.openMail(); }
   closePanel(): void { this.filesOpen.set(false); this.documentTasks.end(); this.mailOpen.set(false); this.remindersOpen.set(false); this.tasksOpen.set(false); }
@@ -153,7 +165,7 @@ export class App {
   }
   createDocumentTask(source: DocumentSource, status?: string): void {
     if (this.modal()) return;
-    this.openTask(status); this.draft.title = source.name.slice(0, 100); this.draftDocuments.set([structuredClone(source)]);
+    this.openTask(status); this.draft.title = source.name.slice(0, 100); this.setDraftDocuments([structuredClone(source)]);
   }
   documentOver(event: DragEvent): void {
     if (this.modal() || this.trashOpen() || !this.documentTasks.accepts(event)) return;
@@ -224,11 +236,11 @@ export class App {
   }
   startPanelResize(event: PointerEvent): void { event.preventDefault(); this.resizingPanel = true; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); }
   @HostListener('document:pointermove', ['$event'])
-  resizePanel(event: PointerEvent): void { if (this.resizingPanel) this.panelWidth.set(Math.min(520, Math.max(300, window.innerWidth - event.clientX))); }
+  resizePanel(event: PointerEvent): void { if (this.resizingPanel) this.panelWidth.set(Math.min(this.panelMaxWidth(), Math.max(300, this.panelViewportWidth() - event.clientX))); }
   @HostListener('document:pointerup')
   @HostListener('document:pointercancel')
   finishPanelResize(): void { if (!this.resizingPanel) return; this.resizingPanel = false; this.persistPanelWidth(); }
-  panelResizeKey(event: KeyboardEvent): void { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); this.panelWidth.set(Math.min(520, Math.max(300, this.panelWidth() + (event.key === 'ArrowLeft' ? 20 : -20)))); this.persistPanelWidth(); }
+  panelResizeKey(event: KeyboardEvent): void { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); this.panelWidth.set(Math.min(this.panelMaxWidth(), Math.max(300, this.effectivePanelWidth() + (event.key === 'ArrowLeft' ? 20 : -20)))); this.persistPanelWidth(); }
   private persistPanelWidth(): void { try { localStorage.setItem('orbit-side-panel-width-v1', String(this.panelWidth())); } catch { /* Width still applies to the current tab. */ } }
   private setMailPosition(element: HTMLElement, y: number, status?: string): void {
     const current = this.mailTasks.boardPosition(), placeholder = element.querySelector<HTMLElement>('.mail-board-placeholder, .mail-list-placeholder')?.getBoundingClientRect();
@@ -276,7 +288,7 @@ export class App {
   openMailTask(mail: MailPreview): void {
     if (this.modal()) return;
     this.openTask();
-    try { this.draft = this.mailTasks.draft(mail, this.draft); this.draftDocuments.set([this.mailTasks.source(mail)]); }
+    try { this.draft = this.mailTasks.draft(mail, this.draft); this.setDraftDocuments([this.mailTasks.source(mail)]); }
     catch (error) { this.formError.set(error instanceof Error ? error.message : '無法建立郵件任務。'); }
   }
   readonly mailPreview = signal<{mail: MailPreview; identity: string; email: string} | null>(null);
@@ -290,7 +302,7 @@ export class App {
   createPreviewTask(mail: MailPreview): void {
     const preview = this.mailPreview();
     if (!preview || this.modal() !== 'mail-preview' || preview.identity !== this.mailTasks.gmail.previewIdentity() || mail.threadId !== preview.mail.threadId) return;
-    this.closeModal(); this.openTask(); this.draft = this.mailTasks.draft(mail, this.draft, preview); this.draftDocuments.set([this.mailTasks.source(mail, preview)]);
+    this.closeModal(); this.openTask(); this.draft = this.mailTasks.draft(mail, this.draft, preview); this.setDraftDocuments([this.mailTasks.source(mail, preview)]);
   }
   openCreatedMailTask(): void {
     if (this.modal()) return;
@@ -324,7 +336,44 @@ export class App {
   private readonly legacyHeaderCompact = signal(this.savedBrowse.headerCompact);
   readonly headerCompact = computed(() => this.store.currentWorkspace().headerCompact ?? this.legacyHeaderCompact());
   readonly trashOpen = signal(this.savedBrowse.trashOpen);
+  readonly overviewOpen = signal(this.savedBrowse.overviewOpen);
+  readonly overviewProject = signal(this.savedBrowse.overviewProject);
+  readonly overviewArchived = signal(this.savedBrowse.overviewArchived);
+  readonly overviewSelection = signal<OverviewSelection | null>(this.savedBrowse.overviewSelection);
+  readonly overviewPage = signal(0);
+  readonly overviewScroll = signal(0);
+  private overviewReturnContext?: {workspaceId: string; generation: string};
+  private readonly taskTitleInput = viewChild<ElementRef<HTMLInputElement>>('taskTitleInput');
+  private readonly modalTitle = viewChild<ElementRef<HTMLElement>>('modalTitle');
+  private readonly overviewDashboard = viewChild<WorkspaceOverview>('overviewDashboard');
+  private overviewModalWasOpen = false;
+  openOverviewList(selection: OverviewSelection): void {
+    if (this.modal() || !this.overviewOpen()) return;
+    this.overviewSelection.set(selection); this.overviewPage.set(0); this.overviewScroll.set(0);
+    this.modal.set('overview-list');
+  }
+  openOverviewTask(task: Task): void {
+    if (!this.leaveOverviewList()) return;
+    this.openTask(task.status, task);
+    if (!this.modal()) this.modal.set('overview-list');
+  }
+  openOverviewConflict(entry: Pick<TaskConflictContext, 'workspace' | 'conflict'>): void {
+    if (!this.leaveOverviewList()) return;
+    this.openTaskConflict(entry);
+    if (!this.modal()) this.modal.set('overview-list');
+  }
+  private leaveOverviewList(): boolean {
+    if (this.modal() !== 'overview-list') return false;
+    this.overviewReturnContext = {workspaceId: this.store.currentWorkspace().id, generation: this.store.generation()};
+    this.modal.set(null);
+    return true;
+  }
+  openOverview(): void {
+    if (this.modal()) return;
+    this.trashOpen.set(false); this.overviewOpen.set(true); this.sidebarOpen.set(false);
+  }
   readonly emptyTrashContext = signal<TrashContext | null>(null);
+  readonly taskPurgeContext = signal<(TaskEditContext & {original: Task; workspaceName: string}) | null>(null);
   readonly selectedProjectId = computed(() => {
     const id = this.projectFilter();
     return id === '' || this.store.projects().some(project => project.id === id) ? id : 'all';
@@ -354,7 +403,16 @@ export class App {
   readonly settingsTab = signal<SettingsTab>('appearance');
   readonly scope = signal<TaskScope>(this.savedBrowse.scope);
   readonly view = signal<BrowseState['view']>(this.savedBrowse.view);
+  readonly viewTabs = viewChild<ElementRef<HTMLElement>>('viewTabs');
   readonly calendarDate = signal(this.savedBrowse.calendarDate);
+  readonly ganttDate = signal(this.savedBrowse.ganttDate);
+  readonly ganttScale = signal(this.savedBrowse.ganttScale);
+  readonly ganttZoom = signal(this.savedBrowse.ganttZoom);
+  readonly ganttCompletion = signal(this.savedBrowse.ganttCompletion);
+  readonly ganttOrder = signal(this.savedBrowse.ganttOrder);
+  readonly ganttRange = signal(this.savedBrowse.ganttRange);
+  readonly ganttStatuses = signal(this.savedBrowse.ganttStatuses);
+  readonly ganttCategories = signal(this.savedBrowse.ganttCategories);
   readonly calendarScrollHour = signal(this.savedBrowse.calendarScrollHour);
   readonly calendarShowOrbit = signal(this.savedBrowse.showOrbit);
   readonly calendarShowGoogle = signal(this.savedBrowse.showGoogle);
@@ -373,11 +431,13 @@ export class App {
   readonly sidebarCollapsed = signal(false);
   readonly sidebarVisible = computed(() => this.compactNavigation() ? this.sidebarOpen() : !this.sidebarCollapsed());
   readonly mobileViewport = signal(window.innerWidth <= 700);
-  readonly modal = signal<Modal>(null);
+  readonly modal = signal<Modal>(this.savedBrowse.overviewOpen && this.savedBrowse.overviewSelection ? 'overview-list' : null);
   readonly logoutSaving = signal(false);
   openLogout(): void {if (!this.modal()) {this.sidebarOpen.set(false); this.modal.set('logout');}}
   private backdropClick?: {pointerId: number; x: number; y: number; released: boolean};
   readonly editing = signal(false);
+  readonly documentCreationPrompt = signal(false);
+  private documentCreationRequest = 0;
   readonly descriptionFocused = signal(false);
   readonly formError = signal('');
   readonly categoryError = signal('');
@@ -395,7 +455,93 @@ export class App {
   ];
   readonly toast = signal('');
   readonly taskEditContext = signal<TaskEditContext | null>(null);
+  readonly localTaskDraftStatus = signal('停頓後自動暫存於本機；按「儲存變更」後生效。');
+  readonly localTaskDraftRecovery = signal<LocalTaskDraft | null>(null);
+  private readonly localTaskDrafts = new TaskEditDrafts();
+  private readonly descriptionKeyboard = new DescriptionKeyboard();
+  resetDescriptionKeyboard(): void {this.descriptionKeyboard.reset();}
+  private localTaskDraftId = '';
+  private localTaskDraftBaseline = '';
+  private localTaskDraftObserved = '';
+  private restoredTaskDraft: LocalTaskDraft | null = null;
+  private localTaskDraftTimer?: ReturnType<typeof setTimeout>;
+  descriptionKeydown(event: KeyboardEvent): void {
+    const value = this.descriptionKeyboard.handle(event);
+    if (value !== undefined) this.draft.description = value;
+  }
+  private taskDraftSnapshot(): TaskDraftSnapshot {
+    const editor = this.documentLinksEditor();
+    return {context: this.taskEditContext()!, task: this.draft, documents: this.draftDocuments(), descriptions: this.draftDocumentDescriptions(), subtaskDraft: this.subtaskDraft, hasStartTime: this.hasStartTime, hasDueTime: this.hasDueTime, documentInput: {name: editor?.name ?? '', url: editor?.url ?? '', adding: editor?.adding() ?? false}};
+  }
+  private startLocalTaskDraft(): void {
+    clearTimeout(this.localTaskDraftTimer); this.localTaskDraftTimer = undefined;
+    this.localTaskDraftId = crypto.randomUUID(); this.restoredTaskDraft = null;
+    this.localTaskDraftBaseline = this.localTaskDraftObserved = JSON.stringify(this.taskDraftSnapshot());
+    this.localTaskDraftStatus.set('停頓後自動暫存於本機；按「儲存變更」後生效。');
+    try {this.localTaskDraftRecovery.set(this.localTaskDrafts.find(this.taskEditContext()!));}
+    catch {this.localTaskDraftRecovery.set(null); this.localTaskDraftStatus.set('無法讀取本機草稿，請使用「儲存變更」。');}
+  }
+  ngDoCheck(): void {
+    if (this.modal() !== 'task' || !this.localTaskDraftId || !this.taskEditContext()) return;
+    const current = JSON.stringify(this.taskDraftSnapshot());
+    if (current === this.localTaskDraftObserved) return;
+    this.localTaskDraftObserved = current;
+    clearTimeout(this.localTaskDraftTimer);
+    this.localTaskDraftStatus.set('等待暫存…');
+    this.localTaskDraftTimer = setTimeout(() => this.flushLocalTaskDraft(), 1200);
+  }
+  @HostListener('window:pagehide')
+  flushLocalTaskDraft(): void {
+    clearTimeout(this.localTaskDraftTimer); this.localTaskDraftTimer = undefined;
+    if (this.modal() !== 'task' || !this.localTaskDraftId || !this.taskEditContext()) return;
+    const value = this.taskDraftSnapshot(), current = JSON.stringify(value);
+    if (value.context.generation !== this.store.generation() || value.context.workspaceId !== this.store.currentWorkspace().id) return;
+    try {
+      if (current === this.localTaskDraftBaseline) {
+        this.localTaskDrafts.remove(this.localTaskDraftId);
+        this.localTaskDraftStatus.set('沒有尚未儲存的變更。');
+      } else {
+        this.localTaskDrafts.save(this.localTaskDraftId, value);
+        this.localTaskDraftStatus.set('已暫存本機草稿，不會同步。');
+      }
+      this.localTaskDraftObserved = current;
+    } catch {this.localTaskDraftStatus.set('本機草稿暫存失敗，內容仍在此視窗，請按「儲存變更」。');}
+  }
+  restoreLocalTaskDraft(): void {
+    const saved = this.localTaskDraftRecovery(), context = this.taskEditContext();
+    if (!saved || !context || saved.snapshot.context.generation !== this.store.generation() || saved.snapshot.context.workspaceId !== this.store.currentWorkspace().id) return;
+    const value = structuredClone(saved.snapshot);
+    this.draft = value.task; this.taskEditContext.set(value.context); this.editing.set(!!value.context.original);
+    this.draftDocuments.set(value.documents); this.draftDocumentDescriptions.set(value.descriptions);
+    this.subtaskDraft = value.subtaskDraft; this.hasStartTime = value.hasStartTime; this.hasDueTime = value.hasDueTime;
+    const editor = this.documentLinksEditor();
+    if (editor) {editor.name = value.documentInput.name; editor.url = value.documentInput.url; editor.adding.set(value.documentInput.adding);}
+    this.restoredTaskDraft = saved; this.localTaskDraftRecovery.set(null);
+    this.ngDoCheck(); this.flushLocalTaskDraft();
+  }
+  discardRecoveredTaskDraft(): void {
+    const saved = this.localTaskDraftRecovery(); if (!saved) return;
+    try {this.localTaskDrafts.remove(saved.id, saved.raw); this.localTaskDraftRecovery.set(this.localTaskDrafts.find(this.taskEditContext()!));}
+    catch {this.localTaskDraftStatus.set('無法移除本機草稿，請稍後重試。');}
+  }
+  private clearLocalTaskDraft(): boolean {
+    clearTimeout(this.localTaskDraftTimer); this.localTaskDraftTimer = undefined;
+    try {
+      if (this.localTaskDraftId) this.localTaskDrafts.remove(this.localTaskDraftId);
+      if (this.restoredTaskDraft) this.localTaskDrafts.remove(this.restoredTaskDraft.id, this.restoredTaskDraft.raw);
+    } catch {this.localTaskDraftStatus.set('無法移除本機草稿，請稍後重試。'); return false;}
+    this.restoredTaskDraft = null;
+    this.localTaskDraftBaseline = this.localTaskDraftObserved = JSON.stringify(this.taskDraftSnapshot());
+    return true;
+  }
+  cancelTaskEdit(): void {if (this.clearLocalTaskDraft()) this.closeModal();}
   readonly draftDocuments = signal<DocumentSource[]>([]);
+  readonly draftDocumentDescriptions = signal<DocumentDescription[]>([]);
+  setDraftDocuments(sources: DocumentSource[]): void {
+    const notes = new Map(this.draftDocumentDescriptions().map(item => [item.documentId, item.description]));
+    this.draftDocuments.set(sources);
+    this.draftDocumentDescriptions.set(sources.map(source => ({documentId: source.id, description: notes.get(source.id) ?? ''})));
+  }
   private readonly documentLinksEditor = viewChild(DocumentLinksEditor);
   readonly taskDraftConflict = computed(() => {
     const context = this.taskEditContext();
@@ -403,7 +549,8 @@ export class App {
     const workspace = this.store.workspaces().find(item => item.id === context.workspaceId);
     const current = context.original ? workspace?.tasks.find(task => task.id === context.original!.id) ?? null : null;
     return this.store.generation() !== context.generation || !workspace || JSON.stringify(current) !== JSON.stringify(context.original)
-      || !!context.original && JSON.stringify(workspace.documentLinks?.filter(link => link.taskId === context.original!.id) ?? []) !== JSON.stringify(context.documentLinks ?? []);
+      || !!context.original && JSON.stringify(workspace.documentLinks?.filter(link => link.taskId === context.original!.id) ?? []) !== JSON.stringify(context.documentLinks ?? [])
+      || !!context.original && context.informationKey !== undefined && taskInformationKey(workspace, context.original.id) !== context.informationKey;
   });
   readonly projectDescription = '把計畫排進日程，讓每一步都清楚可見。';
   draft: Task = this.emptyTask('todo');
@@ -456,6 +603,7 @@ export class App {
   readonly columns = computed(() => boardStatusesForScope(this.statuses(), this.scope()).map(column => ({...column, tasks: this.visibleTasks().filter(task => task.status === column.id)})));
   readonly navigationTitle = computed(() => {
     if (this.trashOpen()) return '垃圾桶';
+    if (this.overviewOpen()) return '空間總覽';
     const labels = {all: '專案看板', active: '待完成任務', done: '已完成任務', archived: '封存任務'};
     return this.scope() === 'all' && this.categoryFilter() !== 'all' ? this.category(this.categoryFilter()).name : labels[this.scope()];
   });
@@ -463,6 +611,7 @@ export class App {
   readonly calendarTasks = computed(() => this.visibleTasks().filter(task => !this.store.isArchived(task)));
   readonly effectiveSortKey = computed(() => this.sortKey() ?? (this.deadlineFilter() === 'all' || this.deadlineFilter() === 'unset' ? null : this.deadlineFilter() === 'this-week' ? 'startDate' : 'dueDate'));
   readonly sortedTasks = computed(() => sortTasks(this.visibleTasks(), this.store.categories(), this.effectiveSortKey(), this.sortKey() ? this.sortDirection() : 'asc', this.statuses(), this.store.projects()));
+  readonly ganttContext = computed(() => JSON.stringify([this.store.generation(), this.store.currentWorkspace().id, this.scope(), this.query(), this.selectedProjectId(), this.categoryFilter(), this.priorityFilter(), this.pinnedOnly(), this.recentOnly(), this.deadlineFilter(), this.effectiveDeadlineDays(), this.sortKey(), this.sortDirection()]));
   readonly hasFilters = computed(() => !!this.query() || this.selectedProjectId() !== 'all' || this.categoryFilter() !== 'all' || this.priorityFilter() !== 'all' || this.scope() !== 'all' || this.deadlineFilter() !== 'all' || this.pinnedOnly() || this.recentOnly());
   readonly deadlineCounts = computed(() => this.store.tasks().reduce((counts, task) => {
     const state = deadlineState(task, this.now(), this.effectiveDeadlineDays(), this.statuses());
@@ -472,6 +621,28 @@ export class App {
   readonly deadlinePresets = computed(() => DUE_DAY_PRESETS.map(days => ({days, count: this.store.tasks().filter(task => deadlineState(task, this.now(), days, this.statuses()) === 'due-soon').length})));
 
   constructor() {
+    afterRenderEffect(() => {
+      this.view(); this.compactNavigation(); this.preferences.textSize();
+      const tabs = this.viewTabs()?.nativeElement, selected = tabs?.querySelector<HTMLElement>('[aria-pressed="true"]');
+      if (tabs && selected) {
+        const tabRect = tabs.getBoundingClientRect(), selectedRect = selected.getBoundingClientRect();
+        if (selectedRect.right > tabRect.right) tabs.scrollLeft += selectedRect.right - tabRect.right;
+        else if (selectedRect.left < tabRect.left) tabs.scrollLeft -= tabRect.left - selectedRect.left;
+      }
+    });
+    afterRenderEffect(() => {
+      const modal = this.modal();
+      if (modal === 'overview-list') this.overviewModalWasOpen = true;
+      if (!modal && this.overviewModalWasOpen) {
+        this.overviewModalWasOpen = false;
+        if (document.activeElement === document.body) this.overviewDashboard()?.focusTitle();
+      }
+      if (!this.overviewReturnContext) return;
+      if (modal === 'task') this.taskTitleInput()?.nativeElement.focus();
+      else if (modal === 'task-conflict') this.modalTitle()?.nativeElement.focus();
+    });
+    inject(DestroyRef).onDestroy(() => {this.flushLocalTaskDraft(); clearTimeout(this.localTaskDraftTimer);});
+    inject(DestroyRef).onDestroy(this.store.protectDocumentSources(() => new Set(this.modal() === 'task' ? this.draftDocuments().map(source => source.id) : [])));
     if (this.store.onboarding()) afterRenderEffect(() => {
       const field = this.firstWorkspaceDialog() && this.modal() === 'workspaces' ? this.workspaceNameInput()?.nativeElement : undefined;
       field?.focus();
@@ -491,7 +662,7 @@ export class App {
       const context = JSON.stringify([generation, workspace]);
       if (context !== this.browseContext) untracked(() => {
         const sameGeneration = generation === this.browseGeneration;
-        const fallback = sameGeneration ? readBrowseState({view: this.view(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour()}) : undefined;
+        const fallback = sameGeneration ? readBrowseState({overviewOpen: this.overviewOpen(), view: this.view(), ganttDate: this.ganttDate(), ganttScale: this.ganttScale(), ganttZoom: this.ganttZoom(), ganttCompletion: this.ganttCompletion(), ganttOrder: this.ganttOrder(), ganttRange: this.ganttRange(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour()}) : undefined;
         this.browseGeneration = generation;
         this.browseContext = context;
         this.restoreBrowse(loadBrowseState(generation, workspace, fallback), sameGeneration);
@@ -509,9 +680,12 @@ export class App {
   private validProjectFilter(id: string): string { return id === '' || id === 'all' || this.store.projects().some(project => project.id === id) ? id : 'all'; }
   private validCategoryFilter(id: string): string { return id === '' || id === 'all' || this.store.categories().some(category => category.id === id) ? id : 'all'; }
   private browseSnapshot(): BrowseState {
-    return {view: this.view(), scope: this.scope(), query: this.query(), project: this.projectFilter(), category: this.categoryFilter(), priority: this.priorityFilter(), pinnedOnly: this.pinnedOnly(), recentOnly: this.recentOnly(), deadline: this.deadlineFilter(), deadlineDays: this.deadlineDays(), sort: this.sortKey(), direction: this.sortDirection(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour(), showOrbit: this.calendarShowOrbit(), showGoogle: this.calendarShowGoogle(), progressExpanded: this.progressExpanded(), headerCompact: this.headerCompact(), trashOpen: this.trashOpen(), panel: this.filesOpen() ? 'files' : this.tasksOpen() ? 'tasks' : this.mailOpen() ? 'gmail' : this.remindersOpen() ? 'reminders' : 'closed', panelTab: this.panelTab(), reminderTab: this.reminderTab()};
+    return {overviewOpen: this.overviewOpen(), overviewProject: this.overviewProject(), overviewArchived: this.overviewArchived(), overviewSelection: this.overviewSelection(), view: this.view(), scope: this.scope(), query: this.query(), project: this.projectFilter(), category: this.categoryFilter(), priority: this.priorityFilter(), pinnedOnly: this.pinnedOnly(), recentOnly: this.recentOnly(), deadline: this.deadlineFilter(), deadlineDays: this.deadlineDays(), sort: this.sortKey(), direction: this.sortDirection(), ganttDate: this.ganttDate(), ganttScale: this.ganttScale(), ganttZoom: this.ganttZoom(), ganttCompletion: this.ganttCompletion(), ganttOrder: this.ganttOrder(), ganttRange: this.ganttRange(), ganttStatuses: this.ganttStatuses(), ganttCategories: this.ganttCategories(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour(), showOrbit: this.calendarShowOrbit(), showGoogle: this.calendarShowGoogle(), progressExpanded: this.progressExpanded(), headerCompact: this.headerCompact(), trashOpen: this.trashOpen(), panel: this.filesOpen() ? 'files' : this.tasksOpen() ? 'tasks' : this.mailOpen() ? 'gmail' : this.remindersOpen() ? 'reminders' : 'closed', panelTab: this.panelTab(), reminderTab: this.reminderTab()};
   }
   private restoreBrowse(state: BrowseState, preserveSharedControls = false): void {
+    this.overviewReturnContext = undefined; this.overviewPage.set(0); this.overviewScroll.set(0);
+    if (!this.modal() || this.modal() === 'overview-list') this.modal.set(state.overviewOpen && state.overviewSelection ? 'overview-list' : null);
+    this.overviewOpen.set(state.overviewOpen); this.overviewProject.set(state.overviewProject); this.overviewArchived.set(state.overviewArchived); this.overviewSelection.set(state.overviewSelection);
     this.view.set(state.view); this.scope.set(state.scope); this.query.set(state.query);
     this.projectFilter.set(this.validProjectFilter(state.project)); this.categoryFilter.set(this.validCategoryFilter(state.category));
     this.priorityFilter.set(state.priority); this.deadlineFilter.set(state.deadline); this.deadlineDays.set(state.deadlineDays);
@@ -519,6 +693,10 @@ export class App {
     this.sortKey.set(state.sort); this.sortDirection.set(state.direction); this.progressExpanded.set(state.progressExpanded);
     this.legacyHeaderCompact.set(state.headerCompact); this.trashOpen.set(state.trashOpen);
     this.calendarDate.set(state.calendarDate); this.calendarScrollHour.set(state.calendarScrollHour);
+    this.ganttDate.set(state.ganttDate); this.ganttScale.set(state.ganttScale);
+    this.ganttZoom.set(state.ganttZoom); this.ganttCompletion.set(state.ganttCompletion); this.ganttOrder.set(state.ganttOrder); this.ganttRange.set(state.ganttRange);
+    this.ganttStatuses.set(state.ganttStatuses.filter(id => this.statuses().some(status => status.id === id)));
+    this.ganttCategories.set(state.ganttCategories.filter(id => id === '' || this.store.categories().some(category => category.id === id)));
     if (!preserveSharedControls) {
       this.calendarShowOrbit.set(state.showOrbit); this.calendarShowGoogle.set(state.showGoogle);
       this.filesOpen.set(state.panel === 'files'); this.mailOpen.set(state.panel === 'gmail'); this.remindersOpen.set(state.panel === 'reminders'); this.tasksOpen.set(state.panel === 'tasks'); this.reminderTab.set(state.reminderTab);
@@ -585,6 +763,7 @@ export class App {
     }
   }
   showReminderDeadline(days: number): void {
+    this.overviewOpen.set(false);
     this.clearFilters(); this.selectDueSoonDays(days); this.view.set('list');
   }
 
@@ -596,7 +775,7 @@ export class App {
     else if (this.statusToDelete()) this.statusToDelete.set(null);
     else if (this.workspaceToDelete()) this.workspaceToDelete.set(null);
     else if (this.categoryToDelete()) this.categoryToDelete.set(null);
-    else if (this.modal() === 'task' && this.descriptionFocused()) this.descriptionFocused.set(false);
+    else if (this.modal() === 'task') return;
     else if (this.modal()) this.closeModal();
     else if (this.sidebarOpen()) this.sidebarOpen.set(false);
     else if (this.panelOpen()) this.closePanel();
@@ -605,6 +784,7 @@ export class App {
 
   @HostListener('window:resize')
   resize(): void {
+    this.panelViewportWidth.set(window.innerWidth);
     this.mobileViewport.set(window.innerWidth <= 700);
     this.panelOverlay.set(window.innerWidth <= 700);
     this.narrowPanelViewport.set(window.innerWidth <= 1100);
@@ -635,6 +815,7 @@ export class App {
   }
 
   selectProject(id: string): void {
+    this.overviewOpen.set(false);
     this.trashOpen.set(false);
     this.clearFilters();
     this.projectFilter.set(id);
@@ -695,7 +876,15 @@ export class App {
     return `${label} · ${order}`;
   }
 
+  openBoardHome(): void {
+    if (this.modal()) return;
+    this.overviewOpen.set(false); this.overviewSelection.set(null);
+    this.overviewPage.set(0); this.overviewScroll.set(0); this.overviewReturnContext = undefined;
+    this.clearFilters(); this.view.set('board'); this.sidebarOpen.set(false);
+  }
+
   selectScope(scope: TaskScope): void {
+    this.overviewOpen.set(false);
     this.trashOpen.set(false);
     if (scope === 'all') this.projectFilter.set('all');
     this.scope.set(scope);
@@ -707,6 +896,7 @@ export class App {
   }
 
   selectCategory(id: string): void {
+    this.overviewOpen.set(false);
     this.trashOpen.set(false);
     this.categoryFilter.set(id);
     this.scope.set('all');
@@ -736,10 +926,16 @@ export class App {
     if (!task) this.trashOpen.set(false);
     const initialStatus = this.statuses().some(item => item.id === status) ? status : this.statuses().find(item => item.kind === 'active')?.id ?? this.statuses()[0].id;
     this.draft = task ? structuredClone(task) : this.emptyTask(initialStatus);
+    if (!task && this.overviewOpen()) {
+      const selected = this.overviewProject();
+      this.draft.projectId = selected === '' ? '' : this.store.projects().some(project => project.id === selected && (!project.archived || this.overviewArchived())) ? selected : this.store.projects().find(project => !project.archived)?.id ?? '';
+    }
     this.draftDocuments.set(task ? structuredClone(this.store.documentsForTask(task.id)) : []);
+    this.draftDocumentDescriptions.set(task ? structuredClone(this.store.descriptionsForTask(task.id)) : []);
     this.taskEditContext.set(this.store.taskContext(this.draft.id));
-    if (!task && this.categoryFilter() !== 'all') this.draft.categoryId = this.categoryFilter();
+    if (!task && !this.overviewOpen() && this.categoryFilter() !== 'all') this.draft.categoryId = this.categoryFilter();
     this.editing.set(!!task);
+    this.documentCreationPrompt.set(false);
     this.descriptionFocused.set(false);
     this.formError.set('');
     this.subtaskDraft = '';
@@ -750,9 +946,10 @@ export class App {
       this.draft.dueDate = date;
     }
     this.modal.set('task');
+    this.startLocalTaskDraft();
   }
 
-  async saveTask(publish = false): Promise<void> {
+  async saveTask(publish = false, createDocument = false): Promise<void> {
     if (this.store.pendingWrites()) return;
     const documents = this.documentLinksEditor();
     if (documents?.hasDraft() && !documents.add()) {this.formError.set('請先確認文件名稱與連結。'); return;}
@@ -774,14 +971,19 @@ export class App {
     }
     if (this.subtaskDraft.trim()) this.addSubtask();
     const saved = {...this.draft, title, description: this.draft.description.trim()};
-    if (publish && JSON.stringify(saved) === JSON.stringify(this.taskEditContext()?.original) && JSON.stringify(this.draftDocuments().map(source => source.id).sort()) === JSON.stringify(this.store.documentsForTask(saved.id).map(source => source.id).sort()) && !this.store.hasUnsavedChanges()) {
+    if (publish && JSON.stringify(saved) === JSON.stringify(this.taskEditContext()?.original) && JSON.stringify(this.draftDocuments().map(source => ({documentId: source.id, description: this.draftDocumentDescriptions().find(item => item.documentId === source.id)?.description ?? ''}))) === taskInformationKey(this.store.state(), saved.id) && !this.store.hasUnsavedChanges()) {
       this.store.refreshFromStorage();
       if (this.taskDraftConflict()) { this.formError.set('任務已更新，請載入最新版本再移轉。'); return; }
       this.draft = structuredClone(saved); this.modal.set('calendar-publish'); return;
     }
-    const result = await this.store.saveTask(saved, this.taskEditContext()!, undefined, this.draftDocuments());
+    const result = await this.store.saveTask(saved, this.taskEditContext()!, undefined, this.draftDocuments(), this.draftDocumentDescriptions());
     if (!this.handleResult(result)) return;
-    const hidden = !this.visibleTasks().some(task => task.id === this.draft.id);
+    if (result.persisted) this.clearLocalTaskDraft();
+    if (createDocument) {
+      if (!result.persisted) {this.formError.set('任務尚未成功保存，未建立雲端文件。請先匯出備份並確認本機儲存。'); return;}
+      this.refreshDocumentTaskDraft(); this.documentCreationPrompt.set(false); await this.openDocumentCreation(); return;
+    }
+    const hidden = !this.overviewOpen() && !this.visibleTasks().some(task => task.id === this.draft.id);
     const message = this.editing() ? '任務已更新' : '新任務已建立';
     if (publish && result.persisted) {
       this.draft = structuredClone(this.store.tasks().find(task => task.id === this.draft.id)!);
@@ -793,10 +995,38 @@ export class App {
     this.notify(result.persisted ? hidden ? `${message}，可清除篩選查看。` : message : '任務只暫存在此分頁，請匯出備份。');
   }
 
+  async requestDocumentCreation(): Promise<void> {
+    if (this.store.pendingWrites() || this.modal() !== 'task') return;
+    if (this.taskDraftConflict()) {this.formError.set('任務已更新，請先載入最新版本再建立文件。'); return;}
+    const context = this.taskEditContext(), information = this.draftDocuments().map(source => ({documentId: source.id, description: this.draftDocumentDescriptions().find(item => item.documentId === source.id)?.description ?? ''}));
+    if (context?.original && JSON.stringify(this.draft) === JSON.stringify(context.original) && JSON.stringify(information) === context.informationKey && !this.subtaskDraft.trim() && !this.documentLinksEditor()?.hasDraft() && !this.store.hasUnsavedChanges()) {await this.openDocumentCreation(); return;}
+    this.documentCreationPrompt.set(true);
+  }
+
+  private refreshDocumentTaskDraft(): void {
+    const task = this.store.currentWorkspace().tasks.find(task => task.id === this.draft.id && !task.deletedAt);
+    if (!task) return;
+    this.draft = structuredClone(task); this.draftDocuments.set(structuredClone(this.store.documentsForTask(task.id)));
+    this.draftDocumentDescriptions.set(structuredClone(this.store.descriptionsForTask(task.id))); this.taskEditContext.set(this.store.taskContext(task.id)); this.editing.set(true);
+    this.clearLocalTaskDraft(); this.startLocalTaskDraft();
+  }
+
+  private async openDocumentCreation(): Promise<void> {
+    const context = this.taskEditContext(); if (!context?.original || this.modal() !== 'task') return;
+    const request = ++this.documentCreationRequest;
+    try {
+      const [{Dialog}, {DocumentCreateDialog}] = await Promise.all([import('@angular/cdk/dialog'), import('./document-create-dialog')]);
+      if (request !== this.documentCreationRequest || this.modal() !== 'task' || this.taskEditContext() !== context || this.taskDraftConflict()) return;
+      const ref = this.injector.get(Dialog).open(DocumentCreateDialog, {data: {context: structuredClone(context)}, injector: this.injector, width: 'min(620px, calc(100vw - 24px))', maxHeight: 'calc(100dvh - 32px)', panelClass: 'information-picker-dialog', ariaLabel: '建立文件並連結任務', ariaModal: true, autoFocus: '.create-cancel', disableClose: true});
+      ref.closed.subscribe(() => {if (this.modal() === 'task' && this.draft.id === context.original?.id && this.store.generation() === context.generation) this.refreshDocumentTaskDraft();});
+    } catch {this.formError.set('無法開啟文件建立視窗，已儲存的任務保留。請重試。');}
+  }
+
   reloadTaskDraft(): void {
     const context = this.taskEditContext();
     const task = this.store.workspaces().find(workspace => workspace.id === context?.workspaceId)?.tasks.find(task => task.id === context?.original?.id);
     if (!task || !context) { this.formError.set('原任務已不存在，可以將草稿另存為新任務。'); return; }
+    if (!this.clearLocalTaskDraft()) return;
     this.store.switchWorkspace(context.workspaceId);
     this.openTask(task.status, task);
   }
@@ -865,6 +1095,7 @@ export class App {
   }
 
   requestDeleteTask(task: Task): void {
+    this.flushLocalTaskDraft();
     this.deletionContext = this.taskEditContext()?.original?.id === task.id ? this.taskEditContext()! : this.store.taskContext(task.id);
     this.taskToDelete.set(task);
     this.modal.set('delete');
@@ -886,6 +1117,22 @@ export class App {
     if (this.modal() || this.store.pendingWrites()) return;
     const context = {...this.store.taskContext(task.id), original: structuredClone(task)};
     if (this.handleResult(await this.store.restoreTask(task.id, context))) this.notifySaved('任務已還原');
+  }
+
+  requestPurgeTask(task: Task): void {
+    if (this.modal() || this.store.pendingWrites()) return;
+    this.store.refreshFromStorage();
+    const context = this.store.taskContext(task.id);
+    if (!context.original?.deletedAt || JSON.stringify(context.original) !== JSON.stringify(task)) {this.notify('垃圾桶中的任務已更新或移除，請重新查看後再刪除。'); return;}
+    this.taskPurgeContext.set({...context, original: context.original, workspaceName: this.store.currentWorkspace().name});
+    this.formError.set(''); this.modal.set('purge-task');
+  }
+
+  async purgeTask(): Promise<void> {
+    const context = this.taskPurgeContext();
+    if (!context || this.modal() !== 'purge-task' || this.store.pendingWrites()) return;
+    if (!this.handleResult(await this.store.purgeTask(context.original.id, context))) return;
+    this.closeModal(); this.notifySaved('任務已徹底刪除');
   }
 
   requestEmptyTrash(): void {
@@ -1273,7 +1520,7 @@ export class App {
   closeFromBackdrop(event: MouseEvent): void {
     const close = this.backdropClick?.released && event.target === event.currentTarget;
     this.cancelBackdropClick();
-    if (close) this.closeModal();
+    if (close && this.modal() !== 'task') this.closeModal();
   }
 
   closeModal(): void {
@@ -1281,8 +1528,18 @@ export class App {
     if (this.modal() === 'intro' && this.introFirstUse() && this.store.onboarding() === 'guide') { void this.finishIntroduction(); return; }
     if (this.calendarPublishing()) return;
     if (this.modal() === 'settings' && this.store.pendingWrites() > 0) return;
+    if (this.modal() === 'purge-task' && this.store.pendingWrites() > 0) return;
+    const current = this.modal(), context = this.overviewReturnContext;
+    const returnToOverview = current !== 'overview-list' && !!context && context.workspaceId === this.store.currentWorkspace().id
+      && context.generation === this.store.generation() && this.overviewOpen() && !!this.overviewSelection();
+    this.flushLocalTaskDraft();
     this.cancelBackdropClick();
-    this.modal.set(null);
+    this.documentCreationRequest++; this.documentCreationPrompt.set(false);
+    this.modal.set(returnToOverview ? 'overview-list' : null);
+    if (!returnToOverview) {
+      this.overviewReturnContext = undefined;
+      if (current === 'overview-list') {this.overviewSelection.set(null); this.overviewPage.set(0); this.overviewScroll.set(0);}
+    }
     this.conflictContext.set(null);
     this.introFirstUse.set(false);
     this.firstWorkspaceDialog.set(false);
@@ -1292,6 +1549,7 @@ export class App {
     this.categoryToDelete.set(null);
     this.taskToDelete.set(null);
     this.emptyTrashContext.set(null);
+    this.taskPurgeContext.set(null);
     this.statusToDelete.set(null);
     this.workspaceToDelete.set(null);
     this.projectToDelete.set(null);

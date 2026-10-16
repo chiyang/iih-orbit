@@ -1,0 +1,53 @@
+<section class="overview" [class.detail-view]="detailsOnly()" [attr.aria-labelledby]="detailsOnly() ? 'overview-detail-title' : 'overview-title'">
+  @if (!detailsOnly()) {
+  <header class="overview-heading"><div><h2 #overviewTitle id="overview-title" tabindex="-1">空間總覽</h2><p>{{ store.currentWorkspace().name }} · {{ data().todayLabel }}</p></div><div class="overview-controls"><label>總覽專案<select aria-label="總覽專案" [ngModel]="selectedProject()" (ngModelChange)="projectChange.emit($event)"><option value="all">所有專案</option>@for (item of projects(); track item.id) {<option [value]="item.id">{{ item.name }}{{ item.archived ? '（已封存）' : '' }}</option>}<option value="">未指定專案</option></select></label><label class="archive-option"><input type="checkbox" [ngModel]="includeArchived()" (ngModelChange)="changeArchived($event)">包含封存任務與專案</label></div></header>
+  <p class="scope-note">目前工作空間 · {{ selectedProject() === 'all' ? '所有專案' : projectName(selectedProject()) }} · {{ includeArchived() ? '包含封存，排除垃圾桶' : '排除垃圾桶、封存任務與封存專案' }}</p>
+  }
+  @if (detailsOnly() && selection()) {
+    <div class="detail-heading"><h3 #detailTitle id="overview-detail-title" tabindex="-1">{{ selectionLabel() }} <span>{{ selection()?.kind === 'conflicts' ? data().conflicts.length : selectedTasks().length }} 項</span></h3><p>{{ store.currentWorkspace().name }} · {{ selectedProject() === 'all' ? '所有專案' : projectName(selectedProject()) }} · {{ includeArchived() ? '包含封存，排除垃圾桶' : '排除封存與垃圾桶' }}<br>點選任務可編輯，關閉編輯器後回到這份清單。</p></div>
+    <div #detailPane class="overview-detail-pane" (scroll)="scrollChange.emit($any($event.target).scrollTop)"><div class="overview-task-list" role="region" [attr.aria-label]="selectionLabel() + '清單'">
+      @if (selection()?.kind === 'conflicts') {
+        @for (conflict of conflictRows(); track conflict.id) {<button type="button" class="task-row" (click)="openConflict.emit({workspace: store.currentWorkspace(), conflict})"><app-icon name="conflict" /><span><strong>{{ conflictTitle(conflict) }}</strong><small>{{ conflict.versions.length }} 份內容待比較 · 開啟比較與編輯</small></span><app-icon name="chevron" /></button>} @empty {<p class="empty-state">目前範圍沒有待處理的任務衝突。</p>}
+      } @else {
+        @for (task of taskRows(); track task.id) {<button type="button" class="task-row" (click)="openTask.emit(task)"><span class="status-dot" [orbitColor]="statusMap().get(task.status)?.color || 'gray'"></span><span><strong>{{ task.title }}</strong><small>{{ projectName(task.projectId) }} · {{ statusMap().get(task.status)?.label || '未指定狀態' }}@if (task.dueDate) { · 截止 {{ task.dueDate }} {{ task.dueTime }}} @else if (task.startDate) { · 開始 {{ task.startDate }} {{ task.startTime }}} @else { · 未排程}</small></span><app-icon name="chevron" /></button>} @empty {<p class="empty-state">目前範圍沒有符合條件的任務。</p>}
+      }
+    </div>
+    </div>
+    @if (pageCount() > 1) {<nav class="pagination" aria-label="總覽任務清單分頁"><button type="button" [disabled]="currentPage() === 0" (click)="goPage(currentPage() - 1)">上一頁</button><span>{{ currentPage() + 1 }} / {{ pageCount() }} 頁 · 每頁 30 項</span><button type="button" [disabled]="currentPage() + 1 >= pageCount()" (click)="goPage(currentPage() + 1)">下一頁</button></nav>}
+  } @else if (!detailsOnly()) {
+    <div class="metrics" aria-label="任務概況">@for (kind of metrics; track kind) {<button type="button" class="metric" [class.warning]="kind === 'overdue' && count(kind) > 0" (click)="show(kind)"><span>{{ kind === 'total' && !includeArchived() ? '有效任務' : labels[kind] }}</span><strong>{{ count(kind) }}</strong><app-icon class="metric-arrow" name="chevron" /></button>}</div>
+    @if (!data().tasks.length) {<div class="empty-state"><app-icon name="leaf" /><h3>這個範圍還沒有任務</h3><p>可以調整專案範圍，或新增一個任務開始安排。</p><button type="button" (click)="addTask.emit()">新增任務</button></div>}
+    <div class="overview-grid">
+      <section class="overview-card completion" aria-label="完成進度">
+        <h3>完成進度</h3><p class="chart-caption">目前任務的完成比例</p>
+        <div class="donut-layout">
+          <div class="donut">
+            <svg viewBox="0 0 200 200" role="group" aria-label="任務完成比例圓環圖">
+              <circle class="donut-base" cx="100" cy="100" r="75" fill="none" stroke-width="26" />
+              @for (slice of completionSlices(); track slice.kind) {<path class="donut-slice" [attr.d]="slice.path" [orbitColor]="slice.color" role="button" tabindex="0" [attr.aria-label]="slice.label + ' ' + slice.count + ' 項，' + percentLabel(slice.percent) + '，查看任務'" (click)="show(slice.kind)" (keydown.enter)="show(slice.kind)" (keydown.space)="$event.preventDefault(); show(slice.kind)"><title>{{ slice.label }}：{{ slice.count }} 項（{{ percentLabel(slice.percent) }}）</title></path>}
+            </svg>
+            <div class="donut-center" aria-hidden="true"><strong>{{ data().percent }}<small>%</small></strong><span>{{ data().tasks.length ? '完成率' : '尚無任務' }}</span></div>
+          </div>
+          <div class="chart-legend" aria-label="完成比例圖例">@for (row of completionRows(); track row.kind) {<button type="button" class="legend-row" [orbitColor]="row.color" (click)="show(row.kind)"><span class="status-name"><i class="status-dot"></i>{{ row.label }}</span><strong>{{ row.count }}<small> 項</small></strong></button>}</div>
+        </div>
+        <p class="completion-summary">任務完成 {{ data().completed }} / {{ data().tasks.length }} 項@if (data().subtaskTotal) { · 子任務 {{ data().subtaskDone }} / {{ data().subtaskTotal }} 項}</p>
+      </section>
+      <section class="overview-card status-card" aria-label="狀態分布">
+        <h3>狀態分布</h3><p class="chart-caption">點選區塊或圖例查看任務</p>
+        <div class="donut-layout">
+          <div class="donut">
+            <svg viewBox="0 0 200 200" role="group" aria-label="任務狀態分布圓環圖">
+              <circle class="donut-base" cx="100" cy="100" r="75" fill="none" stroke-width="26" />
+              @for (slice of statusSlices(); track slice.id) {<path class="donut-slice" [attr.d]="slice.path" [orbitColor]="slice.color" role="button" tabindex="0" [attr.aria-label]="slice.label + ' ' + slice.count + ' 項，' + percentLabel(slice.percent) + '，查看任務'" (click)="show('status', slice.id)" (keydown.enter)="show('status', slice.id)" (keydown.space)="$event.preventDefault(); show('status', slice.id)"><title>{{ slice.label }}：{{ slice.count }} 項（{{ percentLabel(slice.percent) }}）</title></path>}
+            </svg>
+            <div class="donut-center" aria-hidden="true"><strong>{{ data().tasks.length }}</strong><span>範圍內任務</span></div>
+          </div>
+          <div class="chart-legend" aria-label="狀態分布圖例">@for (status of data().statuses; track status.id) {<button type="button" class="legend-row" [orbitColor]="status.color" (click)="show('status', status.id)"><span class="status-name"><i class="status-dot"></i>{{ status.label }}</span><strong>{{ status.count }}<small>{{ percentLabel(status.percent) }}</small></strong></button>}</div>
+        </div>
+      </section>
+      <section class="overview-card schedule-card" aria-label="時程重點"><div><h3>時程重點</h3><p>本週：{{ data().weekLabel }}（週日～週六）</p></div><div class="schedule-list" aria-label="時程任務數長條圖">@for (kind of schedules; track kind) {<button type="button" class="schedule-row" [orbitColor]="kind === 'overdue' ? 'orange' : 'blue'" (click)="show(kind)"><span>{{ kind === 'due-soon' ? store.reminders().dueSoonDays + ' 天內到期' : labels[kind] }}</span><span class="schedule-bar" aria-hidden="true"><span [style.width.%]="count(kind) / scheduleMax() * 100"></span></span><strong>{{ count(kind) }} <small>項</small></strong></button>}</div><small>只計待完成任務，各項可能重複；全天截止算至當天結束。</small></section>
+      <section class="overview-card project-card" aria-label="專案概況"><div class="card-heading"><h3>專案概況</h3><small>已完成 / 範圍內任務 · 完成率</small></div><div class="project-legend">@for (row of completionRows(); track row.kind) {<span [orbitColor]="row.color"><i class="status-dot"></i>{{ row.label }}</span>}</div><div class="project-list">@for (item of data().projects.slice(0, projectLimit()); track item.id) {<button type="button" class="project-row" [attr.aria-label]="item.name + (item.archived ? '，專案已封存' : '') + '：已完成 ' + item.completed + ' 項，待完成 ' + item.pending + ' 項，封存任務 ' + item.archivedCount + ' 項，共 ' + item.count + ' 項，完成率 ' + item.percent + '%，查看任務'" (click)="show('project', item.id)"><span>{{ item.name }}@if (item.archived) {<small>已封存</small>}</span><span>{{ item.completed }} / {{ item.count }}</span><span class="project-bar" aria-hidden="true"><i orbitColor="green" [style.flex-grow]="item.completed"></i><i orbitColor="blue" [style.flex-grow]="item.pending"></i><i orbitColor="gray" [style.flex-grow]="item.archivedCount"></i></span><strong>{{ item.percent }}%</strong></button>}</div><small>每條代表該專案內的任務比例；點選專案查看清單。</small>@if (data().projects.length > projectLimit()) {<button class="text-link" type="button" (click)="projectLimit.update(increaseProjectLimit)">顯示更多專案（尚有 {{ data().projects.length - projectLimit() }} 個）</button>}</section>
+      <section class="overview-card attention-card" aria-label="需要處理"><h3>需要處理</h3><button type="button" class="attention-row" (click)="show('conflicts')"><app-icon name="conflict" /><span>衝突任務</span><strong>{{ data().conflicts.length }}</strong><app-icon name="chevron" /></button><button type="button" class="attention-row" (click)="show('unavailable')"><app-icon name="link" /><span>有待處理連結的任務</span><strong>{{ count('unavailable') }}</strong><app-icon name="chevron" /></button><p>近期已查驗 {{ data().coverage.checked }} / {{ data().coverage.total }} 個 Drive 來源；{{ data().coverage.unavailable }} 個可能無法存取或在垃圾桶@if (data().coverage.stale) {，另有 {{ data().coverage.stale }} 個查驗已過期}。</p><small>使用已有查驗結果；未查驗、過期、離線或待授權不算失效。</small></section>
+    </div>
+  }
+</section>

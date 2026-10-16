@@ -38,7 +38,8 @@
 .app-shell { display: flex; min-height: 100vh; }
 .sidebar { width: var(--sidebar-width); flex: 0 0 var(--sidebar-width); padding: var(--sp34) var(--sp20) 0; background: var(--sidebar-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .sidebar > * { flex-shrink: 0; }
-.sidebar .brand { margin-bottom: var(--sp6); }
+.sidebar .brand { margin-bottom: var(--sp6); background: transparent; padding: 0; text-align: left; }
+.mobile-wordmark { background: transparent; padding: 0; text-align: left; }
 .brand-tagline { margin: 0 var(--sp8) var(--sp13); font-size: max(10px, var(--font-9)); font-weight: 400; line-height: 1.5; letter-spacing: .03em; color: var(--text-muted); text-align: center; text-wrap: balance; }
 .workspace-switch { position: relative; width: 100%; padding: var(--sp11) var(--sp10) var(--sp13); background: var(--surface); border: 1px solid var(--border); border-radius: 9px; margin-bottom: var(--sp31); text-align: left; }
 .workspace-switch:hover { border-color: var(--accent-border); background: var(--surface-hover); }
@@ -76,11 +77,11 @@
 .manage-categories:hover { color: var(--text); }
 .manage-categories app-icon { width: 14px; height: 14px; }
 .sidebar-bottom { margin-top: auto; padding-top: var(--sp18); }
-.little-tip { background: var(--accent-soft); border: 1px solid var(--border); border-radius: 9px; padding: var(--sp12) var(--sp10); position: relative; overflow: clip; isolation: isolate; }
-.tip-heading { display: flex; align-items: center; gap: var(--sp6); }
-.tip-art { width: 20px; height: 20px; flex-shrink: 0; display: grid; place-items: center; color: var(--accent-text); }
+.little-tip { background: var(--accent-soft); border: 1px solid var(--border); border-radius: 9px; margin-inline: calc(-1 * var(--sp2)); padding: var(--sp12) var(--sp4); position: relative; overflow: clip; isolation: isolate; }
+.tip-heading { display: flex; align-items: flex-start; gap: var(--sp3); }
+.tip-art { width: 16px; height: calc(var(--font-10) * 1.5); flex-shrink: 0; display: grid; place-items: center; color: var(--accent-text); }
 .tip-art app-icon { width: 16px; height: 16px; }
-.little-tip strong { min-width: 0; font-size: var(--font-10); font-weight: 600; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; text-wrap: balance; }
+.little-tip strong { flex: 1; min-width: 0; font-size: var(--font-10); font-weight: 600; color: var(--text); line-height: 1.5; text-align: left; white-space: nowrap; }
 .little-tip p { font-size: var(--font-9); color: var(--text-muted); line-height: 1.7; margin: var(--sp8) 0 var(--sp3); }
 .tip-line { position: absolute; width: 74px; height: 74px; border: 1px solid var(--border); border-radius: 50%; right: -28px; bottom: -32px; box-shadow: 0 0 0 11px var(--border); z-index: -1; pointer-events: none; }
 .profile { display: flex; align-items: center; gap: var(--sp10); padding: var(--sp21) var(--sp3); }

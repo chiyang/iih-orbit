@@ -11,6 +11,7 @@ import {createDriveDocument, readDriveFile, versionGraph, versionProperties} fro
 import {mergeDriveBackups} from '../src/app/drive-merge.ts';
 import {createBackup} from '../src/app/backup-data.ts';
 import {expiredDriveVersions} from '../src/app/drive-retention.ts';
+import {documentFromUrl} from '../src/app/document-data.ts';
 
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
 await mkdir('.angular', {recursive: true});
@@ -99,6 +100,20 @@ async function fixture() {
   }
   return {service, create, panel, store, auth, api, stored, documents, retired, removed, navigator, pauseEffects(value) {effectsPaused = value; if (!value) scheduler.flush();}, async event(name) {for (const fn of listeners.get(name) ?? []) fn({}); await settle();}, close() {for (const s of services) s.ngOnDestroy(); for (const i of injectors) i.destroy(); store.ngOnDestroy(); for (const [key, descriptor] of originals) {if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];}}};
 }
+
+test('雲端預覽可讀取每個任務的連結用途與排列順序，關閉不修改本機資料', async () => {
+  const f = await fixture();
+  try {
+    const task = f.store.tasks()[0], file = documentFromUrl('google-drive', 'https://docs.google.com/document/d/preview-notes/edit', '預覽文件');
+    const folder = documentFromUrl('google-drive', 'https://drive.google.com/drive/folders/preview-folder', '預覽資料夾');
+    await f.store.saveTask(task, f.store.taskContext(task.id), undefined, [folder, file], [{documentId: folder.id, description: '資料來源'}, {documentId: file.id, description: '文件用途\n<純文字>'}]);
+    const document = await createDriveDocument(await f.store.backupForExport('full')), panel = f.panel(), revision = f.store.revision();
+    panel.preview.set(document); panel.previewInformationOpen.set(true);
+    assert.deepEqual(panel.previewInformation()[0].links.map(link => [link.name, link.description]), [['預覽資料夾', '資料來源'], ['預覽文件', '文件用途\n<純文字>']]);
+    panel.clearPreview(); assert.deepEqual(panel.previewInformation(), []); assert.equal(panel.previewInformationOpen(), false);
+    assert.equal(f.store.revision(), revision);
+  } finally {f.close();}
+});
 
 test('登出檢查點讀回驗證，離線保留資料；舊部分範圍升級完整備份後可登出', async () => {
   const f = await fixture();

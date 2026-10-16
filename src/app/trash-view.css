@@ -9,9 +9,10 @@ button:hover {background: var(--accent-soft); color: var(--accent-text);}
 button:disabled {opacity: .45; cursor: default;}
 button:focus-visible {outline: 2px solid var(--accent-text); outline-offset: 3px;}
 button app-icon {width: 15px; height: 15px;}
-.empty-trash {color: var(--danger-text);}
-.trash-task {display: flex; align-items: flex-start; gap: var(--sp16); padding: var(--sp18); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); margin-bottom: var(--sp10);}
-.trash-task-content {flex: 1; min-width: 0;}
+.empty-trash, .purge-task {color: var(--danger-text);}
+.trash-task {display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--sp16); padding: var(--sp18); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); margin-bottom: var(--sp10);}
+.trash-task-content {flex: 1 1 240px; min-width: 0;}
+.trash-task-actions {display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp8); margin-left: auto; max-width: 100%;}
 h3 {display: flex; align-items: center; gap: var(--sp8); margin: 0 0 var(--sp9); font-size: var(--font-14); overflow-wrap: anywhere;}
 h3 app-icon {width: 14px; height: 14px; color: var(--accent-text);}
 .trash-task-meta {display: flex; flex-wrap: wrap; gap: var(--sp8); font-size: var(--font-10); color: var(--text-muted);}

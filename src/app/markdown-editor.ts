@@ -1,5 +1,6 @@
 import { afterNextRender, Component, ElementRef, inject, Injector, input, linkedSignal, output, viewChild } from '@angular/core';
 import { RichContent } from './rich-content';
+import {DescriptionKeyboard} from './description-keyboard';
 
 @Component({
   selector: 'app-markdown-editor', imports: [RichContent],
@@ -17,6 +18,12 @@ export class MarkdownEditor {
   readonly textarea = viewChild<ElementRef<HTMLTextAreaElement>>('source');
   readonly focusControl = viewChild<ElementRef<HTMLButtonElement>>('focusControl');
   readonly limit = 20000;
+  private readonly keyboard = new DescriptionKeyboard();
+  resetKeyboard(): void {this.keyboard.reset();}
+  keydown(event: KeyboardEvent): void {
+    const value = this.keyboard.handle(event, this.limit);
+    if (value !== undefined) this.valueChange.emit(value);
+  }
   change(event: Event): void { this.valueChange.emit((event.target as HTMLTextAreaElement).value); }
   startEditing(): void {
     this.mode.set('edit');

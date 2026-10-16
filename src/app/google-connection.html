@@ -50,7 +50,7 @@
     <div class="service-heading"><h4 id="connection-drive-files">Google Drive 檔案瀏覽</h4><span [class.connected]="files.auth.connected()">{{ files.auth.connected() ? '已連線' : files.auth.expired() ? '授權已到期' : '尚未連線' }}</span></div>
     <p>唯讀取得檔名、資料夾與連結，供檔案側欄及任務資訊連結使用。</p>
     @if (files.account().email) {<p class="service-account">{{ files.account().email }}</p>}
-    <div class="google-actions"><button type="button" class="google-primary" [disabled]="busy() || unsaved() || !store.google().clientId || !files.auth.ready()" (click)="connectFiles()">{{ files.connecting() ? '等待授權…' : files.auth.connected() ? '切換帳號／重新授權' : '連線檔案瀏覽' }}</button>@if (files.auth.connected()) {<button type="button" [disabled]="busy()" (click)="files.disconnect()">解除檔案瀏覽連線</button>}<button type="button" (click)="configure.emit('drive-files')">Google Drive 設定</button></div>
+    <div class="google-actions"><button type="button" class="google-primary" [disabled]="busy() || unsaved() || !store.google().clientId || !files.auth.ready()" (click)="connectFiles()">{{ files.connecting() ? '等待授權…' : files.account().id ? '重新授權檔案瀏覽' : '連線檔案瀏覽' }}</button>@if (files.account().id) {<button type="button" [disabled]="busy() || unsaved() || !files.auth.ready()" (click)="connectFiles(true)">切換檔案瀏覽帳號</button>}@if (files.auth.connected()) {<button type="button" [disabled]="busy()" (click)="files.disconnect()">解除檔案瀏覽連線</button>}<button type="button" (click)="configure.emit('drive-files')">Google Drive 設定</button></div>
     @if (files.error() || files.warning() || files.auth.sessionWarning()) {<p class="google-error" role="alert">{{ files.error() || files.warning() || files.auth.sessionWarning() }}</p>}
   </section>
 </div>

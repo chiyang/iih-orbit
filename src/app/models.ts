@@ -66,7 +66,7 @@ export interface CalendarTransfer {
 }
 
 export interface BoardState {
-  version: 4 | 5;
+  version: 4 | 5 | 6;
   projects: Project[];
   categories: Category[];
   statuses: BoardStatus[];
@@ -75,6 +75,8 @@ export interface BoardState {
   taskConflicts?: TaskConflict[];
   documentSources?: DocumentSource[];
   documentLinks?: DocumentLink[];
+  documentDetails?: DocumentDetail[];
+  documentOrders?: DocumentOrder[];
 }
 
 export type DocumentProvider = 'google-drive' | 'gmail' | 'pcloud' | 'microsoft-365';
@@ -92,6 +94,10 @@ export interface DocumentSource {
 }
 /** Each addition has its own identity. Removals are permanent for that addition. */
 export interface DocumentLink {id: string; taskId: string; documentId: string; removed?: true}
+/** A task/source description belongs to the observed lifetime of that relation. */
+export interface DocumentDetail {id: string; taskId: string; documentId: string; linkIds: string[]; description: string}
+export interface DocumentOrder {id: string; documentIds: string[]}
+export interface DocumentDescription {documentId: string; description: string}
 
 export interface DeviceIdentity {id: string; name: string}
 export interface TaskConflictSource extends Partial<DeviceIdentity> {updatedAt?: string}

@@ -26,10 +26,13 @@ Orbit 使用 Google Identity Services Token Model，直接由瀏覽器呼叫 RES
 | --- | --- | --- |
 | Google Calendar | 月曆讀取與帳號識別；首次移轉任務時另取得活動寫入權限 | 「Google 月曆」：工作空間綁定、來源與更新頻率 |
 | Gmail | 郵件唯讀與帳號識別 | 「Gmail」：郵件使用與更新說明；側欄操作標籤、搜尋與更新 |
-| Google Drive 檔案瀏覽 | Drive `drive.metadata.readonly` 與帳號識別 | 「Google Drive」：瀏覽帳號、重新授權、解除連線 |
+| Google Drive 檔案瀏覽 | Drive `drive.metadata.readonly` 與帳號識別 | 「Google Drive」：多個來源、獨立 Client ID／帳號、重新授權、解除連線 |
+| 從任務建立文件 | 該來源獨立的 Drive `drive.file`（根位置）或 `drive`（既有資料夾）與帳號識別 | 任務資訊連結「建立文件」：文件／試算表／簡報／Colab、保存位置與部分成功接續 |
 | 遠端同步備份 | Drive `drive.file` 與帳號識別 | 「遠端同步備份」：全部工作空間同步、頻率與雲端資料 |
 
-可以在「Google 連線」同一頁分別連線或解除。已有 Client ID 時，各功能分頁上方也直接提供連線、切換帳號／重新授權及解除連線；沒有 ID 時才顯示「前往 Google 連線設定」。右側檔案分頁只保留瀏覽操作，帳號與連線選項集中到「Google Drive」設定分頁。
+可以在「Google 連線」同一頁分別連線或解除。已有 Client ID 時，各功能分頁上方也直接提供連線、切換帳號／重新授權及解除連線；沒有 ID 時才顯示「前往 Google 連線設定」。右側檔案分頁提供精簡來源切換與續接入口，來源名稱、Client ID、帳號切換與移除集中到「Google Drive」設定分頁。多個來源與原帳號續接的操作見[多個 Drive 檔案來源](drive-file-sources.md)。
+
+文件建立的保存位置直接沿用指定來源既有的 Google 讀取授權，載入站內資料夾列表供瀏覽、搜尋及選取，不需要 Picker、API Key 或專案編號。按建立時才另取得寫入授權：根位置首次使用 `drive.file`，既有資料夾使用可管理整個 Drive 的 `drive`，由 Google 視窗取得同意，需在同意畫面宣告相應 scope。寫入憑證只留在當前頁面，讀取及備份連線仍各自分開。[操作、權限與接續](document-creation-and-cleanup.md#建立授權)。
 
 授權元件準備完成後，按連線才開啟 Google 授權視窗。Calendar 的寫入權限不代表所有月曆都能寫入；移轉只能選擇具有 `writerWithoutPrivateAccess`、`writer` 或 `owner` 權限的月曆。Drive 備份仍以 `drive.file` 管理 Orbit 建立或明確授權的檔案；檔案瀏覽另以 `drive.metadata.readonly` 逐層取得自己的檔案與資料夾資訊，排除 Orbit 備份使用的「IIH Orbit」資料夾。參考 [Drive 權限說明](https://developers.google.com/workspace/drive/api/guides/api-specific-auth)。
 
@@ -40,6 +43,8 @@ Orbit 使用 Google Identity Services Token Model，直接由瀏覽器呼叫 RES
 全部服務（包含 Calendar 移轉與 Drive 檔案瀏覽權限）連線有效時，這個按鈕改為「目前 Google 全部服務已連線」提示；部分權限未取得時仍提供授權入口，不把部分連線顯示為全部已連線。曾經取得的授權到期時，顯示「重新授權全部服務」。
 
 已保存 Client ID，且目前瀏覽器曾取得的服務授權到期時，頁首顯示 G 按鈕；按下直接開啟相同的全部服務授權流程，不必進入設定。成功後隱藏，取消授權仍保留到期提醒；主動解除服務不觸發提醒。G 按鈕顯示時會隱藏遠端同步按鈕，在窄螢幕也保留。等待上傳資料仍沿用原有保護，此時可由設定單獨重新連線 Drive。
+
+頁首 G 在主要服務使用同一已知帳號時，以原帳號提示減少重複授權互動；各主要服務使用不同帳號時，提示到設定分別續接。額外檔案來源各自授權、續接及顯示到期狀態，不由主要「一次授權全部服務」切換其帳號。
 
 頁首 G、立即同步、同步並登出、操作引導、主題、字體、設定及側欄按鈕提供 tooltip，滑鼠停留或鍵盤聚焦都會顯示。同步並登出先開啟確認視窗，確認後才備份及清除資料。
 

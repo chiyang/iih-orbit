@@ -1,5 +1,5 @@
 export type SourceFileKind = 'folder' | 'document' | 'sheet' | 'presentation' | 'notebook' | 'ecmx' | 'pdf' | 'image' | 'mail' | 'file';
-export interface SourceFileInfo {name: string; mimeType?: string; provider?: string; url?: string; shortcut?: {mimeType: string}}
+export interface SourceFileInfo {name: string; mimeType?: string; provider?: string; url?: string; shortcut?: {id?: string; mimeType: string; resourceKey?: string}}
 const GOOGLE_TYPES: Record<string, SourceFileKind> = {
   'application/vnd.google-apps.folder': 'folder',
   'application/vnd.google-apps.document': 'document',
@@ -35,4 +35,17 @@ export function sourceFileKind(file: SourceFileInfo): SourceFileKind {
 export function sourceFileLabel(file: SourceFileInfo): string {
   const label = LABELS[sourceFileKind(file)];
   return file.shortcut ? label + '捷徑' : file.mimeType === 'application/vnd.google-apps.shortcut' ? '檔案捷徑' : label;
+}
+
+/** Keep portable Drive URLs in saved data, and open notebooks in their editor. */
+export function sourceOpenUrl(file: SourceFileInfo): string {
+  if (!file.url || sourceFileKind(file) !== 'notebook' || file.provider && file.provider !== 'google-drive') return file.url ?? '';
+  try {
+    const url = new URL(file.url);
+    if (url.protocol !== 'https:' || url.hostname !== 'drive.google.com' || url.username || url.password || url.port) return file.url;
+    const id = file.shortcut?.id ?? /\/file\/d\/([A-Za-z0-9_-]+)(?:\/|$)/.exec(url.pathname)?.[1] ?? (url.pathname === '/open' ? url.searchParams.get('id') : undefined);
+    if (!id || !/^[A-Za-z0-9_-]{1,200}$/.test(id)) return file.url;
+    const key = file.shortcut?.resourceKey ?? url.searchParams.get('resourcekey');
+    return 'https://colab.research.google.com/drive/' + id + (key && /^[A-Za-z0-9_-]{1,200}$/.test(key) ? '?resourcekey=' + encodeURIComponent(key) : '');
+  } catch {return file.url;}
 }

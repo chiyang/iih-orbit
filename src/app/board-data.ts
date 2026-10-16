@@ -5,15 +5,16 @@ import { scheduleError, validDate } from './task-schedule.ts';
 import { readCalendarOrigin, readCalendarTransfers } from './calendar-transfer-data.ts';
 import { validTaskEditTime } from './task-activity-data.ts';
 import { readDeviceIdentity } from './device-data.ts';
-import { readDocumentData } from './document-data.ts';
+import { readDocumentData, readDocumentPresentations } from './document-data.ts';
 
 /** Read saved schemas without mutating the source or discarding legacy tasks. */
 export function readBoardState(value: unknown): BoardState | null {
   if (!value || typeof value !== 'object') return null;
   const source = value as Omit<BoardState, 'version'> & {version: unknown; projectName?: unknown};
-  if (![1, 2, 3, 4, 5].includes(source.version as number)) return null;
-  const modern = source.version === 4 || source.version === 5;
-  if (source.version !== 5 && (source.documentSources !== undefined || source.documentLinks !== undefined)) return null;
+  if (![1, 2, 3, 4, 5, 6].includes(source.version as number)) return null;
+  const modern = [4, 5, 6].includes(source.version as number);
+  if (![5, 6].includes(source.version as number) && (source.documentSources !== undefined || source.documentLinks !== undefined)) return null;
+  if (source.version !== 6 && (source.documentDetails !== undefined || source.documentOrders !== undefined)) return null;
   if (!modern && (typeof source.projectName !== 'string' || !source.projectName.trim())) return null;
   const projects: Project[] = modern ? source.projects : [{id: 'project-legacy', name: (source.projectName as string).trim()}];
   if (!validProjects(projects)) return null;
@@ -69,7 +70,7 @@ export function readBoardState(value: unknown): BoardState | null {
       const versions: TaskConflictVersion[] = [];
       for (const version of conflict.versions) {
         if (!version || typeof version.key !== 'string' || !version.key || version.key.length > 1000000) return null;
-        const board = version.task === null ? undefined : readBoardState({...source, version: 4, documentSources: undefined, documentLinks: undefined, taskConflicts: undefined, tasks: [version.task]});
+        const board = version.task === null ? undefined : readBoardState({...source, version: 4, documentSources: undefined, documentLinks: undefined, documentDetails: undefined, documentOrders: undefined, taskConflicts: undefined, tasks: [version.task]});
         const task = board?.tasks[0];
         if (version.task !== null && (!task || task.id !== conflict.id || task.subtasks.some(item => !item.id) || new Set(task.subtasks.map(item => item.id)).size !== task.subtasks.length)) return null;
         const origin = version.source;
@@ -81,14 +82,16 @@ export function readBoardState(value: unknown): BoardState | null {
     }
     if (new Set(taskConflicts.map(conflict => conflict.id)).size !== taskConflicts.length) return null;
   }
-  const documents = source.version === 5 ? readDocumentData(source as BoardState, new Set([...tasks.map(task => task.id), ...taskConflicts?.map(conflict => conflict.id) ?? []])) : undefined;
+  const documents = source.version === 5 || source.version === 6 ? readDocumentData(source as BoardState, new Set([...tasks.map(task => task.id), ...taskConflicts?.map(conflict => conflict.id) ?? []])) : undefined;
   if (documents === null) return null;
+  const presentations = source.version === 6 ? readDocumentPresentations({...source, ...documents} as BoardState) : undefined;
+  if (presentations === null) return null;
   return {
     // Keep an absent archive flag absent so existing cloud backup hashes stay valid.
-    version: modern ? source.version as 4 | 5 : 4, projects: projects.map(project => ({id: project.id, name: project.name.trim(), ...(project.archived === undefined ? {} : {archived: project.archived})})),
+    version: modern ? source.version as 4 | 5 | 6 : 4, projects: projects.map(project => ({id: project.id, name: project.name.trim(), ...(project.archived === undefined ? {} : {archived: project.archived})})),
     categories: source.categories.map(category => ({id: category.id, name: category.name, color: category.color})),
     statuses: statuses.map(status => ({id: status.id, label: status.label, subtitle: status.subtitle, color: status.color, kind: status.kind, hidden: status.hidden ?? status.kind === 'archived'})), tasks,
-    ...(calendarTransfers ? {calendarTransfers} : {}), ...(taskConflicts ? {taskConflicts} : {}), ...(documents ?? {})
+    ...(calendarTransfers ? {calendarTransfers} : {}), ...(taskConflicts ? {taskConflicts} : {}), ...(documents ?? {}), ...(presentations ?? {})
   };
 }
 

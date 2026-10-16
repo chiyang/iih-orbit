@@ -26,3 +26,4 @@
 .trash-nav button {width: 100%;}
 .trash-nav app-icon {width: 16px; height: 16px; color: var(--text-muted);}
 @container workspace-main (max-width: 600px) {.undo-button {width: max(28px, calc(32px * var(--font-scale))); padding: var(--sp6);} .undo-button span {display: none;} .project-header.is-compact h1 {font-size: var(--font-13);} .project-header.is-compact .workspace-heading-actions .button {padding-inline: var(--sp6);}}
+@media (max-width: 380px) {.workspace-heading-actions {flex-wrap: wrap; max-width: 100%;}}

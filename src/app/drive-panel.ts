@@ -8,6 +8,7 @@ import { DriveService, type DriveRemovalReview } from './drive-service';
 import { driveCatalog, fileScope } from './drive-catalog';
 import { Icon } from './icon';
 import { GoogleServiceHeader } from './google-service-header';
+import { indexTaskInformation } from './document-data';
 
 @Component({selector: 'app-drive-panel', imports: [FormsModule, Icon, DatePipe, DecimalPipe, NgTemplateOutlet, GoogleServiceHeader], templateUrl: './drive-panel.html', styleUrl: './drive-panel.css'})
 export class DrivePanel {
@@ -19,6 +20,13 @@ export class DrivePanel {
   readonly saving = signal(false);
   readonly preview = signal<DriveDocument | null>(null);
   readonly previewFile = signal<DriveFile | null>(null);
+  readonly previewInformationOpen = signal(false);
+  readonly previewInformation = computed(() => this.preview()?.data.workspaces.flatMap(workspace => {
+    const sources = new Map(workspace.documentSources?.map(source => [source.id, source]));
+    const tasks = new Map(workspace.tasks.map(task => [task.id, task]));
+    return [...indexTaskInformation(workspace)].filter(([id]) => tasks.has(id)).map(([id, details]) => ({id: JSON.stringify([workspace.id, id]), workspace: workspace.name, task: tasks.get(id)!.title,
+      links: details.map(item => ({...item, name: sources.get(item.documentId)!.name}))}));
+  }) ?? []);
   readonly action = signal<'restore' | 'join' | 'cloud' | null>(null);
   readonly useLabel = '使用這份雲端資料';
   readonly confirmationPhrase = computed(() => this.useLabel);
@@ -226,7 +234,7 @@ export class DrivePanel {
   }
   async inspect(file: DriveFile, use = false): Promise<void> {
     const request = ++this.previewRequest;
-    this.preview.set(null); this.previewFile.set(null); this.action.set(null); this.error.set('');
+    this.preview.set(null); this.previewFile.set(null); this.previewInformationOpen.set(false); this.action.set(null); this.error.set('');
     const document = await this.drive.preview(file);
     if (document && request === this.previewRequest) {
       this.preview.set(document); this.previewFile.set(file);
@@ -279,5 +287,5 @@ export class DrivePanel {
     try {downloadBackup(await this.store.backupForExport('full'));}
     catch (error) {this.error.set(error instanceof Error ? error.message : '無法下載目前資料。');}
   }
-  clearPreview(): void { this.previewRequest++; this.preview.set(null); this.previewFile.set(null); this.action.set(null); }
+  clearPreview(): void { this.previewRequest++; this.preview.set(null); this.previewFile.set(null); this.previewInformationOpen.set(false); this.action.set(null); }
 }

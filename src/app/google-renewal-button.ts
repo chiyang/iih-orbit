@@ -15,7 +15,7 @@ export class GoogleRenewalButton {
   readonly result = output<string>();
   async renew(): Promise<void> {
     if (!this.connections.authorizationNeeded() || !this.connections.canConnect()) return;
-    await this.connections.connectAll();
+    await this.connections.connectAll(true);
     const message = this.connections.error() || this.connections.message();
     if (message && !this.destroyRef.destroyed) this.result.emit(message);
   }

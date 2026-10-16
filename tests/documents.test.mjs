@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createDocumentSource, documentFromUrl, documentsForTask, setTaskDocuments, tasksForDocument, mergeDocumentLinks} from '../src/app/document-data.ts';
+import {createDocumentSource, documentFromUrl, documentLocationLabel, documentLocationSnapshot, documentsForTask, setTaskDocuments, tasksForDocument, mergeDocumentLinks} from '../src/app/document-data.ts';
 import {DocumentMetadataCache} from '../src/app/document-metadata.ts';
 import {readBoardState} from '../src/app/board-data.ts';
 import {createBackup, copyWorkspaces, readBackup} from '../src/app/backup-data.ts';
@@ -9,10 +9,29 @@ import {mergeDriveBackups} from '../src/app/drive-merge.ts';
 import {createDriveDocument, readDriveDocument, readDriveFile, versionProperties, syncHash} from '../src/app/drive-data.ts';
 import {splitWorkspaceRecords, joinWorkspaceRecords, changedWorkspaceRecords} from '../src/app/workspace-records.ts';
 import {backup, cloud} from './helpers/backup-cloud.mjs';
+import {sourceOpenUrl} from '../src/app/source-file-type.ts';
 
 const google = (id = 'source-one', name = '研究文件') => documentFromUrl('google-drive', `https://docs.google.com/document/d/${id}/edit`, name);
 const workspace = () => backup(2).data.workspaces[0];
 const wrap = board => createBackup({version: 1, activeWorkspaceId: board.id, workspaces: [board]}, 'full');
+
+test('Colab 仍保存可攜 Drive 身份及連結，還原後在介面開啟 Colab 編輯器', () => {
+  const source = createDocumentSource({provider: 'google-drive', sourceScope: 'drive', fileId: 'notebook', name: '分析.ipynb', mimeType: 'application/vnd.google.colaboratory', url: 'https://drive.google.com/file/d/notebook/view?resourcekey=key'});
+  const restored = readBackup(JSON.parse(JSON.stringify(wrap(setTaskDocuments(workspace(), 'task-0', [source]))))).data.workspaces[0].documentSources.find(item => item.id === source.id);
+  assert.equal(restored.id, source.id); assert.equal(restored.url, source.url); assert.equal(sourceOpenUrl(restored), 'https://colab.research.google.com/drive/notebook?resourcekey=key');
+  assert.equal(sourceOpenUrl({...source, mimeType: 'application/octet-stream'}), 'https://colab.research.google.com/drive/notebook?resourcekey=key');
+  for (const other of [{...source, provider: 'pcloud', url: 'https://my.pcloud.com/file/notebook'}, {...source, mimeType: 'application/vnd.google-apps.document'}, {...source, url: 'https://drive.google.com.evil.test/file/d/notebook/view'}]) assert.equal(sourceOpenUrl(other), other.url);
+});
+
+test('資訊連結保留來源名稱與路徑快照，JSON 還原後仍可顯示，舊來源不誤認為其他帳號', () => {
+  const source = {...google(), location: documentLocationSnapshot('研究 / 計畫：來源', '我的雲端硬碟 / 教材')};
+  const restored = readBackup(JSON.parse(JSON.stringify(wrap(setTaskDocuments(workspace(), 'task-0', [source]))))).data.workspaces[0].documentSources[0];
+  assert.equal(documentLocationLabel(restored), '研究 / 計畫：來源 / 我的雲端硬碟 / 教材');
+  assert.equal(restored.id, google().id); assert.equal(restored.url, google().url);
+  assert.equal(documentLocationLabel({...google(), location: '我的雲端硬碟 / 教材'}), 'Google Drive · 我的雲端硬碟 / 教材');
+  assert.equal(documentLocationLabel(google()), 'Google Drive');
+  assert.equal(documentLocationLabel({...google(), provider: 'gmail', location: '寄件人@example.test'}), 'Gmail · 寄件人@example.test');
+});
 
 test('來源識別優先，改名／移動不新增來源；跨服務／範圍與同名不同 ID 不合併', () => {
   const source = google(), renamed = google('source-one', '新名稱');

@@ -14,6 +14,7 @@ import { Task } from './models';
 export class TrashView {
   readonly store = inject(BoardStore);
   readonly restoreTask = output<Task>();
+  readonly purgeTask = output<Task>();
   readonly emptyTrash = output<void>();
   readonly back = output<void>();
   readonly undo = output<void>();

@@ -69,10 +69,10 @@ export class GoogleConnection implements OnDestroy {
     try {await this.connections.connectAll();}
     finally {this.startedConsent = false;}
   }
-  async connectFiles(): Promise<void> {
+  async connectFiles(selectAccount = false): Promise<void> {
     if (this.busy() || this.unsaved()) return;
     this.startedFileConsent = true;
-    try {await this.files.connect();}
+    try {await this.files.connect(undefined, undefined, selectAccount);}
     finally {this.startedFileConsent = false;}
   }
   disconnectCalendar(): void {

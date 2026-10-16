@@ -1,0 +1,7 @@
+.source-details{margin:12px 0;font-size:var(--font-11)}
+.source-client{overflow-wrap:anywhere}
+.source-editor,.source-removal{margin:16px 0;padding:16px;border:1px solid var(--border);border-radius:9px;background:var(--section-bg)}
+.source-editor h4{margin:0;font-size:var(--font-13)}
+.source-removal{border-color:var(--accent-border);font-size:var(--font-11)}
+.service-heading h4{overflow-wrap:anywhere;min-width:0}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent-text);outline-offset:2px}

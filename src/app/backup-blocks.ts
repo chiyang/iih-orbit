@@ -49,7 +49,7 @@ export async function packBackup(document: DriveDocument, hashBlock: (block: Bac
 
 export function readManifest(value: unknown, expected: DriveVersion): BackupManifest {
   const m = value as BackupManifest;
-  if (!m || m.application !== 'iih-orbit-chunked' || m.formatVersion !== 1 || !m.header || ![5, 6].includes(expected.formatVersion)
+  if (!m || m.application !== 'iih-orbit-chunked' || m.formatVersion !== 1 || !m.header || ![5, 6, 7].includes(expected.formatVersion)
     || canonical(readVersion(m.header.cloud)) !== canonical(expected) || m.header.application !== 'iih-orbit' || !m.state || m.state.version !== 1
     || typeof m.state.activeWorkspaceId !== 'string' || !Array.isArray(m.state.workspaces) || !m.state.workspaces.length || m.state.workspaces.length > 10000) throw new Error('雲端備份索引不完整，原有資料保留。');
   const reference = (r: BlockReference): boolean => !!r && validDriveId(r.id) && validHash(r.hash);

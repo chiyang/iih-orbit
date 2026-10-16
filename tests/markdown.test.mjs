@@ -64,3 +64,20 @@ test('郵件排版表格去除空白欄與巢狀框線，保留內文順序、�
   assert.ok(html.textContent.indexOf('登入通知') < html.textContent.indexOf('查看活動')); assert.equal(html.querySelector('a').href, 'https://example.test/security');
   assert.equal(html.querySelector('img'), null); assert.equal(html.querySelectorAll('[style],[src]').length, 0);
 });
+
+test('描述 Tab 保留焦點並插入縮排，多行可縮排與反縮排；Escape 後 Tab 可離開', () => {
+  const injector = createEnvironmentInjector([]), oldMode = globalThis.ngServerMode; globalThis.ngServerMode = true;
+  try {
+    const editor = runInInjectionContext(injector, () => new MarkdownEditor()); editor.value = signal('abc');
+    const textarea = dom.window.document.createElement('textarea'); textarea.value = 'abc'; textarea.setSelectionRange(1, 1);
+    editor.valueChange.subscribe(value => editor.value.set(value));
+    const press = (key, shiftKey = false) => {const event = new dom.window.KeyboardEvent('keydown', {key, shiftKey, cancelable: true}); Object.defineProperty(event, 'target', {value: textarea}); editor.keydown(event); return event;};
+    assert.equal(press('Tab').defaultPrevented, true); assert.equal(textarea.value, 'a  bc'); assert.equal(editor.value(), textarea.value); assert.equal(textarea.selectionStart, 3);
+    textarea.value = '- a\n- b\nnext'; textarea.setSelectionRange(0, 8);
+    press('Tab'); assert.equal(textarea.value, '  - a\n  - b\nnext'); assert.equal(textarea.value.slice(textarea.selectionStart, textarea.selectionEnd), '- a\n  - b\n');
+    press('Tab', true); assert.equal(textarea.value, '- a\n- b\nnext');
+    press('Escape'); assert.equal(press('Tab').defaultPrevented, false); assert.equal(press('Tab').defaultPrevented, true);
+    textarea.value = 'x'.repeat(20000); textarea.setSelectionRange(10, 10); press('Tab'); assert.equal(textarea.value.length, 20000);
+    textarea.value = '\nline'; textarea.setSelectionRange(0, 1); press('Tab'); assert.equal(textarea.value, '  \nline');
+  } finally {injector.destroy(); if (oldMode === undefined) delete globalThis.ngServerMode; else globalThis.ngServerMode = oldMode;}
+});

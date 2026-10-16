@@ -27,7 +27,7 @@ const task = {id: 'welcome-task', title: '迎新海報', description: '', projec
 function application(fresh = false) {
   const state = {version: 1, activeWorkspaceId: 'first', workspaces: [{version: 4, id: 'first', name: '學程工作', projects: [{id: 'welcome', name: '迎新活動'}, {id: 'website', name: '網站改版'}], categories: [{id: 'design', name: '設計', color: 'green'}], statuses: COLUMNS, tasks: [task, {...task, id: 'website-task', title: '網站首頁', projectId: 'website', status: 'done'}, {...task, id: 'daily', title: '日常任務', projectId: ''}]}, {version: 4, id: 'second', name: '個人生活', projects: [], categories: [], statuses: COLUMNS, tasks: []}]};
   const values = new Map(fresh ? [] : [['orbit-workspaces-v1', JSON.stringify(state)]]);
-  globalThis.localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key)};
+  globalThis.localStorage = {get length() {return values.size;}, key: index => [...values.keys()][index] ?? null, getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key)};
   const store = new BoardStore();
   const effects = new Set();
   const scheduler = {add(effect) {effects.add(effect);}, schedule() {}, remove(effect) {effects.delete(effect);}};
@@ -69,6 +69,42 @@ test('桌面可收合及開啟左側欄，窄畫面沿用遮罩導覽並保留�
   } finally {delete globalThis.window; f.close();}
 });
 
+test('右側欄可拉寬至 800px，拖曳與鍵盤共用邊界；縮小視窗保留原寬度偏好', () => {
+  const f = application(), app = f.app;
+  try {
+    f.flush(); const before = structuredClone(f.store.workspaceState());
+    app.tasksOpen.set(true);
+    app.startPanelResize({preventDefault() {}, currentTarget: {setPointerCapture() {}}, pointerId: 1});
+    app.resizePanel({clientX: 400}); assert.equal(app.effectivePanelWidth(), 800); assert.equal(app.compactNavigation(), true);
+    app.finishPanelResize(); assert.equal(f.values.get('orbit-side-panel-width-v1'), '800'); assert.equal(f.reopen().panelWidth(), 800);
+    globalThis.window = {innerWidth: 1024}; app.resize();
+    assert.equal(app.panelMaxWidth(), 544); assert.equal(app.effectivePanelWidth(), 544); assert.equal(app.panelWidth(), 800);
+    globalThis.window = {innerWidth: 1440}; app.resize(); assert.equal(app.effectivePanelWidth(), 800);
+    app.panelResizeKey({key: 'ArrowRight', preventDefault() {}}); assert.equal(app.effectivePanelWidth(), 780);
+    app.startPanelResize({preventDefault() {}, currentTarget: {setPointerCapture() {}}, pointerId: 2}); app.resizePanel({clientX: 1439}); app.finishPanelResize();
+    assert.equal(app.effectivePanelWidth(), 300); assert.equal(f.values.get('orbit-side-panel-width-v1'), '300');
+    assert.deepEqual(f.store.workspaceState(), before);
+  } finally {delete globalThis.window; f.close();}
+});
+
+test('寬畫面側欄上限為 45%，較窄時沿用固定上限；寬度超過 800px 可重開恢復', () => {
+  const f = application(), app = f.app;
+  try {
+    for (const [width, limit] of [[1440, 800], [1777, 800], [1778, 800], [1920, 864], [2560, 1152], [3840, 1728], [1024, 544]]) {
+      globalThis.window = {innerWidth: width}; app.resize(); assert.equal(app.panelMaxWidth(), limit);
+    }
+    globalThis.window = {innerWidth: 2560}; app.resize();
+    app.startPanelResize({preventDefault() {}, currentTarget: {setPointerCapture() {}}, pointerId: 1});
+    app.resizePanel({clientX: 0}); app.finishPanelResize();
+    assert.equal(app.effectivePanelWidth(), 1152); assert.equal(f.values.get('orbit-side-panel-width-v1'), '1152');
+    const reopened = f.reopen(); assert.equal(reopened.panelWidth(), 1152); assert.equal(reopened.effectivePanelWidth(), 800);
+    globalThis.window = {innerWidth: 2560}; reopened.resize(); assert.equal(reopened.effectivePanelWidth(), 1152);
+    reopened.panelResizeKey({key: 'ArrowLeft', preventDefault() {}}); assert.equal(reopened.effectivePanelWidth(), 1152);
+    reopened.panelResizeKey({key: 'ArrowRight', preventDefault() {}}); assert.equal(reopened.effectivePanelWidth(), 1132);
+    f.values.set('orbit-side-panel-width-v1', 'Infinity'); assert.equal(f.reopen().panelWidth(), 360);
+  } finally {delete globalThis.window; f.close();}
+});
+
 test('手機來源拖曳先隱藏側欄遮罩並保留來源狀態，結束才真正關閉；桌面與非來源拖曳不受影響', () => {
   const f = application(), app = f.app;
   const drag = (types = [DOCUMENT_DRAG_TYPE]) => ({defaultPrevented: false, dataTransfer: {types}, target: {closest: () => ({})}});
@@ -106,7 +142,45 @@ test('垃圾桶排除任務視圖、專案進度與側欄來源，還原及復�
   } finally {f.close();}
 });
 
-test('編輯內容拖曳選取到遮罩不關閉，只有遮罩上的完整短按會關閉', () => {
+test('單筆徹底刪除先確認並可取消，保存中不可關閉或重複操作，成功保留其他垃圾桶任務', async () => {
+  const f = application();
+  try {
+    const {app, store} = f;
+    await store.deleteTask('welcome-task'); await store.deleteTask('website-task'); app.openTrash();
+    const selected = store.trashedTasks()[0], before = structuredClone(store.workspaceState());
+    app.requestPurgeTask(selected); assert.equal(app.modal(), 'purge-task');
+    assert.equal(app.taskPurgeContext().original.title, selected.title); assert.equal(app.taskPurgeContext().workspaceName, '學程工作');
+    assert.deepEqual(store.workspaceState(), before);
+    app.closeModal(); assert.equal(app.taskPurgeContext(), null); await app.purgeTask(); assert.deepEqual(store.workspaceState(), before);
+    store.pendingWrites.set(1); app.requestPurgeTask(selected); assert.equal(app.modal(), null); store.pendingWrites.set(0);
+    app.requestPurgeTask(selected); const saving = app.purgeTask();
+    assert.ok(store.pendingWrites() > 0); app.closeModal(); assert.equal(app.modal(), 'purge-task');
+    await app.purgeTask(); await saving;
+    assert.equal(app.modal(), null); assert.equal(app.taskPurgeContext(), null); assert.equal(app.trashOpen(), true);
+    assert.deepEqual(store.trashedTasks().map(item => item.id), ['website-task']);
+    assert.equal(app.toast(), '任務已徹底刪除'); assert.equal(store.canUndo(), false);
+  } finally {f.close();}
+});
+
+test('單筆刪除拒絕過期垃圾桶項目，確認後還原或保存失敗均保留內容與錯誤視窗', async () => {
+  const f = application();
+  try {
+    const {app, store} = f;
+    await store.deleteTask('welcome-task'); const selected = structuredClone(store.trashedTasks()[0]);
+    app.requestPurgeTask(selected); const peer = new BoardStore(); await peer.restoreTask(selected.id);
+    await app.purgeTask(); assert.equal(app.modal(), 'purge-task'); assert.match(app.formError(), /已更新、還原或移除/);
+    assert.equal(new BoardStore().tasks().some(item => item.id === selected.id), true);
+    app.closeModal(); app.requestPurgeTask(selected); assert.equal(app.modal(), null); assert.equal(app.taskPurgeContext(), null);
+    await store.deleteTask(selected.id); app.requestPurgeTask(store.trashedTasks()[0]);
+    const write = localStorage.setItem; localStorage.setItem = () => {throw new Error('full');};
+    try {await app.purgeTask();} finally {localStorage.setItem = write;}
+    assert.equal(app.modal(), 'purge-task'); assert.equal(app.taskPurgeContext().original.id, selected.id);
+    assert.match(app.formError(), /任務仍保留在垃圾桶/); assert.equal(store.trashedTasks().length, 1);
+    await app.purgeTask(); assert.equal(app.modal(), null); assert.equal(store.trashedTasks().length, 0);
+  } finally {f.close();}
+});
+
+test('任務編輯點擊或拖曳到遮罩均不關閉，其他視窗仍可在遮罩完整短按關閉', () => {
   const f = application(), backdrop = {}, content = {};
   const event = (target = backdrop, patch = {}) => ({target, currentTarget: backdrop, pointerId: 1, button: 0, isPrimary: true, clientX: 20, clientY: 20, ...patch});
   try {
@@ -118,7 +192,12 @@ test('編輯內容拖曳選取到遮罩不關閉，只有遮罩上的完整短�
     app.startBackdropClick(event(backdrop, {button: 2})); app.finishBackdropClick(event()); app.closeFromBackdrop(event()); assert.equal(app.modal(), 'task');
     app.startBackdropClick(event()); app.finishBackdropClick(event(backdrop, {pointerId: 2})); app.closeFromBackdrop(event()); assert.equal(app.modal(), 'task');
     app.startBackdropClick(event()); app.cancelBackdropClick(); app.finishBackdropClick(event()); app.closeFromBackdrop(event()); assert.equal(app.modal(), 'task');
-    app.startBackdropClick(event()); app.finishBackdropClick(event(backdrop, {clientX: 22})); app.closeFromBackdrop(event()); assert.equal(app.modal(), null);
+    app.startBackdropClick(event()); app.finishBackdropClick(event(backdrop, {clientX: 22})); app.closeFromBackdrop(event());
+    assert.equal(app.modal(), 'task'); assert.equal(app.draft.description, '尚未儲存的描述');
+    app.closeModal(); assert.equal(app.modal(), null);
+    app.openTask('todo', task); assert.ok(app.localTaskDraftRecovery()); app.restoreLocalTaskDraft();
+    assert.equal(app.draft.description, '尚未儲存的描述'); app.cancelTaskEdit(); assert.equal(app.modal(), null);
+    app.modal.set('settings'); app.startBackdropClick(event()); app.finishBackdropClick(event()); app.closeFromBackdrop(event()); assert.equal(app.modal(), null);
   } finally {f.close();}
 });
 
@@ -233,7 +312,7 @@ test('任務側欄與 Gmail／提醒互斥，保留主畫面篩選並開啟最�
     const old = structuredClone(store.tasks()[0]);
     await store.saveTask({...store.tasks()[0], title: '更新後的任務'});
     app.openPanelTask(old); assert.equal(app.draft.title, '更新後的任務'); assert.equal(app.tasksOpen(), true);
-    app.escape(); assert.equal(app.modal(), null); assert.equal(app.tasksOpen(), true);
+    app.escape(); assert.equal(app.modal(), 'task'); assert.equal(app.tasksOpen(), true); app.cancelTaskEdit();
     app.rememberBrowse(); assert.equal(f.reopen().tasksOpen(), true);
     app.escape(); assert.equal(app.panelOpen(), false);
     app.togglePanel(); assert.equal(app.tasksOpen(), true); app.togglePanel(); assert.equal(app.panelOpen(), false);
@@ -817,13 +896,13 @@ test('主題快捷鍵循環淺色、深色及跟隨系統，其他外觀與工�
   } finally { close(); }
 });
 
-test('右下角訊息中心在開關任務及設定後保持開啟，Escape 先關中央視窗', () => {
+test('右下角訊息中心在開關任務及設定後保持開啟，Escape 保留編輯任務', () => {
   const {app, store, close} = application();
   try {
     app.toggleReminders(); assert.equal(app.remindersOpen(), true); assert.equal(app.modal(), null);
     const item = reminderItems(store.currentWorkspace(), store.generation(), [])[0];
     app.openReminder(item); assert.equal(app.modal(), 'task'); assert.equal(app.remindersOpen(), true);
-    app.escape(); assert.equal(app.modal(), null); assert.equal(app.remindersOpen(), true);
+    app.escape(); assert.equal(app.modal(), 'task'); assert.equal(app.remindersOpen(), true); app.cancelTaskEdit();
     app.openReminder({...item, task: store.tasks().find(task => task.id === 'daily')});
     assert.equal(app.draft.id, 'daily'); assert.equal(app.remindersOpen(), true);
     app.closeModal(); app.openBackup(); assert.equal(app.modal(), 'settings'); assert.equal(app.settingsTab(), 'data');
@@ -904,4 +983,259 @@ test('郵件看板與清單中央關聯、邊緣新增，placeholder 位移不�
     f.app.listMailOver(event(list, row, 101)); assert.equal(f.app.mailCreates('daily'), true);
     assert.equal(f.app.listMailOver(event(list, list.querySelector('th'), 20)), false); assert.equal(mail.boardPosition(), null);
   } finally {globalThis.Node = previousNode; dom.window.close(); f.close();}
+});
+
+test('建立文件前先明確保存新任務與未儲存用途，取消提示保留草稿，乾淨任務直接進入', async () => {
+  const f = application(), opened = []; f.app.openDocumentCreation = async () => opened.push(f.app.taskEditContext());
+  try {
+    f.app.openTask('todo'); f.app.draft.title = '新任務與文件'; const count = f.store.tasks().length;
+    await f.app.requestDocumentCreation(); assert.equal(f.app.documentCreationPrompt(), true); assert.equal(f.store.tasks().length, count);
+    f.app.documentCreationPrompt.set(false); assert.equal(f.app.draft.title, '新任務與文件');
+    await f.app.saveTask(false, true); assert.equal(opened.length, 1); assert.equal(f.app.modal(), 'task'); assert.equal(f.app.editing(), true);
+    const file = documentFromUrl('google-drive', 'https://drive.google.com/file/d/dirty-source/view', '用途來源');
+    f.app.setDraftDocuments([file]); f.app.draftDocumentDescriptions.set([{documentId: file.id, description: '建立前的用途'}]);
+    await f.app.requestDocumentCreation(); assert.equal(f.app.documentCreationPrompt(), true); assert.equal(opened.length, 1);
+    await f.app.saveTask(false, true); assert.equal(f.store.descriptionsForTask(f.app.draft.id)[0].description, '建立前的用途'); assert.equal(opened.length, 2);
+    const revision = f.store.revision(); await f.app.requestDocumentCreation(); assert.equal(opened.length, 3); assert.equal(f.store.revision(), revision);
+  } finally {f.close();}
+});
+
+test('任務保存失敗或日期不合法時，不進入雲端文件建立並保留草稿', async () => {
+  const f = application(), opened = []; f.app.openDocumentCreation = async () => opened.push(true);
+  try {
+    f.app.openTask('todo', f.store.tasks()[0]); f.app.draft.title = '保留草稿'; f.app.draft.dueDate = '2025-01-01';
+    await f.app.saveTask(false, true); assert.equal(opened.length, 0); assert.ok(f.app.formError());
+    f.app.draft.dueDate = f.app.draft.startDate; const write = localStorage.setItem; localStorage.setItem = () => {throw new Error('quota');};
+    try {await f.app.saveTask(false, true); assert.equal(opened.length, 0); assert.equal(f.app.modal(), 'task'); assert.match(f.app.formError(), /尚未成功保存/);} finally {localStorage.setItem = write;}
+    assert.equal(f.app.draft.title, '保留草稿');
+  } finally {f.close();}
+});
+
+test('任務與專注描述模式按 Escape 保留視窗，內層選檔仍可先取消', () => {
+  const f = application();
+  try {
+    f.app.openTask('todo', f.store.tasks()[0]); f.app.draft.description = '保留這份描述';
+    f.app.escape(); assert.equal(f.app.modal(), 'task');
+    f.app.descriptionFocused.set(true); f.app.escape();
+    assert.equal(f.app.modal(), 'task'); assert.equal(f.app.descriptionFocused(), true);
+    assert.equal(f.app.draft.description, '保留這份描述');
+    let cancelled = false; f.app.documentLinksEditor = () => ({pickerOpen: () => true, cancelPicker: () => {cancelled = true;}});
+    f.app.escape(); assert.equal(cancelled, true); assert.equal(f.app.modal(), 'task');
+    f.app.documentLinksEditor = () => undefined;
+  } finally {f.close();}
+});
+
+test('停頓 1200ms 才暫存完整本機草稿，連續輸入重設等待，工作版本與同步資料不變', t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const f = application(), app = f.app;
+  try {
+    app.openTask('todo', f.store.tasks()[0]);
+    const before = JSON.stringify(f.store.state()), revision = f.store.revision();
+    const drafts = () => [...f.values.keys()].filter(key => key.startsWith('iih-orbit-task-edit-draft-v1:'));
+    app.draft.description = '第一段'; app.ngDoCheck(); t.mock.timers.tick(1199); assert.equal(drafts().length, 0);
+    app.draft.description += '\n持續輸入'; app.ngDoCheck(); t.mock.timers.tick(1199); assert.equal(drafts().length, 0);
+    t.mock.timers.tick(1); assert.equal(drafts().length, 1); assert.match(app.localTaskDraftStatus(), /已暫存/);
+    assert.equal(JSON.stringify(f.store.state()), before); assert.equal(f.store.revision(), revision);
+    app.ngDoCheck(); t.mock.timers.tick(1200); assert.equal(drafts().length, 1);
+    app.closeModal(); app.openTask('todo', f.store.tasks()[0]); assert.ok(app.localTaskDraftRecovery());
+    assert.equal(app.draft.description, ''); app.restoreLocalTaskDraft(); assert.equal(app.draft.description, '第一段\n持續輸入');
+    app.cancelTaskEdit(); assert.equal(drafts().length, 0); assert.equal(JSON.stringify(f.store.state()), before);
+  } finally {f.close();}
+});
+
+test('草稿保存名稱、描述、連結用途與順序、時程及尚未加入的輸入，恢復後只有明確儲存才更新任務', async () => {
+  const f = application(), app = f.app;
+  try {
+    const file = documentFromUrl('google-drive', 'https://drive.google.com/file/d/draft-file/view', '草稿檔案');
+    const input = {name: '待加入文件', url: 'https://drive.google.com/file/d/pending/view', adding: signal(true), hasDraft: () => false};
+    app.openTask('todo', f.store.tasks()[0]); app.documentLinksEditor = () => input;
+    app.draft.title = '本機修改'; app.draft.description = '長篇內容'; app.draft.pinned = true;
+    app.setDraftDocuments([file]); app.draftDocumentDescriptions.set([{documentId: file.id, description: '讀取方法章節'}]);
+    app.draft.dueTime = '14:00'; app.hasDueTime = true; app.subtaskDraft = '未按加入的步驟';
+    app.flushLocalTaskDraft(); app.closeModal(); app.documentLinksEditor = () => undefined;
+    const reopened = f.reopen(); reopened.openTask('todo', f.store.tasks()[0]);
+    const restoredInput = {name: '', url: '', adding: signal(false), hasDraft: () => false}; reopened.documentLinksEditor = () => restoredInput;
+    reopened.restoreLocalTaskDraft(); assert.equal(reopened.draft.title, '本機修改'); assert.equal(reopened.draft.description, '長篇內容');
+    assert.equal(reopened.draft.pinned, true); assert.equal(reopened.hasDueTime, true); assert.equal(reopened.draft.dueTime, '14:00');
+    assert.equal(reopened.subtaskDraft, '未按加入的步驟'); assert.equal(restoredInput.name, input.name); assert.equal(restoredInput.url, input.url); assert.equal(restoredInput.adding(), true);
+    assert.equal(reopened.draftDocuments()[0].id, file.id); assert.equal(reopened.draftDocumentDescriptions()[0].description, '讀取方法章節');
+    assert.equal(f.store.tasks()[0].title, '迎新海報');
+    await reopened.saveTask(); assert.equal(f.store.tasks()[0].title, '本機修改'); assert.equal(f.store.tasks()[0].subtasks[0].title, '未按加入的步驟');
+    assert.equal(f.store.descriptionsForTask('welcome-task')[0].description, '讀取方法章節');
+    assert.equal([...f.values.keys()].filter(key => key.startsWith('iih-orbit-task-edit-draft-v1:')).length, 0);
+  } finally {f.close();}
+});
+
+test('恢復草稿保留舊編輯基準，另一分頁修改後不能覆蓋；新任務與工作空間草稿分開', async () => {
+  const f = application(), app = f.app;
+  try {
+    app.openTask('todo', f.store.tasks()[0]); app.draft.description = '舊基準的本機內容'; app.flushLocalTaskDraft(); app.closeModal();
+    await f.store.saveTask({...f.store.tasks()[0], description: '已更新的正式任務'});
+    app.openTask('todo', f.store.tasks()[0]); app.restoreLocalTaskDraft(); assert.equal(app.taskDraftConflict(), true);
+    await app.saveTask(); assert.equal(app.modal(), 'task'); assert.equal(f.store.tasks()[0].description, '已更新的正式任務');
+    assert.equal(app.draft.description, '舊基準的本機內容'); app.cancelTaskEdit();
+    app.openTask(); app.draft.title = '還沒建立的新任務'; app.flushLocalTaskDraft(); app.closeModal();
+    f.store.switchWorkspace('second'); app.openTask(); assert.equal(app.localTaskDraftRecovery(), null); app.cancelTaskEdit();
+    f.store.switchWorkspace('first'); app.openTask(); assert.ok(app.localTaskDraftRecovery()); app.restoreLocalTaskDraft();
+    assert.equal(app.draft.title, '還沒建立的新任務'); assert.equal(app.editing(), false); app.cancelTaskEdit();
+  } finally {f.close();}
+});
+
+test('分頁各自暫存不覆寫彼此，儲存空間失敗不宣稱已暫存，舊資料世代不恢復', () => {
+  const f = application(), app = f.app;
+  try {
+    app.openTask('todo', f.store.tasks()[0]); app.draft.description = '第一頁'; app.flushLocalTaskDraft();
+    const second = f.reopen(); second.openTask('todo', f.store.tasks()[0]); second.draft.description = '第二頁'; second.flushLocalTaskDraft();
+    const records = () => [...f.values.entries()].filter(([key]) => key.startsWith('iih-orbit-task-edit-draft-v1:'));
+    assert.equal(records().length, 2); assert.deepEqual(records().map(([, raw]) => JSON.parse(raw).snapshot.task.description).sort(), ['第一頁', '第二頁']);
+    second.cancelTaskEdit(); assert.equal(records().length, 1);
+    const write = localStorage.setItem; localStorage.setItem = () => {throw new Error('quota');};
+    try {app.draft.description = '失敗後仍保留'; app.flushLocalTaskDraft(); assert.match(app.localTaskDraftStatus(), /暫存失敗/); assert.equal(app.draft.description, '失敗後仍保留');}
+    finally {localStorage.setItem = write;}
+    app.cancelTaskEdit();
+    app.openTask(); app.draft.title = '世代隔離'; app.flushLocalTaskDraft(); app.closeModal(); f.store.generation.set('new-generation');
+    app.openTask(); assert.equal(app.localTaskDraftRecovery(), null); app.cancelTaskEdit();
+  } finally {f.close();}
+});
+
+test('空間總覽獨立於任務篩選，記住每個空間的範圍與下鑽，不改工作資料或同步版本', () => {
+  const f = application(), app = f.app;
+  try {
+    app.selectScope('done'); app.projectFilter.set('website'); app.query.set('舊清單搜尋');
+    const revision = f.store.revision(), before = JSON.stringify(f.store.workspaces());
+    app.openOverview(); assert.equal(app.overviewOpen(), true); assert.equal(app.navigationTitle(), '空間總覽');
+    assert.equal(app.scope(), 'done'); assert.equal(app.overviewProject(), 'all');
+    app.overviewProject.set('welcome'); app.overviewSelection.set({kind: 'overdue'}); app.rememberBrowse();
+    const reopened = f.reopen(); assert.equal(reopened.overviewOpen(), true); assert.equal(reopened.overviewProject(), 'welcome'); assert.deepEqual(reopened.overviewSelection(), {kind: 'overdue'}); assert.equal(reopened.modal(), 'overview-list');
+    assert.equal(JSON.stringify(f.store.workspaces()), before); assert.equal(f.store.revision(), revision);
+    app.selectCategory('design'); assert.equal(app.overviewOpen(), false); app.openOverview(); app.selectScope('all'); assert.equal(app.overviewOpen(), false);
+    app.openOverview(); app.selectProject('website'); assert.equal(app.overviewOpen(), false);
+    app.openOverview(); app.modal.set('settings'); app.overviewOpen.set(false); app.openOverview(); assert.equal(app.overviewOpen(), false); app.closeModal();
+  } finally {f.close();}
+});
+
+test('回到專案看板顯示目前空間的全部任務，清除當次篩選而不修改任務或總覽設定', () => {
+  const f = application(), app = f.app;
+  try {
+    const before = JSON.stringify(f.store.workspaces()), revision = f.store.revision(), workspace = f.store.currentWorkspace().id;
+    app.view.set('week'); app.scope.set('done'); app.projectFilter.set('website'); app.categoryFilter.set('design');
+    app.query.set('找不到的名稱'); app.priorityFilter.set('high'); app.pinnedOnly.set(true); app.recentOnly.set(true);
+    app.deadlineFilter.set('due-soon'); app.deadlineDays.set(7); app.trashOpen.set(true); app.sidebarOpen.set(true);
+    app.overviewOpen.set(true); app.overviewProject.set('welcome'); app.overviewArchived.set(true); app.overviewSelection.set({kind: 'pending'});
+    app.openBoardHome();
+    assert.equal(app.view(), 'board'); assert.equal(app.navigationTitle(), '專案看板'); assert.equal(app.overviewOpen(), false);
+    assert.equal(app.scope(), 'all'); assert.equal(app.projectFilter(), 'all'); assert.equal(app.categoryFilter(), 'all'); assert.equal(app.query(), '');
+    assert.equal(app.priorityFilter(), 'all'); assert.equal(app.pinnedOnly(), false); assert.equal(app.recentOnly(), false);
+    assert.equal(app.deadlineFilter(), 'all'); assert.equal(app.deadlineDays(), null); assert.equal(app.trashOpen(), false); assert.equal(app.sidebarOpen(), false);
+    assert.equal(app.hasFilters(), false); assert.equal(app.visibleTasks().length, 3); assert.equal(app.overviewSelection(), null);
+    assert.equal(app.overviewProject(), 'welcome'); assert.equal(app.overviewArchived(), true);
+    assert.equal(f.store.currentWorkspace().id, workspace); assert.equal(f.store.revision(), revision); assert.equal(JSON.stringify(f.store.workspaces()), before);
+    app.view.set('month'); app.openTask('todo', f.store.tasks()[0]); app.draft.description = '正在編輯'; app.openBoardHome();
+    assert.equal(app.modal(), 'task'); assert.equal(app.view(), 'month'); assert.equal(app.draft.description, '正在編輯'); app.cancelTaskEdit();
+  } finally {f.close();}
+});
+
+test('沒有瀏覽紀錄預設專案看板，重新開啟仍接續原視圖與總覽狀態', () => {
+  const f = application(), app = f.app;
+  try {
+    assert.equal(app.view(), 'board'); assert.equal(app.overviewOpen(), false); assert.equal(app.navigationTitle(), '專案看板');
+    app.view.set('month'); app.scope.set('active'); app.query.set('研究'); app.rememberBrowse();
+    const calendar = f.reopen(); assert.equal(calendar.view(), 'month'); assert.equal(calendar.scope(), 'active'); assert.equal(calendar.query(), '研究');
+    app.openOverview(); app.overviewProject.set('welcome'); app.rememberBrowse();
+    const overview = f.reopen(); assert.equal(overview.overviewOpen(), true); assert.equal(overview.overviewProject(), 'welcome'); assert.equal(overview.view(), 'month');
+    app.openBoardHome(); app.rememberBrowse();
+    const home = f.reopen(); assert.equal(home.overviewOpen(), false); assert.equal(home.view(), 'board'); assert.equal(home.query(), '');
+  } finally {f.close();}
+});
+
+test('甘特沿用工作空間與任務篩選、封存範圍和排序，開啟任務保留原時程', () => {
+  const f = application(), app = f.app;
+  try {
+    app.view.set('gantt'); app.projectFilter.set('welcome');
+    assert.deepEqual(app.sortedTasks().map(task => task.id), ['welcome-task']);
+    const key = app.ganttContext(); app.query.set('不存在'); assert.equal(app.sortedTasks().length, 0); assert.notEqual(app.ganttContext(), key);
+    app.clearFilters(); app.selectScope('done'); assert.equal(app.view(), 'gantt'); assert.deepEqual(app.sortedTasks().map(task => task.id), ['website-task']);
+    app.selectScope('archived'); assert.equal(app.view(), 'gantt'); assert.equal(app.sortedTasks().length, 0);
+    app.selectScope('all'); app.categoryFilter.set('design'); assert.equal(app.sortedTasks().length, 3);
+    const original = {...f.store.tasks()[0], startTime: '09:15', dueTime: '16:45'}, before = JSON.stringify(f.store.workspaces()), revision = f.store.revision();
+    app.openTask(original.status, original); assert.equal(app.modal(), 'task'); assert.equal(app.draft.startTime, '09:15'); assert.equal(app.draft.dueTime, '16:45');
+    app.cancelTaskEdit(); assert.equal(app.view(), 'gantt'); assert.equal(app.modal(), null);
+    assert.equal(JSON.stringify(f.store.workspaces()), before); assert.equal(f.store.revision(), revision);
+  } finally {f.close();}
+});
+
+test('甘特日期與尺度在重新開啟及切換空間後恢復，瀏覽不觸發工作資料更新', () => {
+  const f = application(), app = f.app;
+  try {
+    f.flush(); const before = JSON.stringify(f.store.workspaces()), revision = f.store.revision();
+    app.view.set('gantt'); app.ganttDate.set('2028-02-29'); app.ganttScale.set('month'); app.ganttZoom.set(175); app.ganttCompletion.set('pending'); app.ganttOrder.set('end'); app.ganttRange.set({start: '2028-02-20', end: '2028-03-15'}); app.calendarDate.set('2026-10-16'); f.flush();
+    assert.equal(app.visibleTasks().length, 3); // Gantt's date range does not filter other views.
+    const reopened = f.reopen(); assert.equal(reopened.view(), 'gantt'); assert.equal(reopened.ganttDate(), '2028-02-29'); assert.equal(reopened.ganttScale(), 'month'); assert.equal(reopened.calendarDate(), '2026-10-16');
+    assert.equal(reopened.ganttZoom(), 175); assert.equal(reopened.ganttCompletion(), 'pending'); assert.equal(reopened.ganttOrder(), 'end'); assert.deepEqual(reopened.ganttRange(), {start: '2028-02-20', end: '2028-03-15'});
+    f.store.switchWorkspace('second'); f.flush(); app.ganttDate.set('2027-01-01'); app.ganttScale.set('week'); app.ganttZoom.set(75); app.ganttCompletion.set('done'); app.ganttRange.set({start: '2027-01-01', end: '2027-01-20'}); f.flush();
+    f.store.switchWorkspace('first'); f.flush(); assert.equal(app.ganttDate(), '2028-02-29'); assert.equal(app.ganttScale(), 'month');
+    assert.equal(app.ganttZoom(), 175); assert.equal(app.ganttCompletion(), 'pending'); assert.equal(app.ganttOrder(), 'end'); assert.deepEqual(app.ganttRange(), {start: '2028-02-20', end: '2028-03-15'});
+    assert.equal(f.store.revision(), revision); assert.equal(JSON.stringify(f.store.workspaces()), before);
+    f.store.generation.set('new-generation'); f.flush(); assert.equal(app.view(), 'board'); assert.equal(app.ganttScale(), 'day');
+  } finally {f.close();}
+});
+
+test('甘特圖例篩選僅存瀏覽偏好，重開接續、不同空間分開且不影響其他視圖任務', () => {
+  const f = application();
+  try {
+    f.flush(); const {app, store} = f, before = structuredClone(store.workspaceState());
+    app.view.set('gantt'); app.ganttStatuses.set(['todo', 'done']); app.ganttCategories.set(['design', '']); f.flush();
+    const reopened = f.reopen(); assert.deepEqual(reopened.ganttStatuses(), ['todo', 'done']); assert.deepEqual(reopened.ganttCategories(), ['design', '']);
+    assert.equal(app.visibleTasks().length, 3);
+    store.switchWorkspace('second'); f.flush(); assert.deepEqual(app.ganttStatuses(), []); assert.deepEqual(app.ganttCategories(), []);
+    store.switchWorkspace('first'); f.flush(); assert.deepEqual(app.ganttStatuses(), ['todo', 'done']); assert.deepEqual(app.ganttCategories(), ['design', '']);
+    assert.deepEqual(store.workspaceState(), before);
+    store.generation.set('new-generation'); f.flush(); assert.deepEqual(app.ganttStatuses(), []); assert.deepEqual(app.ganttCategories(), []);
+  } finally {f.close();}
+});
+
+test('從總覽新增任務使用總覽專案，不繼承清單分類；空間切換與資料世代隔離總覽狀態', async () => {
+  const f = application(), app = f.app;
+  try {
+    app.projectFilter.set('website'); app.categoryFilter.set('design'); app.openOverview(); app.overviewProject.set('welcome');
+    app.openTask(); assert.equal(app.draft.projectId, 'welcome'); assert.equal(app.draft.categoryId, ''); app.draft.title = '從總覽新增'; await app.saveTask(); assert.doesNotMatch(app.toast(), /清除篩選/);
+    app.overviewSelection.set({kind: 'project', value: 'welcome'}); app.rememberBrowse();
+    f.store.switchWorkspace('second'); f.flush(); assert.equal(app.overviewOpen(), true); assert.equal(app.overviewProject(), 'all'); assert.equal(app.overviewSelection(), null);
+    f.store.switchWorkspace('first'); f.flush(); assert.equal(app.overviewProject(), 'welcome'); assert.deepEqual(app.overviewSelection(), {kind: 'project', value: 'welcome'}); assert.equal(app.modal(), 'overview-list');
+    f.store.generation.set('replacement'); f.flush(); assert.equal(app.overviewOpen(), false); assert.equal(app.overviewProject(), 'all'); assert.equal(app.overviewSelection(), null);
+  } finally {f.close();}
+});
+
+test('總覽下鑽使用清單視窗，編輯、取消與儲存後接回原條件、頁碼及捲動位置', async () => {
+  const f = application(), app = f.app;
+  try {
+    app.openOverview(); app.overviewProject.set('welcome');
+    const revision = f.store.revision();
+    app.openOverviewList({kind: 'pending'}); app.overviewPage.set(1); app.overviewScroll.set(180);
+    assert.equal(app.modal(), 'overview-list'); assert.equal(f.store.revision(), revision);
+    app.openOverviewTask(f.store.tasks().find(task => task.id === 'welcome-task'));
+    assert.equal(app.modal(), 'task'); app.draft.description = '清單內的本機草稿'; app.closeModal();
+    assert.equal(app.modal(), 'overview-list'); assert.equal(app.overviewPage(), 1); assert.equal(app.overviewScroll(), 180);
+    assert.deepEqual(app.overviewSelection(), {kind: 'pending'}); assert.equal(app.overviewProject(), 'welcome');
+    assert.equal(f.store.tasks().find(task => task.id === 'welcome-task').description, '');
+    app.openOverviewTask(f.store.tasks().find(task => task.id === 'welcome-task')); app.restoreLocalTaskDraft();
+    app.cancelTaskEdit(); assert.equal(app.modal(), 'overview-list');
+    app.openOverviewTask(f.store.tasks().find(task => task.id === 'welcome-task')); app.draft.status = 'done'; await app.saveTask();
+    assert.equal(app.modal(), 'overview-list'); assert.equal(f.store.tasks().find(task => task.id === 'welcome-task').status, 'done');
+    app.closeModal(); assert.equal(app.modal(), null); assert.equal(app.overviewOpen(), true);
+    assert.equal(app.overviewSelection(), null); assert.equal(app.overviewPage(), 0); assert.equal(app.overviewScroll(), 0);
+  } finally {f.close();}
+});
+
+test('清單視窗可用 Escape 關閉，任務編輯仍受保護；資料世代與工作空間改變後不接回舊清單', () => {
+  const f = application(), app = f.app;
+  try {
+    app.openOverview(); app.openOverviewList({kind: 'done'}); app.escape();
+    assert.equal(app.modal(), null); assert.equal(app.overviewSelection(), null);
+    app.openOverviewList({kind: 'total'}); app.openOverviewTask(f.store.tasks()[0]); app.escape(); assert.equal(app.modal(), 'task');
+    f.store.generation.set('other'); app.closeModal(); assert.equal(app.modal(), null);
+    app.openOverviewList({kind: 'total'}); app.openOverviewTask(f.store.tasks()[0]);
+    f.store.switchWorkspace('second'); app.closeModal(); assert.equal(app.modal(), null);
+    app.modal.set('settings'); app.openOverviewList({kind: 'pending'}); assert.equal(app.modal(), 'settings');
+  } finally {f.close();}
 });
