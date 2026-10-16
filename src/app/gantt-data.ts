@@ -1,6 +1,7 @@
 import type {BoardStatus, Project, Task} from './models.ts';
 import {COLUMNS} from './models.ts';
 import {dateKey, parseDate, taskMoment, validDate, validTime} from './task-schedule.ts';
+import type {CalendarPosition} from './calendar-move.ts';
 
 export type GanttScale = 'day' | 'week' | 'month';
 export type GanttCompletion = 'all' | 'done' | 'pending';
@@ -129,6 +130,14 @@ export function ganttDayAtPosition(position: number, axis: GanttAxis, columnWidt
   const index = Math.floor(value), start = axis.scale === 'month' ? monthDay(axis.origin + index) : axis.origin + index * (axis.scale === 'week' ? 7 : 1);
   const end = axis.scale === 'month' ? monthDay(axis.origin + index + 1) : start + (axis.scale === 'week' ? 7 : 1);
   return Math.min(axis.end, start + (value - index) * (end - start));
+}
+
+/** Empty timeline drops use the visible civil day; daily mode snaps to a quarter hour. */
+export function ganttDropPosition(position: number, axis: GanttAxis, columnWidth: number): CalendarPosition | undefined {
+  if (!Number.isFinite(position) || !Number.isFinite(columnWidth) || columnWidth <= 0 || position < 0 || position >= axis.units * columnWidth) return;
+  const value = ganttDayAtPosition(position, axis, columnWidth), day = Math.floor(value), key = civilKey(day);
+  if (!validDate(key) || day < axis.start || day >= axis.end) return;
+  return axis.scale === 'day' ? {kind: 'time', day: key, minute: Math.min(1425, Math.floor(((value - day) * 1440 + 0.00001) / 15) * 15)} : {kind: 'all-day', day: key};
 }
 
 export function ganttZoomScroll(axis: GanttAxis, oldWidth: number, newWidth: number, scroll: number, visibleWidth: number): number {

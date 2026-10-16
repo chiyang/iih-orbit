@@ -366,6 +366,22 @@ test('月曆每天預覽四項，超過可逐日或全部展開，全部展開�
   } finally { close(); }
 });
 
+test('月曆接續本機全部展開偏好，切週及回月保持，單日收合會回報關閉全部展開', async () => {
+  const f = calendarController(Array.from({length: 6}, (_, index) => ({...base, id: 'saved-' + index})));
+  try {
+    const calendar = f.calendar, changes = [];
+    calendar.savedExpandAll = signal(true);
+    calendar.expandAllChange.subscribe(value => {changes.push(value); calendar.savedExpandAll.set(value);});
+    const day = () => calendar.days().find(item => item.key === '2026-10-09');
+    assert.equal(day().visibleTasks.length, 6);
+    calendar.mode.set('week'); calendar.mode.set('month'); assert.equal(day().visibleTasks.length, 6);
+    calendar.toggleDay('2026-10-09'); assert.equal(day().visibleTasks.length, 4); assert.deepEqual(changes, [false]);
+    calendar.toggleAllDays(); assert.deepEqual(changes, [false, true]);
+    calendar.savedExpandAll.set(false); assert.equal(calendar.expandAll(), false);
+    assert.equal(JSON.stringify(await f.store.backupForExport('full')).includes('calendarExpandAll'), false);
+  } finally {f.close();}
+});
+
 function assertEditedTask(actual, expected) {
   const {updatedAt, editSource, ...content} = actual;
   const {editSource: previousSource, ...expectedContent} = expected;

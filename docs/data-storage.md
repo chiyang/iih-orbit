@@ -8,10 +8,12 @@ Orbit 是瀏覽器端的單人任務管理工具，沒有自建後端。核心�
 
 | 內容 | 位置 | 備份規則 |
 | --- | --- | --- |
-| 工作空間及其資訊縮放模式、專案、任務、任務待選版本與處理紀錄、分類、狀態、順序、主題、主題色、提醒及公開 Google／Drive 偏好 | IndexedDB：`iih-orbit-workspaces-v1` | 依全部／選定範圍匯出 |
-| 字體大小（與外觀一起本機保存） | IndexedDB：`iih-orbit-workspaces-v1` | 不匯出／同步；匯入及同步保留本機字級 |
+| 工作空間及其資訊縮放模式、專案、任務、任務待選版本與處理紀錄、分類、狀態、順序、主題色、提醒及公開 Google／Drive 偏好 | IndexedDB：`iih-orbit-workspaces-v1` | 依全部／選定範圍匯出 |
+| 深淺色／跟隨系統與字體大小 | IndexedDB：`iih-orbit-workspaces-v1` | 不匯出／同步；匯入及同步保留本機選擇 |
 | 當前工作空間 | 每個分頁的 sessionStorage：`orbit-active-workspace-v1` | 不匯出 |
-| 視圖、日期、篩選、排序、來源開關、捲動、右側欄及垃圾桶入口 | localStorage：`iih-orbit-browse-state-v1` | 不匯出 |
+| 視圖、日期、篩選、排序、來源開關、月曆全部展開、捲動、右側欄、總覽／甘特選項及垃圾桶入口 | localStorage：`iih-orbit-browse-state-v1` | 不匯出／同步 |
+| 右側欄偏好寬度 | localStorage：`orbit-side-panel-width-v1` | 不匯出／同步 |
+| 任務編輯草稿 | localStorage：`iih-orbit-task-edit-draft-v1:` 前綴 | 不匯出／同步；正式儲存後才成為工作資料 |
 | 週視圖顯示時間範圍（預設 08:00–19:00） | localStorage：`iih-orbit-calendar-display-v1` | 不匯出／同步；同瀏覽器分頁可接續 |
 | 提醒徽章的查看紀錄（項目、時程與提醒狀態識別，不含標題或描述） | localStorage：`iih-orbit-reminder-seen-v1` | 不匯出／同步；最多保留 5000 份識別，隔離工作空間及資料世代 |
 | 最近 50 步工作資料操作的復原與重做紀錄 | 目前分頁記憶體 | 不匯出；重新整理後清除 |
@@ -19,16 +21,19 @@ Orbit 是瀏覽器端的單人任務管理工具，沒有自建後端。核心�
 | Calendar 未過期讀取憑證 | localStorage：`iih-orbit-google-session-v1` | 不匯出／同步 |
 | Calendar 未過期移轉／寫入憑證 | localStorage：`iih-orbit-calendar-write-session-v1` | 不匯出／同步 |
 | Gmail 未過期憑證 | localStorage：`iih-orbit-gmail-session-v1` | 不匯出 |
-| Gmail 偏好與郵件預覽 | localStorage；整串預覽及本文暫存於分頁記憶體 | 不匯出 |
+| Gmail 已套用的篩選標籤 | localStorage：`iih-orbit-gmail-preferences-v1` | 不匯出／同步；依資料世代、Client ID 與帳號隔離 |
+| Gmail 列表預覽 | localStorage：`iih-orbit-gmail-cache-v1`；整串預覽及本文只暫存於分頁記憶體 | 不匯出／同步 |
 | Gmail 新郵件提示游標、信件／討論串 ID 與整批通知查看紀錄（不保存本文） | localStorage：`iih-orbit-gmail-arrivals-v1` | 不匯出／同步；綁定目前 Client ID、帳號與資料世代，不修改 Gmail 未讀狀態 |
 | Drive 未過期憑證 | localStorage：`iih-orbit-drive-session-v1` | 不匯出／同步 |
 | Drive 檔案來源名稱、額外來源 Client ID 與已確認帳號 | localStorage：`iih-orbit-drive-sources-v1` | 不匯出／同步；與備份連線分開 |
 | Drive 主要檔案瀏覽憑證與額外來源憑證 | localStorage：`iih-orbit-drive-browser-session-v1`、各來源 `iih-orbit-drive-source-<id>-session-v1` | 不匯出／同步；各來源獨立期限與失效識別 |
+| 檔案資訊查驗、祖先位置與目錄列表快取 | 目前分頁記憶體 | 不匯出／同步；不改工作資料或同步摘要 |
+| 文件建立操作及最後成功位置 | localStorage：`iih-orbit-document-operations-v1`、`iih-orbit-document-destinations-v1` | 不匯出／同步；建立憑證只留分頁記憶體 |
 | Google 各服務的授權到期提示紀錄（不含憑證） | localStorage：各服務 session key 後接 `:authorization-history` | 不匯出／同步；只辨識目前 Client ID、帳號與資料世代 |
 | Drive 待上傳 JSON、固定檔案 ID、同步基準及整併基準快照 | IndexedDB：`iih-orbit-drive-v1` | 不匯出 |
 | 不支援 Web Locks 時的工作資料寫入協調 | 獨立 IndexedDB 交易 | 只保存協調資料，不是任務副本 |
 
-Gmail 快取上限、期限與限流規則見 [Gmail 設計](gmail-design.md)。所有服務在目前瀏覽器保存未過期憑證，關閉後重開仍可接續；有效的舊版 sessionStorage 憑證驗證後遷移。啟動時檢查帳號、Client ID、資料世代、權限與原到期時間，不延長期限；離線或請求逾時不清除憑證。另有不含憑證的失效識別，讓未收到即時通知的分頁也拒絕舊連線；舊分頁不得清掉其他分頁重新授權的新憑證。
+Gmail 快取上限、期限與限流規則見 [Gmail 設計](gmail-design.md)。Calendar、Gmail、Drive 備份及檔案瀏覽連線在目前瀏覽器保存未過期憑證，關閉後重開仍可接續；文件建立憑證只留本次分頁。有效的舊版 sessionStorage 憑證驗證後遷移。啟動時檢查帳號、Client ID、資料世代、權限與原到期時間，不延長期限；離線或請求逾時不清除憑證。另有不含憑證的失效識別，讓未收到即時通知的分頁也拒絕舊連線；舊分頁不得清掉其他分頁重新授權的新憑證。
 
 登出目的地保存在主資料記錄的本機 `cloudResume.datasetId`，Client ID 仍在 Google 設定。這個目的地不匯出、不同步。同步並登出先讀回驗證完整雲端備份，再以當時版本與資料世代檢查原子重置；若期間有其他寫入則拒絕清除。登出後清理 Orbit 的 localStorage／sessionStorage 記錄（保留重置後的主資料）、Calendar 與 Drive IndexedDB 快取及服務憑證，其他應用程式的儲存鍵不變。
 
@@ -40,7 +45,7 @@ Gmail 快取上限、期限與限流規則見 [Gmail 設計](gmail-design.md)。
 
 同來源須有相同協定、主機與連接埠，並使用同一瀏覽器設定檔。`localhost`、`127.0.0.1`、不同連接埠與正式站台的儲存各自獨立。
 
-復原與重做共用最多 50 筆操作前後的工作資料快照，在同一寫入交易中重讀最新內容；復原要求工作內容與操作後快照一致，重做要求與操作前快照一致，避免覆蓋其他分頁修改。其他工作空間、縮放模式與設定不會被快照覆蓋。復原後的新修改清除該工作空間的重做路徑；失敗或未改變內容的操作不清除。資料世代改變時清除全部紀錄；清空垃圾桶成功後清除該工作空間的紀錄，避免透過舊操作帶回已永久清除的任務。
+復原與重做共用最多 50 筆操作前後的工作資料快照，在同一寫入交易中重讀最新內容；復原要求工作內容與操作後快照一致，重做要求與操作前快照一致，避免覆蓋其他分頁修改。其他工作空間、縮放模式與設定不會被快照覆蓋。復原後的新修改清除該工作空間的重做路徑；失敗或未改變內容的操作不清除。資料世代改變時清除全部紀錄；單筆徹底刪除或清空垃圾桶成功後，清除該工作空間的全部復原／重做紀錄，避免透過舊操作帶回已永久清除的任務。
 
 ## Calendar 同步協調
 
@@ -68,7 +73,7 @@ IndexedDB 的 `base` 保存已確認同步基準，`mergeBase` 暫存正在整�
 - `orbit-board-v1` 的版本 1／2 升級至第一個「我的工作空間」與看板格式 4，保留任務、分類、日期、子任務與順序，加入預設封存狀態。版本 1 未提供的開始日期／時間維持空白。
 - 任務可選欄位 `pinned`（布林）與 `updatedAt`（UTC ISO 編輯時間）隨任務保存、備份與同步。舊任務缺少欄位時保持原形，不補預設值或虛構時間，以保留既有備份內容校驗；第一次內容修改才加入時間，釘選及同欄排序不改時間。
 - `orbit-device-v1` 在目前瀏覽器保存穩定身份與可填寫的裝置名稱，不納入備份或同步。新的任務內容編輯附上 `editSource: {id, name}`；版本選項的可選 `source` 保留該份原始來源與時間，避免安全欄位整併後誤用其他裝置的顯示紀錄。舊來源不補寫，來源與時間不參與內容勝負判定。
-- 任務可選欄位 `deletedAt`（UTC ISO 刪除時間）表示已移至垃圾桶，完整任務仍留在工作空間與備份中；一般任務來源及提醒排除該欄位存在的項目。還原時移除標記，刪除及還原不改內容編輯時間。清空垃圾桶必須成功寫入才套用，保存失敗保留原內容。
+- 任務可選欄位 `deletedAt`（UTC ISO 刪除時間）表示已移至垃圾桶，完整任務仍留在工作空間與備份中；一般任務來源及提醒排除該欄位存在的項目。還原時移除標記，刪除及還原不改內容編輯時間。單筆徹底刪除與清空垃圾桶必須成功寫入才套用，保存失敗保留原內容；相關有效文件關聯標記移除，雲端原檔保留。
 - 工作空間可選欄位 `taskConflicts` 保存任務識別及多份 `{key, task}` 選項；`task: null` 表示永久刪除選項，`resolved` 指向已選用的 key。待選及已選用紀錄都納入備份與同步；已選用快照用於辨識舊分歧，後續任務編輯保存在主任務內容中。舊資料沒有此欄位時不補欄位，保留既有校驗。匯入工作空間副本時一併重建任務與子任務識別、選項 key 及選擇參照。相同集合的裝置需更新至支援此欄位的程式。
 - 並排編輯器以原版本 key 記錄採用決定，另將修改後的完整任務一次保存到主資料。過期衝突、工作空間取代、無效引用或時程會拒絕保存；已處理選項保留，之後的整併不以新草稿改寫這些快照。未處理記錄的暫時主卡片不被列為另一份版本，避免同步時累加共同內容。
 - 工作空間可選欄位 `headerCompact`（布林）表示資訊區縮小或展開，納入工作空間備份、匯入副本與 Drive 同步校驗。舊資料缺少時不補欄位，保留既有校驗；舊本機精簡模式可升級寫入，只有同步欄位仍缺少時才套用，避免蓋掉其他分頁已保存的模式。

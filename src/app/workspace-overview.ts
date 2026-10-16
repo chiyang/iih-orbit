@@ -47,6 +47,7 @@ export class WorkspaceOverview {
   });
   readonly completionSlices = computed(() => donutSegments(this.completionRows()));
   readonly statusSlices = computed(() => donutSegments(this.data().statuses));
+  readonly categorySlices = computed(() => donutSegments(this.data().categories));
   readonly scheduleMax = computed(() => Math.max(1, ...this.schedules.map(kind => this.count(kind))));
   readonly increaseProjectLimit = (value: number) => value + 12;
   private readonly overviewTitle = viewChild<ElementRef<HTMLElement>>('overviewTitle');
@@ -65,6 +66,7 @@ export class WorkspaceOverview {
   }
   readonly page = linkedSignal(() => {this.selection(); this.project(); this.includeArchived(); this.store.currentWorkspace().id; return this.initialPage();});
   readonly projectLimit = linkedSignal(() => {this.project(); this.includeArchived(); this.store.currentWorkspace().id; return 12;});
+  readonly categoryLimit = linkedSignal(() => {this.project(); this.includeArchived(); this.store.currentWorkspace().id; return 12;});
   readonly selectedTasks = computed(() => {const selection = this.selection(); return selection ? overviewTasks(this.data(), selection) : [];});
   readonly pageCount = computed(() => Math.max(1, Math.ceil((this.selection()?.kind === 'conflicts' ? this.data().conflicts.length : this.selectedTasks().length) / 30)));
   readonly currentPage = computed(() => Math.min(this.page(), this.pageCount() - 1));
@@ -73,6 +75,7 @@ export class WorkspaceOverview {
   readonly selectionLabel = computed(() => {
     const selection = this.selection(); if (!selection) return '';
     return selection.kind === 'status' ? this.store.statuses().find(status => status.id === selection.value)?.label ?? '已移除的狀態'
+      : selection.kind === 'category' ? selection.value === '' ? '未分類' : this.store.currentWorkspace().categories.find(category => category.id === selection.value)?.name ?? '已移除的分類'
       : selection.kind === 'project' ? this.projectName(selection.value ?? '') : this.labels[selection.kind];
   });
   readonly projectNameMap = computed(() => new Map(this.store.projects().map(project => [project.id, project.name])));

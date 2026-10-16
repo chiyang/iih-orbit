@@ -2,6 +2,22 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { loadBrowseState, readBrowseState, saveBrowseState } from '../src/app/browse-state.ts';
 
+test('月曆全部展開在切換視圖及重新載入後保留，只存本機並隔離資料世代與工作空間', () => {
+  const values = new Map(); globalThis.localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value)};
+  try {
+    const state = readBrowseState({view: 'month', calendarExpandAll: true});
+    saveBrowseState('g', 'first', state);
+    saveBrowseState('g', 'first', {...loadBrowseState('g', 'first'), view: 'gantt'});
+    assert.equal(loadBrowseState('g', 'first').calendarExpandAll, true);
+    assert.equal(loadBrowseState('g', 'first').view, 'gantt');
+    assert.equal(loadBrowseState('g', 'second').calendarExpandAll, false);
+    assert.equal(loadBrowseState('new', 'first').calendarExpandAll, false);
+    assert.equal(readBrowseState({calendarExpandAll: 'true'}).calendarExpandAll, false);
+    saveBrowseState('g', 'first', {...state, calendarExpandAll: false});
+    assert.equal(loadBrowseState('g', 'first').calendarExpandAll, false);
+  } finally {delete globalThis.localStorage;}
+});
+
 test('甘特視圖的定位日期與尺度獨立保存在各工作空間，舊版偏好可直接使用', () => {
   const values = new Map(); globalThis.localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value)};
   try {
@@ -68,5 +84,7 @@ test('總覽選項只存在瀏覽偏好，舊偏好預設回到任務，不恢�
     assert.equal(restored.overviewOpen, true); assert.equal(restored.overviewProject, ''); assert.equal(restored.overviewArchived, true); assert.deepEqual(restored.overviewSelection, {kind: 'status', value: 'custom-done'});
     assert.equal(readBrowseState({}).overviewOpen, false); assert.equal(readBrowseState({overviewSelection: {kind: 'unknown'}}).overviewSelection, null);
     assert.equal(loadBrowseState('other-generation', 'first').overviewOpen, false);
+    saveBrowseState('generation', 'first', {...state, overviewSelection: {kind: 'category', value: ''}});
+    assert.deepEqual(loadBrowseState('generation', 'first').overviewSelection, {kind: 'category', value: ''});
   } finally {delete globalThis.localStorage;}
 });

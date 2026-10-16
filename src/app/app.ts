@@ -201,11 +201,13 @@ export class App {
     this.documentCreated(taskId);
     if (mobileDrag && this.documentTasks.notice()) this.notify(this.documentTasks.notice());
   }
-  async dropCalendarDocument(entry: {event: DragEvent; position?: CalendarPosition; taskId?: string}): Promise<void> {
+  async dropCalendarDocument(entry: {event: DragEvent; position?: CalendarPosition; taskId?: string; projectId?: string}): Promise<void> {
     if (this.modal() || this.trashOpen()) return;
     const position: DocumentDropPosition = entry.taskId ? {kind: 'link', taskId: entry.taskId} : {kind: 'create'};
     const mobileDrag = this.sourcePanelDragging();
-    const taskId = await this.documentTasks.drop(entry.event, this.emptyTask(this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id), position, entry.position);
+    const base = this.emptyTask(this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id);
+    if (entry.projectId !== undefined && (!entry.projectId || this.store.projects().some(project => project.id === entry.projectId))) base.projectId = entry.projectId;
+    const taskId = await this.documentTasks.drop(entry.event, base, position, entry.position);
     this.documentCreated(taskId);
     if (mobileDrag && this.documentTasks.notice()) this.notify(this.documentTasks.notice());
   }
@@ -271,10 +273,11 @@ export class App {
     const position = this.mailTasks.boardPosition();
     await this.dropMail(event, column.id, undefined, position?.beforeId, position?.taskId);
   }
-  async dropMail(event: DragEvent, status?: string, position?: CalendarPosition, beforeId?: string, taskId?: string): Promise<void> {
+  async dropMail(event: DragEvent, status?: string, position?: CalendarPosition, beforeId?: string, taskId?: string, projectId?: string): Promise<void> {
     if (this.modal()) return;
     const mobileDrag = this.sourcePanelDragging();
     const initialStatus = status ?? this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id, base = this.emptyTask(initialStatus);
+    if (projectId !== undefined && (!projectId || this.store.projects().some(project => project.id === projectId))) base.projectId = projectId;
     await this.mailTasks.drop(event, base, position ? {date: position.day, ...(position.kind === 'time' ? {time: minuteLabel(position.minute ?? 0)} : {})} : {}, beforeId, taskId);
     const context = this.mailTasks.undoContext();
     if (context?.original?.id === base.id && context.generation === this.store.generation() && context.workspaceId === this.store.currentWorkspace().id && this.hasFilters()) {
@@ -414,6 +417,7 @@ export class App {
   readonly ganttStatuses = signal(this.savedBrowse.ganttStatuses);
   readonly ganttCategories = signal(this.savedBrowse.ganttCategories);
   readonly calendarScrollHour = signal(this.savedBrowse.calendarScrollHour);
+  readonly calendarExpandAll = signal(this.savedBrowse.calendarExpandAll);
   readonly calendarShowOrbit = signal(this.savedBrowse.showOrbit);
   readonly calendarShowGoogle = signal(this.savedBrowse.showGoogle);
   readonly sortKey = signal<SortKey | null>(this.savedBrowse.sort);
@@ -662,7 +666,7 @@ export class App {
       const context = JSON.stringify([generation, workspace]);
       if (context !== this.browseContext) untracked(() => {
         const sameGeneration = generation === this.browseGeneration;
-        const fallback = sameGeneration ? readBrowseState({overviewOpen: this.overviewOpen(), view: this.view(), ganttDate: this.ganttDate(), ganttScale: this.ganttScale(), ganttZoom: this.ganttZoom(), ganttCompletion: this.ganttCompletion(), ganttOrder: this.ganttOrder(), ganttRange: this.ganttRange(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour()}) : undefined;
+        const fallback = sameGeneration ? readBrowseState({overviewOpen: this.overviewOpen(), view: this.view(), ganttDate: this.ganttDate(), ganttScale: this.ganttScale(), ganttZoom: this.ganttZoom(), ganttCompletion: this.ganttCompletion(), ganttOrder: this.ganttOrder(), ganttRange: this.ganttRange(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour(), calendarExpandAll: this.calendarExpandAll()}) : undefined;
         this.browseGeneration = generation;
         this.browseContext = context;
         this.restoreBrowse(loadBrowseState(generation, workspace, fallback), sameGeneration);
@@ -680,7 +684,7 @@ export class App {
   private validProjectFilter(id: string): string { return id === '' || id === 'all' || this.store.projects().some(project => project.id === id) ? id : 'all'; }
   private validCategoryFilter(id: string): string { return id === '' || id === 'all' || this.store.categories().some(category => category.id === id) ? id : 'all'; }
   private browseSnapshot(): BrowseState {
-    return {overviewOpen: this.overviewOpen(), overviewProject: this.overviewProject(), overviewArchived: this.overviewArchived(), overviewSelection: this.overviewSelection(), view: this.view(), scope: this.scope(), query: this.query(), project: this.projectFilter(), category: this.categoryFilter(), priority: this.priorityFilter(), pinnedOnly: this.pinnedOnly(), recentOnly: this.recentOnly(), deadline: this.deadlineFilter(), deadlineDays: this.deadlineDays(), sort: this.sortKey(), direction: this.sortDirection(), ganttDate: this.ganttDate(), ganttScale: this.ganttScale(), ganttZoom: this.ganttZoom(), ganttCompletion: this.ganttCompletion(), ganttOrder: this.ganttOrder(), ganttRange: this.ganttRange(), ganttStatuses: this.ganttStatuses(), ganttCategories: this.ganttCategories(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour(), showOrbit: this.calendarShowOrbit(), showGoogle: this.calendarShowGoogle(), progressExpanded: this.progressExpanded(), headerCompact: this.headerCompact(), trashOpen: this.trashOpen(), panel: this.filesOpen() ? 'files' : this.tasksOpen() ? 'tasks' : this.mailOpen() ? 'gmail' : this.remindersOpen() ? 'reminders' : 'closed', panelTab: this.panelTab(), reminderTab: this.reminderTab()};
+    return {overviewOpen: this.overviewOpen(), overviewProject: this.overviewProject(), overviewArchived: this.overviewArchived(), overviewSelection: this.overviewSelection(), view: this.view(), scope: this.scope(), query: this.query(), project: this.projectFilter(), category: this.categoryFilter(), priority: this.priorityFilter(), pinnedOnly: this.pinnedOnly(), recentOnly: this.recentOnly(), deadline: this.deadlineFilter(), deadlineDays: this.deadlineDays(), sort: this.sortKey(), direction: this.sortDirection(), ganttDate: this.ganttDate(), ganttScale: this.ganttScale(), ganttZoom: this.ganttZoom(), ganttCompletion: this.ganttCompletion(), ganttOrder: this.ganttOrder(), ganttRange: this.ganttRange(), ganttStatuses: this.ganttStatuses(), ganttCategories: this.ganttCategories(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour(), calendarExpandAll: this.calendarExpandAll(), showOrbit: this.calendarShowOrbit(), showGoogle: this.calendarShowGoogle(), progressExpanded: this.progressExpanded(), headerCompact: this.headerCompact(), trashOpen: this.trashOpen(), panel: this.filesOpen() ? 'files' : this.tasksOpen() ? 'tasks' : this.mailOpen() ? 'gmail' : this.remindersOpen() ? 'reminders' : 'closed', panelTab: this.panelTab(), reminderTab: this.reminderTab()};
   }
   private restoreBrowse(state: BrowseState, preserveSharedControls = false): void {
     this.overviewReturnContext = undefined; this.overviewPage.set(0); this.overviewScroll.set(0);
@@ -692,7 +696,7 @@ export class App {
     this.pinnedOnly.set(state.pinnedOnly); this.recentOnly.set(state.recentOnly);
     this.sortKey.set(state.sort); this.sortDirection.set(state.direction); this.progressExpanded.set(state.progressExpanded);
     this.legacyHeaderCompact.set(state.headerCompact); this.trashOpen.set(state.trashOpen);
-    this.calendarDate.set(state.calendarDate); this.calendarScrollHour.set(state.calendarScrollHour);
+    this.calendarDate.set(state.calendarDate); this.calendarScrollHour.set(state.calendarScrollHour); this.calendarExpandAll.set(state.calendarExpandAll);
     this.ganttDate.set(state.ganttDate); this.ganttScale.set(state.ganttScale);
     this.ganttZoom.set(state.ganttZoom); this.ganttCompletion.set(state.ganttCompletion); this.ganttOrder.set(state.ganttOrder); this.ganttRange.set(state.ganttRange);
     this.ganttStatuses.set(state.ganttStatuses.filter(id => this.statuses().some(status => status.id === id)));

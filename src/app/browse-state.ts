@@ -33,6 +33,7 @@ export interface BrowseState {
   ganttStatuses: string[];
   ganttCategories: string[];
   calendarScrollHour: number;
+  calendarExpandAll: boolean;
   showOrbit: boolean;
   showGoogle: boolean;
   progressExpanded: boolean;
@@ -72,6 +73,7 @@ export function readBrowseState(value: unknown): BrowseState {
     ganttRange,
     ganttStatuses: filterIds(s.ganttStatuses), ganttCategories: filterIds(s.ganttCategories),
     calendarScrollHour: typeof s.calendarScrollHour === 'number' && Number.isFinite(s.calendarScrollHour) && s.calendarScrollHour >= 0 && s.calendarScrollHour <= 24 ? s.calendarScrollHour : 7.75,
+    calendarExpandAll: s.calendarExpandAll === true,
     showOrbit: s.showOrbit !== false, showGoogle: s.showGoogle !== false, progressExpanded: s.progressExpanded === true,
     headerCompact: s.headerCompact === true, trashOpen: s.trashOpen === true,
     panel: choice(s.panel, ['closed', 'gmail', 'reminders', 'tasks', 'files'], 'closed'),

@@ -15,7 +15,7 @@
   @if (browser.auth.connected() || browser.files().length) {
     <div class="drive-search"><input type="search" maxlength="300" aria-label="搜尋目前資料夾" placeholder="搜尋目前資料夾的檔名…" [ngModel]="searchDraft()" [ngModelOptions]="{standalone: true}" (ngModelChange)="searchDraft.set($event)" (keydown.enter)="$event.preventDefault(); search()"><button type="button" [disabled]="browser.busy()" (click)="search()"><app-icon name="search" /><span class="visually-hidden">搜尋</span></button></div>
     <nav class="drive-breadcrumbs" aria-label="目前 Drive 位置"><button type="button" class="drive-icon-button" aria-label="返回上層資料夾" [disabled]="browser.path().length < 2 || browser.busy()" (click)="browser.back()"><app-icon name="undo" /></button>@for (folder of browser.path(); track $index) {<button type="button" class="drive-path-name" [disabled]="$last || browser.busy()" [attr.aria-current]="$last ? 'location' : null" (click)="browser.back($index)">{{ browser.pathLabel($index) }}</button>@if (!$last) {<span class="drive-path-separator" aria-hidden="true">›</span>}}</nav>
-    @if (!selectionMode()) {<p class="drive-drag-help">拖到任務中間加入連結；拖到卡片邊緣或空隙建立新任務。也可拖到月曆日期或週曆時段。</p>}
+    @if (!selectionMode()) {<p class="drive-drag-help">拖到任務中間加入連結；拖到卡片邊緣或空隙建立新任務。也可拖到月曆日期、週曆時段或甘特時間軸。</p>}
     <div class="drive-files" role="list" aria-label="檔案與資料夾列表" [attr.aria-busy]="browser.busy()">
       @for (file of browser.visibleFiles(); track file.id) {
         @let shown = browser.displayEntry(file);

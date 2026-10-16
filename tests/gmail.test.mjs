@@ -1237,3 +1237,46 @@ test('郵件邊緣建立與按鈕草稿都帶資訊連結，偽造／過期拖�
     const deleted = event(); f.tasks.start(deleted, preview); await f.store.deleteTask(base.id); await f.tasks.drop(deleted, base, {}, undefined, base.id); assert.match(f.tasks.notice(), /更新或刪除/); assert.equal(f.store.tasks().length, 0);
   } finally {child.destroy(); f.close();}
 });
+
+test('甘特郵件落點建立跨午夜任務及來源連結，重複加入不增任務或關聯，結果可備份', async () => {
+  const f = fixture(); f.gmail.messages.set([preview]);
+  const child = createEnvironmentInjector([{provide: UiPreferences, useValue: {textSize: () => 'standard'}}], f.child);
+  try {
+    const app = appController(child); app.view.set('gantt');
+    const drag = event(); f.tasks.start(drag, preview);
+    await app.dropMail(drag, undefined, {kind: 'time', day: '2026-10-16', minute: 1425}, undefined, undefined, 'project');
+    const created = f.store.tasks()[0], source = f.store.documentsForTask(created.id)[0];
+    assert.equal(created.projectId, 'project'); assert.equal(created.startDate, '2026-10-16'); assert.equal(created.startTime, '23:45');
+    assert.equal(created.dueDate, '2026-10-17'); assert.equal(created.dueTime, '00:45');
+    assert.equal(source.provider, 'gmail'); assert.equal(source.fileId, preview.id); assert.equal(source.sourceScope, 'account'); assert.ok(source.url.startsWith('https://'));
+    const count = f.store.currentWorkspace().documentLinks.length, again = event(); f.tasks.start(again, preview);
+    await app.dropMail(again, undefined, undefined, undefined, created.id);
+    assert.equal(f.store.tasks().length, 1); assert.equal(f.store.currentWorkspace().documentLinks.length, count);
+    const backup = await f.store.backupForExport('full');
+    assert.equal(backup.data.workspaces[0].documentSources[0].fileId, preview.id);
+    assert.equal(JSON.stringify(backup).includes('calendarExpandAll'), false);
+    app.calendarExpandAll.set(true); app.view.set('month'); app.rememberBrowse(); app.view.set('gantt'); app.rememberBrowse();
+    const stored = JSON.parse(f.values.get('iih-orbit-browse-state-v1')).workspaces.workspace;
+    assert.equal(stored.calendarExpandAll, true); assert.equal(stored.view, 'gantt');
+  } finally {child.destroy(); f.close();}
+});
+
+test('郵件列表依單封郵件及帳號列出跨空間相關任務，去重、移除及垃圾桶即時反映', async () => {
+  const f = fixture(); f.gmail.messages.set([preview]); let panel;
+  try {
+    panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(false);
+    const source = f.tasks.source(preview), reply = {...preview, id: 'reply'};
+    assert.equal(panel.related(preview).length, 0);
+    await f.store.saveTask({...base, id: 'one', title: '第一項'}, undefined, undefined, [source]);
+    assert.equal(panel.related(preview).length, 1); assert.equal(panel.related(reply).length, 0);
+    await f.store.linkDocument('one', source); assert.equal(panel.related(preview).length, 1);
+    f.store.switchWorkspace('other'); await f.store.saveTask({...base, id: 'two', title: '第二項', projectId: ''}, undefined, undefined, [source]);
+    assert.equal(panel.related(preview).length, 2);
+    const opened = []; panel.openTask.subscribe(value => opened.push(value));
+    const entry = panel.related(preview)[0]; panel.openTask.emit({workspaceId: entry.workspace.id, task: entry.task}); assert.equal(opened[0].task.id, entry.task.id);
+    await f.store.deleteTask('two'); assert.equal(panel.related(preview).length, 1);
+    await f.store.restoreTask('two'); assert.equal(panel.related(preview).length, 2);
+    await f.store.saveTask(f.store.tasks()[0], undefined, undefined, []); assert.equal(panel.related(preview).length, 1);
+    f.gmail.preferences.update(value => ({...value, accountId: 'another', email: 'another@example.test'})); assert.equal(panel.related(preview).length, 0);
+  } finally {panel?.ngOnDestroy(); f.close();}
+});

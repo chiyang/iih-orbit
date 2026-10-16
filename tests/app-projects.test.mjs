@@ -1239,3 +1239,19 @@ test('清單視窗可用 Escape 關閉，任務編輯仍受保護；資料世代
     app.modal.set('settings'); app.openOverviewList({kind: 'pending'}); assert.equal(app.modal(), 'settings');
   } finally {f.close();}
 });
+
+test('總覽分類清單沿用彈窗，重新開啟與編輯返回保留分類條件，不更動工作範圍篩選', async () => {
+  const f = application(), app = f.app;
+  try {
+    app.projectFilter.set('website'); app.categoryFilter.set('design'); app.openOverview();
+    const task = f.store.tasks().find(task => task.categoryId === 'design'), revision = f.store.revision();
+    app.openOverviewList({kind: 'category', value: 'design'}); app.rememberBrowse();
+    assert.equal(app.modal(), 'overview-list'); assert.equal(f.store.revision(), revision);
+    const reopened = f.reopen(); assert.equal(reopened.modal(), 'overview-list'); assert.deepEqual(reopened.overviewSelection(), {kind: 'category', value: 'design'});
+    app.openOverviewTask(task); app.draft.categoryId = ''; await app.saveTask();
+    assert.equal(app.modal(), 'overview-list'); assert.deepEqual(app.overviewSelection(), {kind: 'category', value: 'design'});
+    assert.equal(f.store.tasks().find(item => item.id === task.id).categoryId, '');
+    assert.equal(app.projectFilter(), 'website'); assert.equal(app.categoryFilter(), 'design');
+    app.closeModal(); assert.equal(app.overviewOpen(), true); assert.equal(app.modal(), null);
+  } finally {f.close();}
+});

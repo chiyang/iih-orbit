@@ -21,7 +21,7 @@ export function sourceDragScroll(document: Document): () => void {
       const {clientX: x, clientY: y} = pointer, hit = document.elementFromPoint?.(x, y), main = document.querySelector('main');
       const targets = new Set<HTMLElement>();
       for (let element = hit as HTMLElement | null; element && element !== document.body; element = element.parentElement) if (main?.contains(element)) targets.add(element);
-      for (const element of main?.querySelectorAll<HTMLElement>('.kanban-scroll, .list-scroll, .calendar-scroll, .week-scroll') ?? []) targets.add(element);
+      for (const element of main?.querySelectorAll<HTMLElement>('.kanban-scroll, .list-scroll, .calendar-scroll, .week-scroll, .gantt-viewport') ?? []) targets.add(element);
       let moved = false, movedX = false, movedY = false;
       for (const element of targets) {
         const bounds = element.getBoundingClientRect();
@@ -30,7 +30,7 @@ export function sourceDragScroll(document: Document): () => void {
         if (right <= left || bottom <= top || x < left - 8 || x > right + 8 || y < top - 8 || y > bottom + 8) continue;
         const style = window.getComputedStyle(element);
         const dx = !movedX && /auto|scroll/.test(style.overflowX) && element.scrollWidth > element.clientWidth ? sourceScrollSpeed(x, left, right) * elapsed : 0;
-        const sticky = element.querySelector<HTMLElement>('.week-sticky-head')?.getBoundingClientRect().height ?? 0;
+        const sticky = element.querySelector<HTMLElement>('.week-sticky-head, .gantt-header')?.getBoundingClientRect().height ?? 0;
         const dy = !movedY && /auto|scroll/.test(style.overflowY) && element.scrollHeight > element.clientHeight ? sourceScrollSpeed(y, Math.min(bottom, top + sticky), bottom) * elapsed : 0;
         const oldX = element.scrollLeft, oldY = element.scrollTop;
         if (dx) element.scrollLeft = Math.max(0, Math.min(element.scrollWidth - element.clientWidth, oldX + dx));

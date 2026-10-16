@@ -8,6 +8,8 @@ import { gmailMessageLink, mailLabelName, MailLabel, MailPreview } from './gmail
 import { Icon } from './icon';
 import { mapMailRequests } from './gmail-api';
 import { SourceTouchDrag } from './source-touch-drag';
+import {mailInformationSource} from './mail-information-data';
+import type {Task} from './models';
 
 interface ThreadView {messages: MailPreview[]; busy: boolean; error: string}
 @Component({selector: 'app-gmail-panel', imports: [FormsModule, Icon, NgTemplateOutlet, SourceTouchDrag], templateUrl: './gmail-panel.html', styleUrl: './gmail-panel.css'})
@@ -21,6 +23,7 @@ export class GmailPanel {
   readonly createTask = output<MailPreview>();
   readonly previewMail = output<MailPreview>();
   readonly configure = output<void>();
+  readonly openTask = output<{workspaceId: string; task: Task}>();
   readonly searchDraft = linkedSignal(() => this.gmail.query());
   readonly labelDraft = linkedSignal(() => {
     this.gmail.store.generation(); this.gmail.clientId(); this.gmail.preferences().accountId;
@@ -112,6 +115,12 @@ export class GmailPanel {
     } finally { if (current()) this.syncExpanded(); }
   }
   link(mail: MailPreview): string { return gmailMessageLink(mail, this.gmail.preferences().email); }
+  related(mail: MailPreview) {
+    const {email, accountId} = this.gmail.preferences();
+    if (!accountId) return [];
+    try {return this.gmail.store.tasksForDocument(mailInformationSource(mail, email, accountId));}
+    catch {return [];}
+  }
   labels(mail: MailPreview): MailLabel[] { return mail.labelIds.filter(id => id !== 'UNREAD').map(id => this.gmail.labelIndex().get(id)).filter((label): label is MailLabel => !!label); }
   date(mail: MailPreview): string { return new Date(mail.receivedAt).toLocaleString('zh-TW', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false}); }
   labelMenuKeydown(event: KeyboardEvent): void {

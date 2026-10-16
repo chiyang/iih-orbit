@@ -1,4 +1,4 @@
-import { afterRenderEffect, Component, computed, DestroyRef, effect, ElementRef, inject, input, output, signal, untracked, viewChild } from '@angular/core';
+import { afterRenderEffect, Component, computed, DestroyRef, effect, ElementRef, inject, input, linkedSignal, output, signal, untracked, viewChild } from '@angular/core';
 import { BoardStatus, Category, COLUMNS, Task } from './models';
 import { Icon } from './icon';
 import { ThemeColor } from './theme-color';
@@ -33,6 +33,8 @@ export class Calendar {
   readonly mode = input.required<'month' | 'week'>();
   readonly selectedDate = input<string>();
   readonly savedScrollHour = input(7.75);
+  readonly savedExpandAll = input(false);
+  readonly expandAllChange = output<boolean>();
   readonly dateChange = output<string>();
   readonly scrollHourChange = output<number>();
   readonly weekRequested = output<string>();
@@ -55,7 +57,7 @@ export class Calendar {
   readonly anchor = signal(new Date());
   readonly hoveredMonthWeek = signal<number | null>(null);
   readonly expandedDays = signal(new Set<string>());
-  readonly expandAll = signal(false);
+  readonly expandAll = linkedSignal(() => this.savedExpandAll());
   readonly monthPreviewLimit = 4;
   readonly savingMove = signal(false);
   readonly moveNotice = signal('');
@@ -258,7 +260,7 @@ export class Calendar {
   toggleDay(key: string): void {
     if (this.expandAll()) {
       this.expandedDays.set(new Set(this.days().filter(day => day.key !== key).map(day => day.key)));
-      this.expandAll.set(false); return;
+      this.expandAll.set(false); this.expandAllChange.emit(false); return;
     }
     const expanded = new Set(this.expandedDays());
     if (expanded.has(key)) expanded.delete(key);
@@ -266,7 +268,7 @@ export class Calendar {
     this.expandedDays.set(expanded);
   }
   dayExpanded(key: string): boolean { return this.expandAll() || this.expandedDays().has(key); }
-  toggleAllDays(): void { const expand = !this.allDaysExpanded(); this.expandedDays.set(new Set()); this.expandAll.set(expand); }
+  toggleAllDays(): void { const expand = !this.allDaysExpanded(); this.expandedDays.set(new Set()); this.expandAll.set(expand); this.expandAllChange.emit(expand); }
   toggleOrbit(): void { this.endDrag(); this.orbitVisibilityChange.emit(!this.showOrbit()); }
   toggleGoogle(): void { if (!this.deadlineFiltered()) this.googleVisibilityChange.emit(!this.showGoogle()); }
   toggleWeekHours(): void {this.endDrag(); this.fullDayHours.update(value => !value);}

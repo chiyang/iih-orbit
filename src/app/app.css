@@ -90,6 +90,11 @@
 .profile strong { display: block; font-size: var(--font-11); font-weight: 600; margin-bottom: var(--sp4); line-height: 1.5; overflow-wrap: anywhere; }
 .profile small { font-size: var(--font-9); color: var(--text-muted); }
 .main { min-width: 0; flex: 1; }
+.main.gantt-layout { height: 100dvh; display: flex; flex-direction: column; overflow: auto; }
+.gantt-layout > :not(.board-area) { flex-shrink: 0; }
+.gantt-layout .board-area { flex: 1; min-height: 500px; display: flex; flex-direction: column; }
+.gantt-layout .board-area > :not(app-gantt) { flex-shrink: 0; }
+.gantt-layout app-gantt { flex: 1; min-height: 240px; }
 .topbar { position: sticky; top: 0; z-index: 50; background: var(--surface); height: 76px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--sp39); }
 .breadcrumb { display: flex; align-items: center; gap: var(--sp15); font-size: var(--font-11); color: var(--text-muted); min-width: 0; }
 .navigation-crumb { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

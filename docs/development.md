@@ -72,11 +72,18 @@ Manifest 的 `start_url`、`scope` 與圖示路徑皆相對於 manifest 所在�
 | 主介面、表單、篩選及拖曳 | [app.ts](../src/app/app.ts)、[app.html](../src/app/app.html) |
 | 資料型別與首次空白狀態 | [models.ts](../src/app/models.ts)、[seed.ts](../src/app/seed.ts) |
 | 工作空間與樣板 | [workspace-data.ts](../src/app/workspace-data.ts)、[workspace-templates.ts](../src/app/workspace-templates.ts)、[startup-guide.ts](../src/app/startup-guide.ts) |
-| 核心資料、驗證與升級 | [board-store.ts](../src/app/board-store.ts)、[board-data.ts](../src/app/board-data.ts)、[stored-data.ts](../src/app/stored-data.ts) |
-| 備份與寫入協調 | [backup-data.ts](../src/app/backup-data.ts)、[backup-panel.ts](../src/app/backup-panel.ts)、[storage-coordinator.ts](../src/app/storage-coordinator.ts) |
+| 核心資料、驗證與按紀錄保存 | [board-store.ts](../src/app/board-store.ts)、[board-data.ts](../src/app/board-data.ts)、[stored-data.ts](../src/app/stored-data.ts)、[workspace-records.ts](../src/app/workspace-records.ts) |
+| 備份、雲端分塊與寫入協調 | [backup-data.ts](../src/app/backup-data.ts)、[backup-blocks.ts](../src/app/backup-blocks.ts)、[backup-panel.ts](../src/app/backup-panel.ts)、[storage-coordinator.ts](../src/app/storage-coordinator.ts) |
 | 專案歸屬與進度 | [project-data.ts](../src/app/project-data.ts) |
 | 日期、時間、月／週排列及改期 | [task-schedule.ts](../src/app/task-schedule.ts)、[schedule-controls.ts](../src/app/schedule-controls.ts)、[calendar.ts](../src/app/calendar.ts)、[week-layout.ts](../src/app/week-layout.ts)、[calendar-move.ts](../src/app/calendar-move.ts) |
 | 描述編輯與內容清理 | [markdown-editor.ts](../src/app/markdown-editor.ts)、[rich-content.ts](../src/app/rich-content.ts)、[rich-content-data.ts](../src/app/rich-content-data.ts) |
+| 任務編輯本機草稿 | [task-edit-drafts.ts](../src/app/task-edit-drafts.ts)；開啟、取消、還原與垃圾桶操作由 [app.ts](../src/app/app.ts) 協調 |
+| 文件身份、關聯、用途與排序 | [document-data.ts](../src/app/document-data.ts)、[document-tasks.ts](../src/app/document-tasks.ts)、[document-links-editor.ts](../src/app/document-links-editor.ts) |
+| 檔案來源、授權、目錄與選檔 | [drive-browser-connection.ts](../src/app/drive-browser-connection.ts)、[drive-browser-auth.ts](../src/app/drive-browser-auth.ts)、[drive-browser.ts](../src/app/drive-browser.ts)、[document-panel.ts](../src/app/document-panel.ts) |
+| 檔案資訊查驗與共用快取 | [document-metadata-service.ts](../src/app/document-metadata-service.ts)、[document-metadata-manager.ts](../src/app/document-metadata-manager.ts)、[document-metadata-visible.ts](../src/app/document-metadata-visible.ts) |
+| 文件建立、結果接續與安全整理 | [document-create-dialog.ts](../src/app/document-create-dialog.ts)、[document-create-auth.ts](../src/app/document-create-auth.ts)、[document-create-service.ts](../src/app/document-create-service.ts)、[document-create-recovery.ts](../src/app/document-create-recovery.ts)、[document-source-cleanup.ts](../src/app/document-source-cleanup.ts) |
+| 空間總覽與統計圖表 | [workspace-overview.ts](../src/app/workspace-overview.ts)、[workspace-overview-data.ts](../src/app/workspace-overview-data.ts)、[overview-charts.ts](../src/app/overview-charts.ts) |
+| 甘特時間軸與日期範圍 | [gantt.ts](../src/app/gantt.ts)、[gantt-data.ts](../src/app/gantt-data.ts) |
 | 設定、外觀與瀏覽狀態 | [settings.ts](../src/app/settings.ts)、[appearance-data.ts](../src/app/appearance-data.ts)、[ui-preferences.ts](../src/app/ui-preferences.ts)、[browse-state.ts](../src/app/browse-state.ts) |
 | 共用 Google 連線與合併授權 | [google-connection.ts](../src/app/google-connection.ts)、[google-combined-auth.ts](../src/app/google-combined-auth.ts)、[google-service-header.ts](../src/app/google-service-header.ts) |
 | Calendar 授權、讀取、快取與同步 | [google-auth.ts](../src/app/google-auth.ts)、[google-session.ts](../src/app/google-session.ts)、[google-api.ts](../src/app/google-api.ts)、[google-calendar.ts](../src/app/google-calendar.ts)、[calendar-cache.ts](../src/app/calendar-cache.ts)、[calendar-sync.ts](../src/app/calendar-sync.ts) |
@@ -91,6 +98,6 @@ Manifest 的 `start_url`、`scope` 與圖示路徑皆相對於 manifest 所在�
 
 ## 測試與驗收範圍
 
-[tests](../tests/) 包含日期／週排列、工作空間／專案、備份相容、儲存失敗、跨分頁競態，以及 Calendar、Drive、Gmail 與合併授權的模擬測試。各次實際結果與建置限制記錄於 [QA.md](../QA.md)。
+[tests](../tests/) 包含日期／週排列、工作空間／專案、任務草稿與垃圾桶刪除、文件關聯／用途／排序、多來源、查驗／建立／安全整理、總覽／甘特、備份相容、儲存失敗及跨分頁競態，另有 Calendar、Drive、Gmail 與合併授權的模擬測試。各次實際結果與建置限制記錄於 [QA.md](../QA.md)。
 
 程式測試不代替瀏覽器版面或真實 Google 帳號驗收。真實 OAuth、API 回覆、郵件／活動內容、限流改善與跨裝置操作由使用者手動驗收；系統通知、背景推播、WebMCP 與 AI 日期判讀尚未加入。

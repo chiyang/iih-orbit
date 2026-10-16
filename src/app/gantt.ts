@@ -1,11 +1,14 @@
-import {afterRenderEffect, Component, computed, DestroyRef, ElementRef, inject, input, output, signal, untracked, viewChild, viewChildren} from '@angular/core';
+import {afterRenderEffect, Component, computed, DestroyRef, ElementRef, inject, input, linkedSignal, output, signal, untracked, viewChild, viewChildren} from '@angular/core';
 import {FormsModule} from '@angular/forms';
 import {Icon} from './icon';
 import {ThemeColor} from './theme-color';
 import {UiPreferences} from './ui-preferences';
 import {BoardStatus, Category, COLUMNS, Project, Task} from './models';
 import {dateKey, isTaskOverdue, validDate} from './task-schedule';
-import {civilDay, ganttAxis, ganttParts, ganttPosition, ganttRows, ganttSchedule, ganttSpan, ganttZoomScroll, moveGanttDate, readGanttRange, readGanttZoom, virtualRange, type GanttCompletion, type GanttDateRange, type GanttOrder, type GanttScale} from './gantt-data';
+import {GMAIL_MIME} from './gmail-data';
+import {DOCUMENT_DRAG_TYPE} from './document-data';
+import type {CalendarPosition} from './calendar-move';
+import {civilDay, ganttAxis, ganttDropPosition, ganttParts, ganttPosition, ganttRows, ganttSchedule, ganttSpan, ganttZoomScroll, moveGanttDate, readGanttRange, readGanttZoom, virtualRange, type GanttCompletion, type GanttDateRange, type GanttOrder, type GanttScale} from './gantt-data';
 
 @Component({selector: 'app-gantt', imports: [FormsModule, Icon, ThemeColor], templateUrl: './gantt.html', styleUrl: './gantt.css'})
 export class Gantt {
@@ -38,6 +41,22 @@ export class Gantt {
   readonly statusFilterChange = output<string[]>();
   readonly categoryFilterChange = output<string[]>();
   readonly editTask = output<Task>();
+  readonly documentDragging = input(false);
+  readonly mailDragging = input(false);
+  readonly documentDrop = output<{event: DragEvent; position?: CalendarPosition; taskId?: string; projectId?: string}>();
+  readonly mailDrop = output<{event: DragEvent; position?: CalendarPosition; taskId?: string; projectId?: string}>();
+  readonly sourceTarget = linkedSignal<{taskId?: string; position?: CalendarPosition; projectId?: string; left?: number} | null>(() => {
+    this.documentDragging(); this.mailDragging(); this.resetKey(); this.scale(); this.selectedDate(); this.range(); return null;
+  });
+  readonly sourceHint = computed(() => {
+    const target = this.sourceTarget();
+    if (!target) return '';
+    if (target.taskId) return '放開以加入資訊連結';
+    const position = target.position;
+    if (!position) return '';
+    const minute = position.minute ?? 0, time = position.kind === 'time' ? ` ${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}（一小時）` : '（全天）';
+    return '放開以建立任務：' + position.day + time;
+  });
   readonly viewport = viewChild<ElementRef<HTMLElement>>('viewport');
   readonly names = viewChildren<ElementRef<HTMLButtonElement>>('taskName');
   readonly barTitles = viewChildren<ElementRef<HTMLElement>>('barTitle');
@@ -154,6 +173,34 @@ export class Gantt {
     inject(DestroyRef).onDestroy(() => observer?.disconnect());
   }
   status(task: Task): BoardStatus {return this.statusMap().get(task.status) ?? COLUMNS[0];}
+  private sourceKind(event: DragEvent): 'document' | 'mail' | undefined {
+    if (this.documentDragging() && event.dataTransfer?.types.includes(DOCUMENT_DRAG_TYPE)) return 'document';
+    if (this.mailDragging() && event.dataTransfer?.types.includes(GMAIL_MIME)) return 'mail';
+    return;
+  }
+  sourceOver(event: DragEvent): boolean {
+    const element = event.target instanceof Element ? event.target : null, body = element?.closest<HTMLElement>('.gantt-body');
+    if (!this.sourceKind(event) || !body) {this.sourceTarget.set(null); return false;}
+    const bounds = body.getBoundingClientRect(), index = Math.floor((event.clientY - bounds.top) / this.rowHeight()), row = this.rows()[index];
+    const link = element?.closest<HTMLElement>('[data-link-task-id]')?.dataset['linkTaskId'];
+    if (link && (row?.kind !== 'task' || row.id !== link)) {this.sourceTarget.set(null); return false;}
+    const projectId = row?.kind === 'task' ? row.task.projectId : row?.id.startsWith('project:') ? row.id.slice(8) : undefined;
+    const x = event.clientX - bounds.left - this.labelWidth(), viewport = this.viewport()?.nativeElement;
+    const onLabel = !!viewport && event.clientX < viewport.getBoundingClientRect().left + this.labelWidth();
+    const position = onLabel ? {kind: 'all-day' as const, day: this.selectedDate()} : ganttDropPosition(x, this.axis(), this.columnWidth());
+    if (!link && !position) {this.sourceTarget.set(null); return false;}
+    this.sourceTarget.set(link ? {taskId: link} : {position, projectId, left: onLabel ? this.scrollLeft() : x});
+    event.preventDefault(); event.stopPropagation(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; return true;
+  }
+  sourceLeave(event: DragEvent): void {
+    if (!(event.relatedTarget instanceof Node) || !(event.currentTarget as HTMLElement).contains(event.relatedTarget)) this.sourceTarget.set(null);
+  }
+  dropSource(event: DragEvent): void {
+    const kind = this.sourceKind(event);
+    if (!kind || !this.sourceOver(event)) return;
+    const target = this.sourceTarget(); this.sourceTarget.set(null);
+    if (target) (kind === 'document' ? this.documentDrop : this.mailDrop).emit({event, position: target.position, taskId: target.taskId, projectId: target.projectId});
+  }
   color(task: Task): string {return this.categoryMap().get(task.categoryId)?.color ?? 'gray';}
   colorLabel(task: Task): string {return '分類：' + (this.categoryMap().get(task.categoryId)?.name ?? '未分類');}
   project(task: Task): string {return this.projectMap().get(task.projectId) ?? '未指定專案';}

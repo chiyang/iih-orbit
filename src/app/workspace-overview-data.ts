@@ -5,15 +5,15 @@ import {unresolvedTaskConflicts} from './task-conflict-data.ts';
 import {dateKey, isTaskOverdue, startOfWeek} from './task-schedule.ts';
 import {deadlineState} from './reminder-data.ts';
 
-export type OverviewKind = 'total' | 'pending' | 'done' | 'overdue' | 'unscheduled' | 'linked' | 'archived' | 'today-start' | 'week-start' | 'due-soon' | 'status' | 'project' | 'conflicts' | 'unavailable';
+export type OverviewKind = 'total' | 'pending' | 'done' | 'overdue' | 'unscheduled' | 'linked' | 'archived' | 'today-start' | 'week-start' | 'due-soon' | 'status' | 'category' | 'project' | 'conflicts' | 'unavailable';
 export interface OverviewSelection {kind: OverviewKind; value?: string}
 export interface OverviewOptions {project: string; includeArchived: boolean; dueSoonDays: number}
-const KINDS: readonly OverviewKind[] = ['total', 'pending', 'done', 'overdue', 'unscheduled', 'linked', 'archived', 'today-start', 'week-start', 'due-soon', 'status', 'project', 'conflicts', 'unavailable'];
-export const OVERVIEW_LABELS: Record<OverviewKind, string> = {total: '範圍內任務', pending: '待完成', done: '已完成', overdue: '已逾期', unscheduled: '未排程', linked: '有資訊連結', archived: '封存任務', 'today-start': '今日開始', 'week-start': '本週開始', 'due-soon': '即將截止', status: '任務狀態', project: '專案任務', conflicts: '衝突任務', unavailable: '有待處理連結的任務'};
+const KINDS: readonly OverviewKind[] = ['total', 'pending', 'done', 'overdue', 'unscheduled', 'linked', 'archived', 'today-start', 'week-start', 'due-soon', 'status', 'category', 'project', 'conflicts', 'unavailable'];
+export const OVERVIEW_LABELS: Record<OverviewKind, string> = {total: '範圍內任務', pending: '待完成', done: '已完成', overdue: '已逾期', unscheduled: '未排程', linked: '有資訊連結', archived: '封存任務', 'today-start': '今日開始', 'week-start': '本週開始', 'due-soon': '即將截止', status: '任務狀態', category: '任務分類', project: '專案任務', conflicts: '衝突任務', unavailable: '有待處理連結的任務'};
 export function readOverviewSelection(value: unknown): OverviewSelection | null {
   const selection = value as OverviewSelection | null;
   if (!selection || !KINDS.includes(selection.kind)) return null;
-  if (selection.kind === 'status' || selection.kind === 'project') return typeof selection.value === 'string' && selection.value.length <= 500 ? {kind: selection.kind, value: selection.value} : null;
+  if (selection.kind === 'status' || selection.kind === 'category' || selection.kind === 'project') return typeof selection.value === 'string' && selection.value.length <= 500 ? {kind: selection.kind, value: selection.value} : null;
   return {kind: selection.kind};
 }
 
@@ -27,6 +27,7 @@ export function workspaceOverview(workspace: Workspace, now: Date, options: Over
   const links = taskDocumentIds(workspace), linkedSources = new Set<string>();
   const groups = new Map<OverviewKind, Task[]>(KINDS.map(kind => [kind, []])); groups.set('total', tasks);
   const statusGroups = new Map(workspace.statuses.map(status => [status.id, [] as Task[]]));
+  const categoryGroups = new Map([...workspace.categories.map(category => category.id), ''].map(id => [id, [] as Task[]]));
   const projectGroups = new Map<string, Task[]>();
   const today = dateKey(now), weekStart = startOfWeek(now), weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 6);
   const firstDay = dateKey(weekStart), lastDay = dateKey(weekEnd);
@@ -35,6 +36,7 @@ export function workspaceOverview(workspace: Workspace, now: Date, options: Over
     const kind = statuses.get(task.status)?.kind ?? 'active';
     groups.get(kind === 'done' ? 'done' : kind === 'archived' ? 'archived' : 'pending')!.push(task);
     statusGroups.get(task.status)?.push(task);
+    categoryGroups.get(task.categoryId)?.push(task);
     if (!projectGroups.has(task.projectId)) projectGroups.set(task.projectId, []); projectGroups.get(task.projectId)!.push(task);
     if (!task.startDate && !task.dueDate) groups.get('unscheduled')!.push(task);
     if (isTaskOverdue(task, now, workspace.statuses)) groups.get('overdue')!.push(task);
@@ -61,8 +63,14 @@ export function workspaceOverview(workspace: Workspace, now: Date, options: Over
   const percent = tasks.length ? Math.round(completed / tasks.length * 100) : 0;
   const rows = [...workspace.projects.filter(project => (options.includeArchived || !project.archived) && (options.project === 'all' || options.project === project.id)), {id: '', name: '未指定專案', archived: false}].filter(project => options.project === 'all' || options.project === project.id);
   return {
-    tasks, groups, statusGroups, projectGroups, percent, completed, subtaskTotal, subtaskDone, conflicts,
+    tasks, groups, statusGroups, categoryGroups, projectGroups, percent, completed, subtaskTotal, subtaskDone, conflicts,
     statuses: workspace.statuses.filter(status => options.includeArchived || status.kind !== 'archived').map(status => ({...status, count: statusGroups.get(status.id)!.length, percent: tasks.length ? statusGroups.get(status.id)!.length / tasks.length * 100 : 0})),
+    categories: [...workspace.categories, {id: '', name: '未分類', color: 'gray'}].map(category => {
+      const selected = categoryGroups.get(category.id) ?? [];
+      let done = 0, archivedCount = 0;
+      for (const task of selected) {const kind = statuses.get(task.status)?.kind; if (kind === 'done') done++; else if (kind === 'archived') archivedCount++;}
+      return {...category, count: selected.length, completed: done, pending: selected.length - done - archivedCount, archivedCount, percent: selected.length ? Math.round(done / selected.length * 100) : 0, share: tasks.length ? selected.length / tasks.length * 100 : 0};
+    }),
     projects: rows.map(project => {
       const selected = projectGroups.get(project.id) ?? [];
       let done = 0, archivedCount = 0;
@@ -77,5 +85,6 @@ export function workspaceOverview(workspace: Workspace, now: Date, options: Over
 export type WorkspaceOverviewData = ReturnType<typeof workspaceOverview>;
 export function overviewTasks(data: WorkspaceOverviewData, selection: OverviewSelection): Task[] {
   return selection.kind === 'status' ? data.statusGroups.get(selection.value ?? '') ?? []
+    : selection.kind === 'category' ? data.categoryGroups.get(selection.value ?? '') ?? []
     : selection.kind === 'project' ? data.projectGroups.get(selection.value ?? '') ?? [] : data.groups.get(selection.kind) ?? [];
 }

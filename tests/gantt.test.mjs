@@ -7,6 +7,10 @@ import {mkdir, mkdtemp, rm} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {execFileSync} from 'node:child_process';
+import {JSDOM} from 'jsdom';
+import {ganttDropPosition} from '../src/app/gantt-data.ts';
+import {GMAIL_MIME} from '../src/app/gmail-data.ts';
+import {DOCUMENT_DRAG_TYPE} from '../src/app/document-data.ts';
 import {civilDay, civilKey, ganttAxis, ganttDayAtPosition, ganttParts, ganttTaskInRange, ganttPosition, ganttRows, ganttSchedule, ganttSpan, ganttZoomScroll, moveGanttDate, readGanttRange, readGanttZoom, virtualRange} from '../src/app/gantt-data.ts';
 
 const task = (id, patch = {}) => ({id, title: id, description: '', categoryId: '', projectId: '', status: 'working', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: [], ...patch});
@@ -16,6 +20,49 @@ const directory = await mkdtemp(resolve('.angular/gantt-test-')), output = resol
 await build({stdin: {contents: "export {Gantt} from './src/app/gantt.ts'; export {UiPreferences} from './src/app/ui-preferences.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
 const {Gantt, UiPreferences} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
+
+test('甘特空白落點以實際日期定位，日模式以十五分鐘建立，週月依日期且不越過範圍', () => {
+  for (const scale of ['day', 'week', 'month']) {
+    const axis = ganttAxis('2028-02-29', scale, {start: '2028-02-28', end: '2028-03-02'}), width = 288;
+    const position = ganttPosition(civilDay('2028-02-29') + (9 * 60 + 37) / 1440, axis, width);
+    assert.deepEqual(ganttDropPosition(position, axis, width), scale === 'day' ? {kind: 'time', day: '2028-02-29', minute: 570} : {kind: 'all-day', day: '2028-02-29'});
+    const last = ganttDropPosition(axis.units * width - .001, axis, width);
+    assert.equal(last.day, '2028-03-02'); if (scale === 'day') assert.equal(last.minute, 1425);
+    for (const invalid of [-1, NaN, Infinity, axis.units * width]) assert.equal(ganttDropPosition(invalid, axis, width), undefined);
+  }
+});
+
+test('甘特來源拖放區分任務與空白日期，保留專案、清理取消提示並拒絕外部或過期拖曳', () => {
+  const dom = new JSDOM('<div id="viewport"><div class="gantt-body"><div class="task-label" data-link-task-id="one"><button>任務</button></div><div class="task-timeline"></div></div></div>');
+  const originals = {Element: globalThis.Element, Node: globalThis.Node};
+  globalThis.Element = dom.window.Element; globalThis.Node = dom.window.Node;
+  const injector = createEnvironmentInjector([{provide: UiPreferences, useValue: {scale: () => 1}}]);
+  globalThis.ngServerMode = true; let component;
+  try {component = runInInjectionContext(injector, () => new Gantt());} finally {delete globalThis.ngServerMode;}
+  try {
+    component.tasks = signal([task('one', {projectId: 'p', startDate: '2026-10-16', dueDate: '2026-10-17'})]);
+    component.projects = signal([{id: 'p', name: '研究'}]); component.selectedDate = signal('2026-10-16');
+    component.mailDragging = signal(true); component.documentDragging = signal(false);
+    const body = dom.window.document.querySelector('.gantt-body'), viewport = dom.window.document.querySelector('#viewport'), blank = dom.window.document.querySelector('.task-timeline'), button = dom.window.document.querySelector('button');
+    body.getBoundingClientRect = () => ({left: -3500, top: 100}); viewport.getBoundingClientRect = () => ({left: 0, top: 36});
+    component.viewport = () => ({nativeElement: viewport});
+    const drops = [], files = [];
+    component.mailDrop.subscribe(value => drops.push(value)); component.documentDrop.subscribe(value => files.push(value));
+    const make = (target, x, y = 170, mime = GMAIL_MIME) => ({target, currentTarget: body, clientX: x, clientY: y, dataTransfer: {types: [mime]}, preventDefault() {this.prevented = true;}, stopPropagation() {}});
+    const link = make(button, 20); component.dropSource(link);
+    assert.equal(drops[0].taskId, 'one'); assert.equal(drops[0].position, undefined); assert.equal(component.sourceTarget(), null);
+    const x = ganttPosition(civilDay('2026-10-16') + 9.5 / 24, component.axis(), component.columnWidth()) + component.labelWidth() - 3500;
+    const create = make(blank, x); component.dropSource(create);
+    assert.deepEqual(drops[1].position, {kind: 'time', day: '2026-10-16', minute: 570}); assert.equal(drops[1].projectId, 'p');
+    const group = make(blank, x, 120); component.dropSource(group); assert.equal(drops[2].projectId, 'p');
+    const empty = make(blank, x, 270); component.dropSource(empty); assert.equal(drops[3].projectId, undefined);
+    assert.equal(component.sourceOver(create), true); component.sourceLeave({...create, relatedTarget: null}); assert.equal(component.sourceTarget(), null);
+    component.sourceOver(create); component.mailDragging.set(false); assert.equal(component.sourceTarget(), null); component.dropSource(create); assert.equal(drops.length, 4);
+    component.documentDragging.set(true); component.dropSource(make(button, 20, 170, DOCUMENT_DRAG_TYPE)); assert.equal(files[0].taskId, 'one');
+    component.dropSource(make(blank, x, 170, 'text/plain')); assert.equal(files.length, 1);
+    component.dropSource(make(button, 20, 120, DOCUMENT_DRAG_TYPE)); assert.equal(files.length, 1);
+  } finally {injector.destroy(); dom.window.close(); for (const [key, value] of Object.entries(originals)) {if (value === undefined) delete globalThis[key]; else globalThis[key] = value;}}
+});
 
 test('日／週軸含首尾日、跨月跨年及閏日，起訖同日仍有一天寬度', () => {
   for (const scale of ['day', 'week']) {

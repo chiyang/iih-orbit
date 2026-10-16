@@ -22,6 +22,70 @@ const makeTask = (id, patch = {}) => ({id, title: id, description: '', projectId
 const workspace = (tasks = []) => ({version: 6, id: 'first', name: '研究工作', projects: [{id: 'research', name: '研究計畫'}, {id: 'old', name: '封存計畫', archived: true}], categories: [], statuses: [{id: 'working', label: '研究進行中', kind: 'active', color: '#45a677', subtitle: ''}, {id: 'accepted', label: '審核通過', kind: 'done', color: 'blue', subtitle: ''}, {id: 'stored', label: '留存', kind: 'archived', color: 'gray', subtitle: ''}], tasks});
 const count = (data, kind) => overviewTasks(data, {kind}).length;
 
+test('任務分類按識別、名稱、配色與順序統計，含未分類及零任務分類，完成率與占比分開', () => {
+  const state = workspace([
+    makeTask('design-pending', {categoryId: 'design', subtasks: [{id: 's', title: '子任務', done: true}]}),
+    makeTask('design-done', {categoryId: 'design', status: 'accepted'}),
+    makeTask('research-pending', {categoryId: 'study'}),
+    makeTask('unassigned', {categoryId: ''}),
+    makeTask('stored', {categoryId: 'design', status: 'stored'}),
+    makeTask('archived-project', {categoryId: 'study', projectId: 'old'}),
+    makeTask('trash', {categoryId: 'design', deletedAt: '2026-10-15T00:00:00Z'})
+  ]);
+  state.categories = [{id: 'study', name: '研究', color: '#456789'}, {id: 'design', name: '研究', color: 'purple'}, {id: 'empty', name: '尚未使用', color: 'blue'}];
+  const before = JSON.stringify(state), data = workspaceOverview(state, now, options);
+  assert.deepEqual(data.categories.map(row => [row.id, row.name, row.color, row.count]), [['study', '研究', '#456789', 1], ['design', '研究', 'purple', 2], ['empty', '尚未使用', 'blue', 0], ['', '未分類', 'gray', 1]]);
+  const design = data.categories.find(row => row.id === 'design');
+  assert.equal(design.completed, 1); assert.equal(design.pending, 1); assert.equal(design.archivedCount, 0); assert.equal(design.share, 50); assert.equal(design.percent, 50);
+  assert.equal(data.categories.reduce((sum, row) => sum + row.count, 0), data.tasks.length);
+  assert.equal(data.categories.reduce((sum, row) => sum + row.share, 0), 100);
+  assert.deepEqual(overviewTasks(data, {kind: 'category', value: 'design'}).map(task => task.id), ['design-pending', 'design-done']);
+  assert.deepEqual(overviewTasks(data, {kind: 'category', value: ''}).map(task => task.id), ['unassigned']);
+  const full = workspaceOverview(state, now, {...options, includeArchived: true});
+  const archivedDesign = full.categories.find(row => row.id === 'design');
+  assert.equal(archivedDesign.count, 3); assert.equal(archivedDesign.archivedCount, 1); assert.equal(archivedDesign.percent, 33); assert.equal(archivedDesign.share, 50);
+  for (const row of full.categories) assert.equal(row.completed + row.pending + row.archivedCount, row.count);
+  const archivedProject = workspaceOverview(state, now, {...options, project: 'old', includeArchived: true});
+  assert.equal(archivedProject.categories.find(row => row.id === 'study').count, 1); assert.equal(archivedProject.categories.find(row => row.id === 'design').count, 0);
+  assert.equal(workspaceOverview(state, now, {...options, project: ''}).categories.every(row => row.count === 0 && row.percent === 0 && row.share === 0), true);
+  assert.equal(JSON.stringify(state), before);
+});
+
+test('分類下鑽驗證包含未分類，未知分類不擴大查詢，空範圍與萬筆分類統計保持完整', () => {
+  assert.deepEqual(readOverviewSelection({kind: 'category', value: ''}), {kind: 'category', value: ''});
+  assert.deepEqual(readOverviewSelection({kind: 'category', value: 'custom'}), {kind: 'category', value: 'custom'});
+  for (const value of [undefined, null, 1, {}, 'x'.repeat(501)]) assert.equal(readOverviewSelection({kind: 'category', value}), null);
+  const state = workspace(Array.from({length: 10000}, (_, i) => makeTask('task-' + i, {categoryId: i % 3 ? 'a' : '', status: i % 4 ? 'working' : 'accepted'})));
+  state.categories = [{id: 'a', name: 'A', color: 'blue'}, {id: 'unused', name: '尚無任務', color: 'purple'}];
+  const data = workspaceOverview(state, now, options);
+  assert.equal(data.categories.reduce((sum, row) => sum + row.count, 0), 10000);
+  assert.equal(overviewTasks(data, {kind: 'category', value: 'a'}).length, 6666);
+  assert.equal(overviewTasks(data, {kind: 'category', value: 'removed'}).length, 0);
+  assert.deepEqual(donutSegments(data.categories).map(row => row.id), ['a', '']);
+  assert.equal(state.tasks[0].updatedAt, undefined);
+  const empty = workspaceOverview(workspace(), now, options);
+  assert.deepEqual(empty.categories, [{id: '', name: '未分類', color: 'gray', count: 0, completed: 0, pending: 0, archivedCount: 0, percent: 0, share: 0}]);
+});
+
+test('分類圖表與彈窗標題即時反映改名、分類及狀態修改，分類清單仍分頁且不發出查驗', () => {
+  const state = signal({...workspace(Array.from({length: 35}, (_, i) => makeTask('task-' + i, {categoryId: 'design'}))), categories: [{id: 'design', name: '設計', color: 'purple'}]});
+  const store = {currentWorkspace: state, projects: () => state().projects, statuses: () => state().statuses, reminders: () => ({dueSoonDays: 3})};
+  const injector = createEnvironmentInjector([{provide: BoardStore, useValue: store}, {provide: DocumentMetadataService, useValue: {view() {throw new Error('此範圍沒有文件，不應發請求');}}}]);
+  const previous = globalThis.ngServerMode; globalThis.ngServerMode = true;
+  try {
+    const component = runInInjectionContext(injector, () => new WorkspaceOverview()); component.now = signal(now); component.project = signal('all'); component.selection = signal({kind: 'category', value: 'design'});
+    assert.equal(component.selectionLabel(), '設計'); assert.equal(component.taskRows().length, 30); assert.equal(component.pageCount(), 2);
+    assert.equal(component.categorySlices()[0].share, 100); assert.equal(component.categorySlices()[0].count, 35);
+    let selection; component.selectionChange.subscribe(value => {selection = value;}); component.show('category', 'design'); assert.deepEqual(selection, {kind: 'category', value: 'design'});
+    state.update(value => ({...value, categories: [{id: 'design', name: '設計改名', color: 'green'}], tasks: value.tasks.map((task, index) => index === 0 ? {...task, categoryId: ''} : {...task, status: 'accepted'})}));
+    assert.equal(component.selectionLabel(), '設計改名'); assert.equal(component.selectedTasks().length, 34);
+    assert.equal(component.data().categories[0].completed, 34); assert.equal(component.data().categories[0].percent, 100); assert.equal(component.categorySlices()[0].color, 'green');
+    component.selection.set({kind: 'category', value: ''}); assert.equal(component.selectionLabel(), '未分類'); assert.equal(component.selectedTasks()[0].id, 'task-0');
+    component.selection.set({kind: 'category', value: 'removed'}); assert.equal(component.selectionLabel(), '已移除的分類'); assert.equal(component.taskRows().length, 0);
+    component.categoryLimit.set(24); component.project.set('old'); assert.equal(component.categoryLimit(), 12);
+  } finally {injector.destroy(); if (previous === undefined) delete globalThis.ngServerMode; else globalThis.ngServerMode = previous;}
+});
+
 test('總覽使用自訂狀態 kind，排除垃圾桶與兩種封存，主任務與子任務分母分開', () => {
   const state = workspace([...Array.from({length: 5}, (_, i) => makeTask('pending-' + i)), ...Array.from({length: 3}, (_, i) => makeTask('done-' + i, {status: 'accepted', subtasks: [{id: 's', title: '子任務', done: true}]})), makeTask('archived', {status: 'stored'}), makeTask('project-archive', {projectId: 'old'}), makeTask('trash', {deletedAt: now.toISOString()})]);
   const data = workspaceOverview(state, now, options);
