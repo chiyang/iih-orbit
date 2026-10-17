@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "orbit-project-manager": {
+    "iih-orbit": {
       "projectType": "application",
       "root": "",
       "sourceRoot": "src",
@@ -35,8 +35,8 @@
         "serve": {
           "builder": "@angular/build:dev-server",
           "configurations": {
-            "production": {"buildTarget": "orbit-project-manager:build:production"},
-            "development": {"buildTarget": "orbit-project-manager:build:development"}
+            "production": {"buildTarget": "iih-orbit:build:production"},
+            "development": {"buildTarget": "iih-orbit:build:development"}
           },
           "defaultConfiguration": "development"
         }

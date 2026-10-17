@@ -27,7 +27,9 @@ npm start
 | `npm run build` | 一般正式建置 |
 | `npm run build:pages` | 正式建置，網站基底路徑為 `/iih-orbit/` |
 
-建置輸出至 `dist/orbit-project-manager/browser`。`build` 透過 [.build.env](../.build.env) 設定 Angular 支援的 SQLite 快取，便於在限制較多的本機環境建置；不啟用 SSR。
+建置輸出至 `dist/iih-orbit/browser`。`build` 透過 [.build.env](../.build.env) 設定 Angular 支援的 SQLite 快取，便於在限制較多的本機環境建置；不啟用 SSR。
+
+正式建置另產生離線啟動用的 `sw.js`，須完整部署整個輸出目錄；開發伺服器不註冊離線程式。驗證方式與更新規則見 [離線使用與安裝](offline-tasks.md)。
 
 ## 本機 Google 授權
 
@@ -47,7 +49,7 @@ npm start
 | 對 `main` 的 Pull Request | 相同檢查與建置，不部署 |
 | 在 `main` 手動執行 | 檢查、建置及部署 |
 
-workflow 使用 Node.js 24.19.0，先 `npm ci`，再執行 `check`、`test` 與 `build:pages`。測試失敗時保留完整紀錄及失敗摘要。部署工作只上傳 `dist/orbit-project-manager/browser` 的靜態內容。
+workflow 使用 Node.js 24.19.0，先 `npm ci`，再執行 `check`、`test` 與 `build:pages`。測試失敗時保留完整紀錄及失敗摘要。部署工作只上傳 `dist/iih-orbit/browser` 的靜態內容。
 
 本機重現 Pages 建置：
 
@@ -61,7 +63,7 @@ npm run build:pages
 
 [manifest.webmanifest](../public/manifest.webmanifest) 設定 `display: standalone`，並提供 192、512 像素 PNG 圖示及獨立的 512 像素 maskable 圖示。[index.html](../src/index.html) 連結 manifest 與 180 像素 Apple Touch 圖示，保留既有 SVG favicon。圖示的可編輯 SVG 原稿放在 [public/icons](../public/icons/)；maskable 版本保留裁切安全範圍。
 
-Manifest 的 `start_url`、`scope` 與圖示路徑皆相對於 manifest 所在位置，HTML 連結則沿用建置的 base href，因此本機根目錄與 Pages 的 `/iih-orbit/` 都能使用。省略 `id`，讓識別碼沿用 `start_url`；[相對的 id 會依來源根目錄解析](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest/Reference/id)，不適合直接設為 `./`。`public` 資產由 Angular 原樣複製，無須加入 `@angular/pwa`、Service Worker 或離線快取。部署後的手機操作見 [使用指南](user-guide.md#安裝到手機主畫面)。
+Manifest 的 `start_url`、`scope` 與圖示路徑皆相對於 manifest 所在位置，HTML 連結則沿用建置的 base href，因此本機根目錄與 Pages 的 `/iih-orbit/` 都能使用。省略 `id`，讓識別碼沿用 `start_url`；[相對的 id 會依來源根目錄解析](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest/Reference/id)，不適合直接設為 `./`。`public` 資產由 Angular 原樣複製，離線程式由建置腳本產生，未加入 `@angular/pwa` 套件。部署後的手機操作見 [使用指南](user-guide.md#安裝到手機主畫面)。
 
 ## 主要程式入口
 
