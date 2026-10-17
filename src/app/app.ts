@@ -381,6 +381,15 @@ export class App {
     const id = this.projectFilter();
     return id === '' || this.store.projects().some(project => project.id === id) ? id : 'all';
   });
+  readonly headingProjectName = computed(() => {
+    if (this.trashOpen()) return '';
+    const id = this.overviewOpen() ? this.overviewProject() : this.selectedProjectId();
+    if (id === 'all') return '';
+    if (id === '') return '未指定專案';
+    const project = this.store.projects().find(project => project.id === id);
+    return project && (!this.overviewOpen() || this.overviewArchived() || !project.archived) ? project.name : '';
+  });
+  readonly workspaceTitle = computed(() => this.store.currentWorkspace().name + (this.headingProjectName() ? ' ／ ' + this.headingProjectName() : ''));
   readonly activeProjectCount = computed(() => this.store.projects().filter(project => !project.archived).length);
   readonly progressRows = computed(() => projectSummaries(this.store.tasks(), this.statuses(), this.store.projects().filter(project => !project.archived)));
   readonly archivedProgressRows = computed(() => this.store.projects().filter(project => project.archived).map(project => projectProgress(this.store.tasks(), this.statuses(), project.id, project.name)));

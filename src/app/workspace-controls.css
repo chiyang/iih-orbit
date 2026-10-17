@@ -1,4 +1,9 @@
 .workspace-heading-actions {align-items: stretch;}
+.workspace-title {display: flex; align-items: baseline; gap: var(--sp6); min-width: 0;}
+.workspace-title-name, .workspace-title-project {min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+.workspace-title.has-project .workspace-title-name {max-width: 50%;}
+.workspace-title-separator {flex-shrink: 0; color: var(--text-soft); font-weight: 400;}
+.workspace-title-project {color: var(--accent-text); font-weight: 500;}
 .header-mode-toggle {display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; align-self: stretch; width: max(28px, calc(34px * var(--font-scale))); min-height: 28px; padding: var(--sp6); border: 1px solid var(--border); border-radius: 7px; background: var(--control-bg); color: var(--text-muted);}
 .header-mode-toggle:hover {color: var(--accent-text); background: var(--accent-soft);}
 .header-mode-toggle:disabled {opacity: .45; cursor: default;}
