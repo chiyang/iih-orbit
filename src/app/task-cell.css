@@ -5,7 +5,8 @@ button, input, select {font: inherit; color: var(--text);}
 .cell-value:hover {background: var(--surface-hover); box-shadow: 0 0 0 1px var(--border);}
 .cell-value > span {min-width: 0; overflow-wrap: anywhere;}
 .title-value {font-weight: 600; font-size: var(--font-12);}
-.category-value {color: var(--category-text); background: var(--category-bg); font-size: var(--font-10); white-space: nowrap;}
+/* The negative margins reserve badge padding outside the host's content width. */
+.category-value {max-width: none; color: var(--category-text); background: var(--category-bg); font-size: var(--font-10); white-space: nowrap;}
 .category-value i {width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: var(--category-color);}
 .project-value {color: var(--text-muted); font-size: var(--font-10);}
 .cell-value app-icon {width: 12px; height: 12px; flex-shrink: 0;}
