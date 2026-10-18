@@ -1,8 +1,7 @@
 import { taskInformationKey } from './document-data';
 import { A11yModule } from '@angular/cdk/a11y';
-import { CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup } from '@angular/cdk/drag-drop';
 import { CdkScrollable } from '@angular/cdk/scrolling';
-import { afterRenderEffect, Component, computed, DestroyRef, effect, ElementRef, HostListener, inject, Injector, signal, untracked, viewChild } from '@angular/core';
+import { afterNextRender, afterRenderEffect, Component, computed, DestroyRef, effect, ElementRef, HostListener, inject, Injector, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { BoardStore, StoreResult, TaskEditContext, TrashContext } from './board-store';
 import { Calendar } from './calendar';
@@ -65,13 +64,21 @@ import {TaskEditDrafts, type LocalTaskDraft, type TaskDraftSnapshot} from './tas
 import {WorkspaceOverview} from './workspace-overview';
 import {Gantt} from './gantt';
 import type {OverviewSelection} from './workspace-overview-data';
+import {RelatedTasksEditor} from './related-tasks-editor';
+import {relatedTasksKey} from './task-links-data';
+import {BOARD_TASK_DRAG_TYPE, readTaskLinkDrag, TASK_LINK_DRAG_TYPE, type BoardTaskDropPosition} from './task-link-drag';
+import {createSourceDragPreview} from './source-drag-preview';
+import {SourceTouchDrag} from './source-touch-drag';
+import type {DialogRef} from '@angular/cdk/dialog';
+import {NotificationBridge} from './notification-bridge';
+import type {TaskLinkPicker, TaskLinkPickerData} from './task-link-picker';
 
 type Modal = 'intro' | 'task' | 'task-conflict' | 'overview-list' | 'calendar-publish' | 'categories' | 'projects' | 'delete' | 'purge-task' | 'empty-trash' | 'statuses' | 'workspaces' | 'settings' | 'external-event' | 'mail-preview' | 'logout' | null;
 type BoardColumn = BoardStatus & {tasks: Task[]};
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, A11yModule, CdkDrag, CdkDropList, CdkDropListGroup, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView, TaskConflictEditor, GoogleRenewalButton, DriveSyncButton, CloudLogoutButton, CloudResumeNotice, CloudLogoutConfirm, Tooltip, PanelButton, DocumentLinksEditor, DocumentPanel, WorkspaceOverview, Gantt],
+  imports: [FormsModule, A11yModule, SourceTouchDrag, CdkScrollable, Icon, BrandMark, Calendar, ThemeColor, Settings, CalendarSources, DriveStatus, ExternalEventDetails, ReminderCenter, ReminderPopups, TaskCell, WorkspaceTemplatePicker, CalendarPublish, GmailPanel, MailPreviewDialog, MarkdownEditor, RichContent, ScheduleTime, DatePickerTrigger, StartupGuide, TaskPanel, TrashView, TaskConflictEditor, GoogleRenewalButton, DriveSyncButton, CloudLogoutButton, CloudResumeNotice, CloudLogoutConfirm, Tooltip, PanelButton, DocumentLinksEditor, DocumentPanel, WorkspaceOverview, Gantt, RelatedTasksEditor, NotificationBridge],
   templateUrl: './app.html',
   styleUrls: ['./app.css', './side-panel.css', './topbar.css', './forms.css', './document-dialog.css', './startup.css', './task-shortcuts.css', './workspace-controls.css']
 })
@@ -91,6 +98,125 @@ export class App {
   readonly panelOpen = computed(() => this.mailOpen() || this.remindersOpen() || this.tasksOpen() || this.filesOpen());
   readonly panelOverlay = signal(window.innerWidth <= 700);
   readonly sourcePanelDragging = signal(false);
+  readonly taskLinkSource = signal<TaskEditContext | null>(null);
+  readonly taskLinkTarget = signal('');
+  readonly boardTaskDrag = signal<TaskEditContext | null>(null);
+  readonly boardTaskPosition = signal<BoardTaskDropPosition | null>(null);
+  readonly boardTaskLinkTarget = signal<TaskEditContext | null>(null);
+  readonly calendarTaskDragging = signal(false);
+  private boardDragContext = '';
+  private boardTaskToken = '';
+  private clearBoardTaskPreview?: () => void;
+  canDragBoardTask(task: Task): boolean {
+    return this.view() === 'board' && !this.modal() && !this.trashOpen() && !this.overviewOpen() && !this.store.pendingWrites() && !task.deletedAt && !this.taskLinkDragging() && !this.ganttLockedTaskIds().includes(task.id);
+  }
+  startBoardTaskDrag(event: DragEvent, task: Task): void {
+    if (!this.canDragBoardTask(task) || !event.dataTransfer) {event.preventDefault(); return;}
+    const context = this.store.taskContext(task.id);
+    if (JSON.stringify(context.original) !== JSON.stringify(task)) {event.preventDefault(); this.notify('任務已更新，請重新查看後再拖曳。'); return;}
+    this.endBoardTaskDrag(); this.cancelTaskLink(); this.boardDragContext = this.ganttContext();
+    this.boardTaskDrag.set(context); this.boardTaskToken = crypto.randomUUID();
+    event.dataTransfer.setData(BOARD_TASK_DRAG_TYPE, JSON.stringify({token: this.boardTaskToken, taskId: task.id, generation: context.generation, workspaceId: context.workspaceId}));
+    event.dataTransfer.effectAllowed = 'all'; event.stopPropagation();
+    this.clearBoardTaskPreview = createSourceDragPreview(event, task.title, () => this.endBoardTaskDrag(), 'document-drag-preview task-drag-preview');
+  }
+  private boardDragValid(): boolean {
+    const source = this.boardTaskDrag();
+    return !!source?.original && this.canDragBoardTask(source.original) && source.generation === this.store.generation() && source.workspaceId === this.store.currentWorkspace().id && this.boardDragContext === this.ganttContext()
+      && JSON.stringify(this.store.tasks().find(task => task.id === source.original!.id)) === JSON.stringify(source.original);
+  }
+  boardTaskOver(event: DragEvent, column: BoardColumn): boolean {
+    if (!this.boardTaskDrag() || !event.dataTransfer?.types.includes(BOARD_TASK_DRAG_TYPE)) return false;
+    event.preventDefault(); event.stopPropagation();
+    if (!this.boardDragValid()) {this.endBoardTaskDrag(); return false;}
+    const area = event.currentTarget as HTMLElement, current = this.boardTaskPosition();
+    const placeholder = area.querySelector<HTMLElement>('.task-board-placeholder, .task-board-empty')?.getBoundingClientRect();
+    // Keep the insertion target while its visible placeholder is under the pointer.
+    if (current?.kind === 'move' && current.status === column.id && placeholder && event.clientY >= placeholder.top && event.clientY <= placeholder.bottom) {event.dataTransfer.dropEffect = 'move'; return true;}
+    const cards = [...area.querySelectorAll<HTMLElement>('.task-card[data-task-id]')].map(card => {const bounds = card.getBoundingClientRect(); return {id: card.dataset['taskId']!, top: bounds.top, bottom: bounds.bottom};});
+    const position = documentCardPosition(cards, event.clientY, column.id), sourceId = this.boardTaskDrag()!.original!.id;
+    if (position.kind === 'link') {
+      if (position.taskId === sourceId || this.ganttLockedTaskIds().includes(position.taskId)) {this.boardTaskPosition.set(null); this.boardTaskLinkTarget.set(null); event.dataTransfer.dropEffect = 'none'; return false;}
+      if (this.boardTaskLinkTarget()?.original?.id !== position.taskId) this.boardTaskLinkTarget.set(this.store.taskContext(position.taskId));
+      if (!this.boardTaskLinkTarget()?.original) {this.boardTaskPosition.set(null); event.dataTransfer.dropEffect = 'none'; return false;}
+      this.boardTaskPosition.set({kind: 'link', taskId: position.taskId, status: column.id}); event.dataTransfer.dropEffect = 'link';
+    } else {
+      const beforeId = position.beforeId === sourceId ? column.tasks[column.tasks.findIndex(task => task.id === sourceId) + 1]?.id : position.beforeId;
+      const next: BoardTaskDropPosition = {kind: 'move', status: column.id, ...(beforeId ? {beforeId} : {})};
+      if (JSON.stringify(current) !== JSON.stringify(next)) this.boardTaskPosition.set(next);
+      this.boardTaskLinkTarget.set(null); event.dataTransfer.dropEffect = 'move';
+    }
+    return true;
+  }
+  boardTaskLeave(event: DragEvent): void {
+    const area = event.currentTarget as HTMLElement, bounds = area.getBoundingClientRect();
+    const outside = event.clientX < bounds.left || event.clientX >= bounds.right || event.clientY < bounds.top || event.clientY >= bounds.bottom;
+    if (outside && (!(event.relatedTarget instanceof Node) || !area.contains(event.relatedTarget))) {this.boardTaskPosition.set(null); this.boardTaskLinkTarget.set(null);}
+  }
+  boardTaskMoves(beforeId: string | undefined, status: string): boolean {const position = this.boardTaskPosition(); return !!this.boardTaskDrag() && position?.kind === 'move' && position.status === status && position.beforeId === beforeId;}
+  boardTaskLinks(taskId: string): boolean {return !!this.boardTaskDrag() && this.boardTaskPosition()?.kind === 'link' && this.boardTaskLinkTarget()?.original?.id === taskId;}
+  async dropBoardTask(event: DragEvent, column: BoardColumn): Promise<void> {
+    if (!this.boardTaskOver(event, column)) return;
+    const payload = readTaskLinkDrag(event.dataTransfer!.getData(BOARD_TASK_DRAG_TYPE)), context = this.boardTaskDrag()!, position = this.boardTaskPosition(), target = this.boardTaskLinkTarget();
+    const valid = payload && payload.token === this.boardTaskToken && payload.taskId === context.original!.id && payload.workspaceId === context.workspaceId && payload.generation === context.generation;
+    this.endBoardTaskDrag();
+    if (!valid || !position) return;
+    if (position.kind === 'link' && target?.original) {
+      if (this.store.relatedTaskIds(context.original!.id).includes(target.original.id)) {this.notify('這兩個任務已經連結。'); return;}
+      if (this.handleResult(await this.store.linkTasks(context, target))) this.notify('任務連結已建立，可復原。');
+    } else if (position.kind === 'move') {
+      const sourceIndex = column.tasks.findIndex(task => task.id === context.original!.id);
+      if (context.original!.status === column.id && column.tasks[sourceIndex + 1]?.id === position.beforeId) return;
+      if (this.handleResult(await this.store.moveTask(context.original!.id, column.id, position.beforeId, context))) this.notifySaved(context.original!.status === column.id ? '任務順序已調整' : `「${context.original!.title}」已移至${column.label}`);
+    }
+  }
+  @HostListener('window:pagehide')
+  @HostListener('window:blur')
+  endBoardTaskDrag(): void {
+    const active = !!this.boardTaskDrag(), clear = this.clearBoardTaskPreview; this.clearBoardTaskPreview = undefined;
+    this.boardTaskDrag.set(null); this.boardTaskPosition.set(null); this.boardTaskLinkTarget.set(null); this.boardTaskToken = ''; clear?.();
+    if (active) this.dragEnded();
+  }
+  private readonly taskLinkToken = signal('');
+  readonly taskLinkDragging = computed(() => !!this.taskLinkToken());
+  private taskLinkView = '';
+  beginTaskLink(task: Task): void {
+    if (this.modal() || this.store.pendingWrites() || Date.now() - this.dragEndedAt < 200) return;
+    if (task.deletedAt || this.store.taskConflicts().some(entry => entry.workspace.id === this.store.currentWorkspace().id && entry.conflict.id === task.id)) {this.notify('請先處理任務衝突或還原任務，再建立連結。'); return;}
+    this.taskLinkView = this.view(); this.taskLinkSource.set({...this.store.taskContext(task.id), original: structuredClone(task)}); this.taskLinkTarget.set('');
+  }
+  startTaskLinkDrag(event: DragEvent, task: Task): void {
+    this.beginTaskLink(task);
+    const source = this.taskLinkSource();
+    if (!source?.original || source.original.id !== task.id || !event.dataTransfer) {event.preventDefault(); return;}
+    const token = crypto.randomUUID(); this.taskLinkToken.set(token);
+    event.dataTransfer.setData(TASK_LINK_DRAG_TYPE, JSON.stringify({token, generation: source.generation, workspaceId: source.workspaceId, taskId: task.id}));
+    event.dataTransfer.effectAllowed = 'link'; event.stopPropagation();
+  }
+  taskLinkOver(event: DragEvent, task: Task): boolean {
+    const source = this.taskLinkSource();
+    if (!this.taskLinkToken() || !event.dataTransfer?.types.includes(TASK_LINK_DRAG_TYPE) || !source?.original || this.modal() || source.workspaceId !== this.store.currentWorkspace().id || source.generation !== this.store.generation()) return false;
+    event.preventDefault(); event.stopPropagation();
+    const valid = task.id !== source.original.id && !task.deletedAt && !this.ganttLockedTaskIds().includes(task.id);
+    event.dataTransfer.dropEffect = valid ? 'link' : 'none'; this.taskLinkTarget.set(valid ? task.id : ''); return valid;
+  }
+  dropTaskLink(event: DragEvent, task: Task): void {
+    if (!this.taskLinkOver(event, task)) return;
+    const data = readTaskLinkDrag(event.dataTransfer!.getData(TASK_LINK_DRAG_TYPE)), source = this.taskLinkSource()!;
+    if (!data || data.token !== this.taskLinkToken() || data.taskId !== source.original!.id || data.generation !== source.generation || data.workspaceId !== source.workspaceId) {this.cancelTaskLink(); return;}
+    void this.linkSelectedTask(task);
+  }
+  async linkSelectedTask(task: Task): Promise<void> {
+    const source = this.taskLinkSource(); if (!source?.original || this.modal() || this.store.pendingWrites()) return;
+    if (task.id === source.original.id) {this.notify('請選擇另一個任務。'); return;}
+    const target = {...this.store.taskContext(task.id), original: structuredClone(task)};
+    this.cancelTaskLink();
+    const result = await this.store.linkTasks(source, target);
+    if (this.handleResult(result)) this.notify(result.persisted ? '相關任務已連結，可復原。' : '連結只暫存在此分頁，請匯出備份。');
+  }
+  @HostListener('window:pagehide')
+  cancelTaskLink(): void {this.taskLinkSource.set(null); this.taskLinkToken.set(''); this.taskLinkTarget.set('');}
+  endTaskLinkDrag(): void {this.cancelTaskLink(); this.dragEnded();}
   readonly panelBlocking = computed(() => this.panelOverlay() && this.panelOpen() && !this.sourcePanelDragging());
   readonly narrowPanelViewport = signal(window.innerWidth <= 1100);
   readonly panelViewportWidth = signal(window.innerWidth);
@@ -422,6 +548,7 @@ export class App {
   readonly ganttZoom = signal(this.savedBrowse.ganttZoom);
   readonly ganttCompletion = signal(this.savedBrowse.ganttCompletion);
   readonly ganttOrder = signal(this.savedBrowse.ganttOrder);
+  readonly ganttLockedTaskIds = computed(() => this.store.taskConflicts().filter(entry => entry.workspace.id === this.store.currentWorkspace().id).map(entry => entry.conflict.id));
   readonly ganttRange = signal(this.savedBrowse.ganttRange);
   readonly ganttStatuses = signal(this.savedBrowse.ganttStatuses);
   readonly ganttCategories = signal(this.savedBrowse.ganttCategories);
@@ -484,7 +611,15 @@ export class App {
   }
   private taskDraftSnapshot(): TaskDraftSnapshot {
     const editor = this.documentLinksEditor();
-    return {context: this.taskEditContext()!, task: this.draft, documents: this.draftDocuments(), descriptions: this.draftDocumentDescriptions(), subtaskDraft: this.subtaskDraft, hasStartTime: this.hasStartTime, hasDueTime: this.hasDueTime, documentInput: {name: editor?.name ?? '', url: editor?.url ?? '', adding: editor?.adding() ?? false}};
+    return {context: this.taskEditContext()!, task: this.draft, documents: this.draftDocuments(), descriptions: this.draftDocumentDescriptions(), relatedTaskIds: this.draftRelatedTasks(), subtaskDraft: this.subtaskDraft, hasStartTime: this.hasStartTime, hasDueTime: this.hasDueTime, documentInput: {name: editor?.name ?? '', url: editor?.url ?? '', adding: editor?.adding() ?? false}};
+  }
+  private relatedDraftUnchanged(): boolean {return JSON.stringify([...this.draftRelatedTasks()].sort()) === JSON.stringify(this.store.relatedTaskIds(this.draft.id));}
+  openRelatedTask(id: string): void {
+    if (this.modal() !== 'task' || this.store.pendingWrites()) return;
+    if (this.taskDraftConflict() || JSON.stringify(this.taskDraftSnapshot()) !== this.localTaskDraftBaseline) {this.formError.set('請先儲存或取消目前變更，再開啟相關任務。'); return;}
+    const task = this.store.tasks().find(task => task.id === id && !task.deletedAt);
+    if (!task) {this.formError.set('相關任務已移除或在垃圾桶，無法開啟。'); return;}
+    this.closeModal(); this.openTask(task.status, task);
   }
   private startLocalTaskDraft(): void {
     clearTimeout(this.localTaskDraftTimer); this.localTaskDraftTimer = undefined;
@@ -526,6 +661,7 @@ export class App {
     const value = structuredClone(saved.snapshot);
     this.draft = value.task; this.taskEditContext.set(value.context); this.editing.set(!!value.context.original);
     this.draftDocuments.set(value.documents); this.draftDocumentDescriptions.set(value.descriptions);
+    this.draftRelatedTasks.set(value.relatedTaskIds ?? this.store.relatedTaskIds(value.task.id));
     this.subtaskDraft = value.subtaskDraft; this.hasStartTime = value.hasStartTime; this.hasDueTime = value.hasDueTime;
     const editor = this.documentLinksEditor();
     if (editor) {editor.name = value.documentInput.name; editor.url = value.documentInput.url; editor.adding.set(value.documentInput.adding);}
@@ -549,6 +685,35 @@ export class App {
   }
   cancelTaskEdit(): void {if (this.clearLocalTaskDraft()) this.closeModal();}
   readonly draftDocuments = signal<DocumentSource[]>([]);
+  readonly draftRelatedTasks = signal<string[]>([]);
+  readonly taskLinkPickerOpen = signal(false);
+  private taskLinkPickerRef?: DialogRef<string[], TaskLinkPicker>;
+  private taskLinkPickerRequest = 0;
+  private taskLinkDisposed = false;
+  async openTaskLinkPicker(): Promise<void> {
+    if (this.modal() !== 'task' || this.taskLinkPickerOpen() || this.store.pendingWrites()) return;
+    const context = this.taskEditContext()!, taskId = this.draft.id, request = ++this.taskLinkPickerRequest;
+    const data: TaskLinkPickerData = {taskId, workspaceId: context.workspaceId, generation: context.generation, excluded: [...this.draftRelatedTasks()]};
+    this.taskLinkPickerOpen.set(true); this.formError.set('');
+    const current = () => request === this.taskLinkPickerRequest && this.modal() === 'task' && this.draft.id === taskId && this.taskEditContext() === context && this.store.generation() === data.generation && this.store.currentWorkspace().id === data.workspaceId;
+    try {
+      const [{Dialog}, {TaskLinkPicker}] = await Promise.all([import('@angular/cdk/dialog'), import('./task-link-picker')]);
+      if (!current()) {if (request === this.taskLinkPickerRequest) this.taskLinkPickerOpen.set(false); return;}
+      const ref = this.injector.get(Dialog).open<string[], TaskLinkPickerData, TaskLinkPicker>(TaskLinkPicker, {data, injector: this.injector, width: 'min(700px, calc(100vw - 24px))', maxHeight: 'calc(100dvh - 32px)', panelClass: 'information-picker-dialog', ariaLabel: '建立任務連結', ariaModal: true, autoFocus: '.task-link-search', restoreFocus: '.task-link-create', disableClose: true});
+      this.taskLinkPickerRef = ref;
+      ref.backdropClick.subscribe(() => ref.close());
+      ref.closed.subscribe(ids => {
+        if (this.taskLinkPickerRef !== ref) return;
+        this.taskLinkPickerRef = undefined; this.taskLinkPickerOpen.set(false);
+        if (!this.taskLinkDisposed && typeof document !== 'undefined') afterNextRender(() => {if (this.modal() === 'task' && this.draft.id === taskId) this.documentLinksEditor()?.focusTaskLinkButton();}, {injector: this.injector});
+        if (ids === undefined || !current()) return;
+        const locked = new Set(this.ganttLockedTaskIds()), available = new Set(this.store.tasks().filter(task => task.id !== taskId && !locked.has(task.id)).map(task => task.id));
+        if (ids.some(id => !available.has(id))) {this.formError.set('部分任務已更新或移除，請重新選擇任務連結。'); return;}
+        this.draftRelatedTasks.update(previous => [...new Set([...previous, ...ids])]);
+      });
+    } catch {if (request === this.taskLinkPickerRequest) {this.taskLinkPickerOpen.set(false); this.formError.set('無法開啟任務選擇視窗，原有草稿保留，請重試。');}}
+  }
+  cancelTaskLinkPicker(): void {this.taskLinkPickerRequest++; this.taskLinkPickerRef?.close(); this.taskLinkPickerRef = undefined; this.taskLinkPickerOpen.set(false);}
   readonly draftDocumentDescriptions = signal<DocumentDescription[]>([]);
   setDraftDocuments(sources: DocumentSource[]): void {
     const notes = new Map(this.draftDocumentDescriptions().map(item => [item.documentId, item.description]));
@@ -563,7 +728,8 @@ export class App {
     const current = context.original ? workspace?.tasks.find(task => task.id === context.original!.id) ?? null : null;
     return this.store.generation() !== context.generation || !workspace || JSON.stringify(current) !== JSON.stringify(context.original)
       || !!context.original && JSON.stringify(workspace.documentLinks?.filter(link => link.taskId === context.original!.id) ?? []) !== JSON.stringify(context.documentLinks ?? [])
-      || !!context.original && context.informationKey !== undefined && taskInformationKey(workspace, context.original.id) !== context.informationKey;
+      || !!context.original && context.informationKey !== undefined && taskInformationKey(workspace, context.original.id) !== context.informationKey
+      || !!context.original && context.relatedTasksKey !== undefined && relatedTasksKey(workspace, context.original.id) !== context.relatedTasksKey;
   });
   readonly projectDescription = '把計畫排進日程，讓每一步都清楚可見。';
   draft: Task = this.emptyTask('todo');
@@ -654,7 +820,7 @@ export class App {
       if (modal === 'task') this.taskTitleInput()?.nativeElement.focus();
       else if (modal === 'task-conflict') this.modalTitle()?.nativeElement.focus();
     });
-    inject(DestroyRef).onDestroy(() => {this.flushLocalTaskDraft(); clearTimeout(this.localTaskDraftTimer);});
+    inject(DestroyRef).onDestroy(() => {this.taskLinkDisposed = true; this.endBoardTaskDrag(); this.cancelTaskLinkPicker(); this.flushLocalTaskDraft(); clearTimeout(this.localTaskDraftTimer);});
     inject(DestroyRef).onDestroy(this.store.protectDocumentSources(() => new Set(this.modal() === 'task' ? this.draftDocuments().map(source => source.id) : [])));
     if (this.store.onboarding()) afterRenderEffect(() => {
       const field = this.firstWorkspaceDialog() && this.modal() === 'workspaces' ? this.workspaceNameInput()?.nativeElement : undefined;
@@ -686,7 +852,15 @@ export class App {
         void this.store.setWorkspaceHeaderCompact(true, workspace, generation, true);
       });
     });
+    effect(() => {
+      this.boardTaskDrag(); this.ganttContext(); this.store.tasks(); this.store.pendingWrites(); this.view(); this.modal(); this.trashOpen(); this.overviewOpen(); this.ganttLockedTaskIds();
+      untracked(() => {if (this.boardTaskDrag() && !this.boardDragValid()) this.endBoardTaskDrag();});
+    });
     const timer = setInterval(() => this.now.set(new Date()), 30000);
+    effect(() => {
+      const source = this.taskLinkSource(), generation = this.store.generation(), workspace = this.store.currentWorkspace(), view = this.view(), modal = this.modal();
+      untracked(() => {if (source && (generation !== source.generation || workspace.id !== source.workspaceId || view !== this.taskLinkView || !!modal || JSON.stringify(workspace.tasks.find(task => task.id === source.original?.id)) !== JSON.stringify(source.original))) this.cancelTaskLink();});
+    });
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
   }
 
@@ -763,6 +937,7 @@ export class App {
     if (this.remindersOpen()) this.remindersOpen.set(false);
     else this.openReminders();
   }
+  systemNotificationNotice(message: string): void {this.notify(message);}
   openReminder(item: ReminderItem): void {
     if (this.modal()) return;
     if (item.generation !== this.store.generation()) return;
@@ -778,6 +953,12 @@ export class App {
       if (task && (item.historical || active)) {this.store.switchWorkspace(workspace.id); this.openTask(task.status, task);}
     }
   }
+  async adjustGanttSchedule(change: {task: Task; original: Task; context: string}): Promise<void> {
+    if (this.modal() || this.store.pendingWrites() || change.context !== this.ganttContext()) return;
+    const context = {...this.store.taskContext(change.original.id), original: change.original};
+    const result = await this.store.saveTask(change.task, context);
+    if (this.handleResult(result)) this.notify(result.persisted ? '任務時程已更新，可復原。' : '變更只暫存在此分頁，請匯出備份。');
+  }
   showReminderDeadline(days: number): void {
     this.overviewOpen.set(false);
     this.clearFilters(); this.selectDueSoonDays(days); this.view.set('list');
@@ -785,6 +966,9 @@ export class App {
 
   @HostListener('document:keydown.escape')
   escape(): void {
+    if (this.taskLinkPickerOpen()) {this.cancelTaskLinkPicker(); return;}
+    if (this.taskLinkSource()) {this.cancelTaskLink(); return;}
+    if (this.boardTaskDrag()) {this.endBoardTaskDrag(); return;}
     if (this.sourcePanelDragging()) {this.cancelSourceDrag(); return;}
     if (this.documentLinksEditor()?.pickerOpen()) {this.documentLinksEditor()?.cancelPicker(); return;}
     if (this.projectToDelete()) this.projectToDelete.set(null);
@@ -935,6 +1119,7 @@ export class App {
   }
 
   openTask(status: TaskStatus = 'todo', task?: Task, date = ''): void {
+    if (this.taskLinkSource()) {if (task) void this.linkSelectedTask(task); else this.notify('請先選擇要連結的任務，或取消建立連結。'); return;}
     if (Date.now() - this.dragEndedAt < 200) return;
     const conflict = task && this.store.taskConflicts().find(entry => entry.workspace.id === this.store.currentWorkspace().id && entry.conflict.id === task.id);
     if (conflict) {if (!this.modal()) this.openTaskConflict(conflict); else this.notify('此任務有同步衝突，草稿仍保留。請關閉後重新開啟，比較與編輯完整版本。'); return;}
@@ -947,6 +1132,7 @@ export class App {
       this.draft.projectId = selected === '' ? '' : this.store.projects().some(project => project.id === selected && (!project.archived || this.overviewArchived())) ? selected : this.store.projects().find(project => !project.archived)?.id ?? '';
     }
     this.draftDocuments.set(task ? structuredClone(this.store.documentsForTask(task.id)) : []);
+    this.draftRelatedTasks.set(task ? [...this.store.relatedTaskIds(task.id)] : []);
     this.draftDocumentDescriptions.set(task ? structuredClone(this.store.descriptionsForTask(task.id)) : []);
     this.taskEditContext.set(this.store.taskContext(this.draft.id));
     if (!task && !this.overviewOpen() && this.categoryFilter() !== 'all') this.draft.categoryId = this.categoryFilter();
@@ -966,7 +1152,7 @@ export class App {
   }
 
   async saveTask(publish = false, createDocument = false): Promise<void> {
-    if (this.store.pendingWrites()) return;
+    if (this.store.pendingWrites() || this.taskLinkPickerOpen()) return;
     const documents = this.documentLinksEditor();
     if (documents?.hasDraft() && !documents.add()) {this.formError.set('請先確認文件名稱與連結。'); return;}
     const title = this.draft.title.trim();
@@ -987,12 +1173,12 @@ export class App {
     }
     if (this.subtaskDraft.trim()) this.addSubtask();
     const saved = {...this.draft, title, description: this.draft.description.trim()};
-    if (publish && JSON.stringify(saved) === JSON.stringify(this.taskEditContext()?.original) && JSON.stringify(this.draftDocuments().map(source => ({documentId: source.id, description: this.draftDocumentDescriptions().find(item => item.documentId === source.id)?.description ?? ''}))) === taskInformationKey(this.store.state(), saved.id) && !this.store.hasUnsavedChanges()) {
+    if (publish && this.relatedDraftUnchanged() && JSON.stringify(saved) === JSON.stringify(this.taskEditContext()?.original) && JSON.stringify(this.draftDocuments().map(source => ({documentId: source.id, description: this.draftDocumentDescriptions().find(item => item.documentId === source.id)?.description ?? ''}))) === taskInformationKey(this.store.state(), saved.id) && !this.store.hasUnsavedChanges()) {
       this.store.refreshFromStorage();
       if (this.taskDraftConflict()) { this.formError.set('任務已更新，請載入最新版本再移轉。'); return; }
       this.draft = structuredClone(saved); this.modal.set('calendar-publish'); return;
     }
-    const result = await this.store.saveTask(saved, this.taskEditContext()!, undefined, this.draftDocuments(), this.draftDocumentDescriptions());
+    const result = await this.store.saveTask(saved, this.taskEditContext()!, undefined, this.draftDocuments(), this.draftDocumentDescriptions(), this.draftRelatedTasks());
     if (!this.handleResult(result)) return;
     if (result.persisted) this.clearLocalTaskDraft();
     if (createDocument) {
@@ -1012,10 +1198,10 @@ export class App {
   }
 
   async requestDocumentCreation(): Promise<void> {
-    if (this.store.pendingWrites() || this.modal() !== 'task') return;
+    if (this.store.pendingWrites() || this.taskLinkPickerOpen() || this.modal() !== 'task') return;
     if (this.taskDraftConflict()) {this.formError.set('任務已更新，請先載入最新版本再建立文件。'); return;}
     const context = this.taskEditContext(), information = this.draftDocuments().map(source => ({documentId: source.id, description: this.draftDocumentDescriptions().find(item => item.documentId === source.id)?.description ?? ''}));
-    if (context?.original && JSON.stringify(this.draft) === JSON.stringify(context.original) && JSON.stringify(information) === context.informationKey && !this.subtaskDraft.trim() && !this.documentLinksEditor()?.hasDraft() && !this.store.hasUnsavedChanges()) {await this.openDocumentCreation(); return;}
+    if (context?.original && this.relatedDraftUnchanged() && JSON.stringify(this.draft) === JSON.stringify(context.original) && JSON.stringify(information) === context.informationKey && !this.subtaskDraft.trim() && !this.documentLinksEditor()?.hasDraft() && !this.store.hasUnsavedChanges()) {await this.openDocumentCreation(); return;}
     this.documentCreationPrompt.set(true);
   }
 
@@ -1023,6 +1209,7 @@ export class App {
     const task = this.store.currentWorkspace().tasks.find(task => task.id === this.draft.id && !task.deletedAt);
     if (!task) return;
     this.draft = structuredClone(task); this.draftDocuments.set(structuredClone(this.store.documentsForTask(task.id)));
+    this.draftRelatedTasks.set([...this.store.relatedTaskIds(task.id)]);
     this.draftDocumentDescriptions.set(structuredClone(this.store.descriptionsForTask(task.id))); this.taskEditContext.set(this.store.taskContext(task.id)); this.editing.set(true);
     this.clearLocalTaskDraft(); this.startLocalTaskDraft();
   }
@@ -1050,6 +1237,7 @@ export class App {
   async saveTaskDraftAsNew(): Promise<void> {
     if (this.store.pendingWrites()) return;
     this.draft = {...this.draft, id: crypto.randomUUID(), subtasks: this.draft.subtasks.map(subtask => ({...subtask, id: crypto.randomUUID()}))};
+    this.draftRelatedTasks.update(ids => ids.filter(id => this.store.tasks().some(task => task.id === id && !task.deletedAt)));
     if (!this.statuses().some(status => status.id === this.draft.status)) this.draft.status = this.statuses().find(status => status.kind === 'active')?.id ?? this.statuses()[0].id;
     if (!this.store.categories().some(category => category.id === this.draft.categoryId)) this.draft.categoryId = '';
     if (!this.store.projects().some(project => project.id === this.draft.projectId)) this.draft.projectId = '';
@@ -1192,15 +1380,6 @@ export class App {
     if (this.modal() || this.sidebarOpen() || this.panelOverlay() && this.panelOpen() || target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
     if (!(redo ? this.store.canRedo() : this.store.canUndo()) || this.store.pendingWrites()) return;
     event.preventDefault(); void (redo ? this.redoLastAction() : this.undoLastAction());
-  }
-
-  async drop(event: CdkDragDrop<BoardColumn, BoardColumn, Task>): Promise<void> {
-    if (!event.isPointerOverContainer) return;
-    const task = event.item.data;
-    const destination = event.container.data;
-    const remaining = destination.tasks.filter(item => item.id !== task.id);
-    if (!this.handleResult(await this.store.moveTask(task.id, destination.id, remaining[event.currentIndex]?.id))) return;
-    if (event.previousContainer !== event.container) this.notifySaved(`「${task.title}」已移至${this.statusLabel(destination.id)}`);
   }
 
   dragEnded(): void {
@@ -1545,6 +1724,7 @@ export class App {
     if (this.calendarPublishing()) return;
     if (this.modal() === 'settings' && this.store.pendingWrites() > 0) return;
     if (this.modal() === 'purge-task' && this.store.pendingWrites() > 0) return;
+    this.cancelTaskLinkPicker();
     const current = this.modal(), context = this.overviewReturnContext;
     const returnToOverview = current !== 'overview-list' && !!context && context.workspaceId === this.store.currentWorkspace().id
       && context.generation === this.store.generation() && this.overviewOpen() && !!this.overviewSelection();

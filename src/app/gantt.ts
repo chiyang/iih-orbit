@@ -1,4 +1,4 @@
-import {afterRenderEffect, Component, computed, DestroyRef, ElementRef, inject, input, linkedSignal, output, signal, untracked, viewChild, viewChildren} from '@angular/core';
+import {afterRenderEffect, Component, computed, DestroyRef, ElementRef, HostListener, inject, input, linkedSignal, output, signal, untracked, viewChild, viewChildren} from '@angular/core';
 import {FormsModule} from '@angular/forms';
 import {Icon} from './icon';
 import {ThemeColor} from './theme-color';
@@ -8,7 +8,8 @@ import {dateKey, isTaskOverdue, validDate} from './task-schedule';
 import {GMAIL_MIME} from './gmail-data';
 import {DOCUMENT_DRAG_TYPE} from './document-data';
 import type {CalendarPosition} from './calendar-move';
-import {civilDay, ganttAxis, ganttDropPosition, ganttParts, ganttPosition, ganttRows, ganttSchedule, ganttSpan, ganttZoomScroll, moveGanttDate, readGanttRange, readGanttZoom, virtualRange, type GanttCompletion, type GanttDateRange, type GanttOrder, type GanttScale} from './gantt-data';
+import {civilDay, ganttAxis, ganttDayAtPosition, ganttDropPosition, ganttParts, ganttPosition, ganttRows, ganttSchedule, ganttSpan, ganttZoomScroll, moveGanttDate, readGanttRange, readGanttZoom, virtualRange, type GanttCompletion, type GanttDateRange, type GanttOrder, type GanttScale} from './gantt-data';
+import {editGanttSchedule, type GanttEditKind} from './gantt-edit';
 
 @Component({selector: 'app-gantt', imports: [FormsModule, Icon, ThemeColor], templateUrl: './gantt.html', styleUrl: './gantt.css'})
 export class Gantt {
@@ -41,6 +42,14 @@ export class Gantt {
   readonly statusFilterChange = output<string[]>();
   readonly categoryFilterChange = output<string[]>();
   readonly editTask = output<Task>();
+  readonly scheduleChange = output<{task: Task; original: Task; context: string}>();
+  readonly busy = input(false);
+  readonly lockedTaskIds = input<string[]>([]);
+  readonly scheduleMessage = signal('');
+  readonly schedulePreview = signal<Task | null>(null);
+  private gesture?: {pointerId: number; element: HTMLElement; original: Task; kind: GanttEditKind; day: number; x: number; y: number; lastX: number; moved: boolean; valid: boolean; context: string; axis: string};
+  private scrollFrame = 0;
+  private suppressClick = false;
   readonly documentDragging = input(false);
   readonly mailDragging = input(false);
   readonly documentDrop = output<{event: DragEvent; position?: CalendarPosition; taskId?: string; projectId?: string}>();
@@ -90,7 +99,7 @@ export class Gantt {
   readonly selectedGroup = computed(() => this.groups().some(group => group.id === this.sectionTarget()) ? this.sectionTarget() : this.groups()[0]?.id ?? '');
   readonly rowWindow = computed(() => virtualRange(this.rows().length, this.scrollTop(), this.viewportHeight() - this.headerHeight(), this.rowHeight()));
   readonly visibleRows = computed(() => this.rows().slice(this.rowWindow().start, this.rowWindow().end).map((row, index) => {
-    const span = row.kind === 'task' ? ganttSpan(row.task, this.axis(), this.columnWidth()) : null;
+    const span = row.kind === 'task' ? ganttSpan(this.preview(row.task), this.axis(), this.columnWidth()) : null;
     const textWidth = this.titleWidths().get(row.id) ?? 0, padding = 8 * this.preferences.scale();
     const titleOutside = !!span && (span.marker || span.width < textWidth + padding * 2);
     const barWidth = span?.marker ? 28 : span?.width ?? 0, barLeft = (span?.left ?? 0) - (span?.marker ? 14 : 0);
@@ -170,8 +179,83 @@ export class Gantt {
       const button = buttons.find(item => item.nativeElement.dataset['taskId'] === id)?.nativeElement;
       if (button) {button.focus({preventScroll: true}); this.pendingFocus.set('');}
     });
-    inject(DestroyRef).onDestroy(() => observer?.disconnect());
+    afterRenderEffect(() => {
+      const context = this.resetKey(), axis = this.editAxis(), tasks = this.tasks(), busy = this.busy() || this.documentDragging() || this.mailDragging(), locked = this.lockedTaskIds();
+      untracked(() => {const gesture = this.gesture; if (gesture && (busy || gesture.context !== context || gesture.axis !== axis || locked.includes(gesture.original.id) || JSON.stringify(tasks.find(task => task.id === gesture.original.id)) !== JSON.stringify(gesture.original))) this.cancelSchedule();});
+    });
+    inject(DestroyRef).onDestroy(() => {observer?.disconnect(); this.cancelSchedule();});
   }
+  preview(task: Task): Task {const preview = this.schedulePreview(); return preview?.id === task.id ? preview : task;}
+  canAdjust(task: Task): boolean {return !this.busy() && !this.documentDragging() && !this.mailDragging() && !task.deletedAt && !this.lockedTaskIds().includes(task.id);}
+  private editAxis(): string {return JSON.stringify([this.selectedDate(), this.scale(), this.zoom(), this.range(), this.preferences.scale(), this.labelWidth(), this.completion(), this.order(), this.selectedStatuses(), this.selectedCategories()]);}
+  private pointerDay(x: number): number {
+    const viewport = this.viewport()!.nativeElement;
+    return ganttDayAtPosition(x - viewport.getBoundingClientRect().left + viewport.scrollLeft - this.labelWidth(), this.axis(), this.columnWidth());
+  }
+  beginSchedule(event: PointerEvent, task: Task, kind: GanttEditKind): void {
+    if (event.button !== 0 || event.isPrimary === false || !this.canAdjust(task) || this.documentDragging() || this.mailDragging() || !this.viewport()) return;
+    this.cancelSchedule();
+    this.suppressClick = false;
+    const element = event.currentTarget as HTMLElement;
+    this.gesture = {pointerId: event.pointerId, element, original: structuredClone(task), kind, day: this.pointerDay(event.clientX), x: event.clientX, y: event.clientY, lastX: event.clientX, moved: false, valid: true, context: this.resetKey(), axis: this.editAxis()};
+    try {element.setPointerCapture(event.pointerId);} catch { /* Document listeners still support mouse input. */ }
+    this.scheduleMessage.set(''); event.stopPropagation();
+  }
+  @HostListener('document:pointermove', ['$event'])
+  moveSchedule(event: PointerEvent): void {
+    const gesture = this.gesture;
+    if (!gesture || event.pointerId !== gesture.pointerId) return;
+    gesture.lastX = event.clientX;
+    if (!gesture.moved && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 5) return;
+    gesture.moved = true; event.preventDefault(); this.updateSchedulePreview(); this.startScroll();
+  }
+  private updateSchedulePreview(): void {
+    const gesture = this.gesture; if (!gesture) return;
+    try {
+      const next = editGanttSchedule(gesture.original, gesture.kind, Math.round(this.pointerDay(gesture.lastX) - gesture.day));
+      gesture.valid = true; this.schedulePreview.set(next); this.scheduleMessage.set(ganttSchedule(next) + ' · 放開儲存，Esc 取消');
+    } catch (error) {gesture.valid = false; this.scheduleMessage.set(error instanceof Error ? error.message : '時程不合法，原內容保留。');}
+  }
+  private startScroll(): void {
+    if (this.scrollFrame || typeof requestAnimationFrame === 'undefined') return;
+    const frame = () => {
+      this.scrollFrame = 0; const gesture = this.gesture, viewport = this.viewport()?.nativeElement;
+      if (!gesture || !viewport) return;
+      const bounds = viewport.getBoundingClientRect(), direction = gesture.lastX < bounds.left + this.labelWidth() + 28 ? -1 : gesture.lastX > bounds.right - 28 ? 1 : 0;
+      if (direction) {viewport.scrollLeft += direction * 10; this.scrolled(); this.updateSchedulePreview();}
+      this.scrollFrame = requestAnimationFrame(frame);
+    };
+    this.scrollFrame = requestAnimationFrame(frame);
+  }
+  @HostListener('document:pointerup', ['$event'])
+  finishSchedule(event: PointerEvent): void {
+    const gesture = this.gesture; if (!gesture || event.pointerId !== gesture.pointerId) return;
+    const task = this.schedulePreview();
+    const message = this.scheduleMessage();
+    if (gesture.moved) {event.preventDefault(); this.suppressClick = true;}
+    this.cancelSchedule();
+    if (gesture.moved && !gesture.valid) this.scheduleMessage.set(message);
+    if (gesture.moved && gesture.valid && task && JSON.stringify(task) !== JSON.stringify(gesture.original) && gesture.context === this.resetKey() && gesture.axis === this.editAxis() && this.canAdjust(gesture.original)) this.scheduleChange.emit({task, original: gesture.original, context: gesture.context});
+  }
+  @HostListener('document:pointercancel', ['$event'])
+  pointerCancelled(event: PointerEvent): void {if (event.pointerId === this.gesture?.pointerId) this.cancelSchedule();}
+  @HostListener('window:blur')
+  cancelSchedule(): void {
+    const gesture = this.gesture; this.gesture = undefined;
+    if (gesture?.moved) this.suppressClick = true;
+    if (this.scrollFrame && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(this.scrollFrame);
+    this.scrollFrame = 0; this.schedulePreview.set(null); this.scheduleMessage.set('');
+    if (gesture) try {if (gesture.element.hasPointerCapture(gesture.pointerId)) gesture.element.releasePointerCapture(gesture.pointerId);} catch { /* An unmounted bar has already released capture. */ }
+  }
+  @HostListener('document:keydown.escape', ['$event'])
+  cancelScheduleKey(event: Event): void {if (this.gesture) {event.preventDefault(); event.stopPropagation(); this.suppressClick = true; this.cancelSchedule();}}
+  scheduleKey(event: KeyboardEvent, task: Task, kind: GanttEditKind): void {
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || !this.canAdjust(task)) return;
+    event.preventDefault(); event.stopPropagation();
+    try {const changed = editGanttSchedule(task, kind, event.key === 'ArrowLeft' ? -1 : 1); this.scheduleMessage.set(''); this.scheduleChange.emit({task: changed, original: structuredClone(task), context: this.resetKey()});}
+    catch (error) {this.scheduleMessage.set(error instanceof Error ? error.message : '時程不合法，原內容保留。');}
+  }
+  openBar(task: Task): void {if (this.suppressClick) {this.suppressClick = false; return;} this.editTask.emit(task);}
   status(task: Task): BoardStatus {return this.statusMap().get(task.status) ?? COLUMNS[0];}
   private sourceKind(event: DragEvent): 'document' | 'mail' | undefined {
     if (this.documentDragging() && event.dataTransfer?.types.includes(DOCUMENT_DRAG_TYPE)) return 'document';

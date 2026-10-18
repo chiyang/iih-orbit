@@ -1,5 +1,5 @@
 import {sourceOpenUrl} from './source-file-type';
-import { Component, DestroyRef, effect, inject, Injector, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, effect, ElementRef, inject, Injector, input, output, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { CdkDrag, CdkDragHandle, CdkDropList, type CdkDragDrop } from '@angular/cdk/drag-drop';
 import type { DocumentDescription, DocumentSource } from './models';
@@ -14,8 +14,8 @@ import {DocumentLinkStatus} from './document-link-status';
 @Component({
   selector: 'app-document-links-editor', imports: [FormsModule, Icon, SourceIcon, CdkDrag, CdkDragHandle, CdkDropList, DocumentLinkStatus], styleUrl: './document-links.css',
   template: `<section #editor class="document-editor" aria-label="任務資訊連結">
-    <div class="document-heading"><div><app-icon name="link" /><strong>資訊連結</strong></div><span>{{ value().length }} 項</span></div>
-    <p class="document-help">拖曳或用箭頭排序，為這個任務補充用途說明。儲存任務後生效；移除只解除關聯。</p>
+    <div class="document-heading"><div><app-icon name="link" /><strong>資訊連結</strong></div><span>{{ value().length + taskLinkCount() }} 項</span></div>
+    <p class="document-help">可為郵件與檔案補充用途、調整順序。儲存任務後生效；移除只解除關聯。</p>
     @if (hasDrive()) {<div class="document-metadata-actions"><label>查驗來源<select [ngModel]="metadataSource()" (ngModelChange)="metadataSource.set($event)" [ngModelOptions]="{standalone: true}" aria-label="連結資訊查驗來源"><option value="">自動選擇可用來源</option>@for (source of metadata.connections.sources(); track source.id) {<option [value]="source.id">{{ source.name() }}</option>}</select></label><button type="button" [disabled]="metadata.manualBusy()" title="更新目前可見的 Drive 連結；捲動後可查驗更多項目" (click)="refreshMetadata(editor)">{{ metadata.manualBusy() ? '查驗中…' : '更新連結資訊' }}</button>@if (metadataSource() && !metadata.connections.source(metadataSource()).auth.connected()) {<button type="button" (click)="metadata.reconnect(metadataSource())">連線此查驗來源</button>}</div>}
     <!-- Previously saved preview sources stay readable without opening synthetic IDs. -->
     <div class="document-link-list" cdkDropList [cdkDropListData]="value()" (cdkDropListDropped)="drop($event)">
@@ -31,7 +31,8 @@ import {DocumentLinkStatus} from './document-link-status';
         </article>
       }
     </div>
-    <div class="document-add-actions"><button type="button" (click)="createDocument.emit()">建立文件</button><button type="button" (click)="openPicker()">＋ 瀏覽 Drive 加入連結</button><button type="button" (click)="adding.set(!adding()); error.set('')">貼上 Drive 連結</button></div>
+    <ng-content />
+    <div class="document-add-actions"><button type="button" (click)="createDocument.emit()">建立文件</button><button #taskLinkCreate type="button" class="task-link-create" [disabled]="taskLinkPickerBusy()" (click)="createTaskLink.emit()">建立任務連結</button><button type="button" (click)="openPicker()">＋ 瀏覽 Drive 加入連結</button><button type="button" (click)="adding.set(!adding()); error.set('')">貼上 Drive 連結</button></div>
     @if (adding()) {
       <div class="document-add-fields">
         <label>文件名稱<input aria-label="文件名稱" [(ngModel)]="name" [ngModelOptions]="{standalone: true}" maxlength="300" (keydown.enter)="$event.preventDefault(); add()"></label>
@@ -56,6 +57,11 @@ export class DocumentLinksEditor {
   readonly known = input<DocumentSource[]>([]);
   readonly valueChange = output<DocumentSource[]>();
   readonly createDocument = output<void>();
+  readonly taskLinkCount = input(0);
+  readonly taskLinkPickerBusy = input(false);
+  readonly createTaskLink = output<void>();
+  private readonly taskLinkCreate = viewChild<ElementRef<HTMLButtonElement>>('taskLinkCreate');
+  focusTaskLinkButton(): void {this.taskLinkCreate()?.nativeElement.focus({preventScroll: true});}
   readonly descriptions = input<DocumentDescription[]>([]);
   readonly descriptionsChange = output<DocumentDescription[]>();
   readonly descriptionLimit = DOCUMENT_DESCRIPTION_LIMIT;

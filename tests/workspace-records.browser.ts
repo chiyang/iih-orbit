@@ -69,6 +69,17 @@ export async function runRecordBrowserTests(): Promise<string[]> {
       const completionBackup = await second.backupForExport('full');
       check(completionBackup.formatVersion === 8 && completionBackup.data.workspaces[0].completionEvents?.length === 4, '重新開啟及跨分頁更新保留完成歷史，JSON 使用格式 8');
       await first.snapshotForExport();
+      check((await first.linkTasks(first.taskContext('task-20'), first.taskContext('task-21'))).ok, '相關任務在原生交易內連結');
+      await second.snapshotForExport();
+      check(second.relatedTaskIds('task-20')[0] === 'task-21' && second.relatedTaskIds('task-21')[0] === 'task-20', '另一分頁重讀後可從兩端找到相關任務');
+      const relationState = await repository.read();
+      IDBObjectStore.prototype.put = function(value, ...args) {if (value.key.includes('taskLinks')) throw new DOMException('測試相關任務寫入失敗', 'QuotaExceededError'); return originalPut.call(this, value, ...args);};
+      try {const result = await first.linkTasks(first.taskContext('task-20'), first.taskContext('task-22')); check(result.ok && !result.persisted && first.hasUnsavedChanges(), '相關任務寫入失敗時完整變更暫存分頁');}
+      finally {IDBObjectStore.prototype.put = originalPut;}
+      check(JSON.stringify(await repository.read()) === JSON.stringify(relationState), '相關任務保存失敗不部分更新兩端任務與連結');
+      check((await first.linkTasks(first.taskContext('task-20'), first.taskContext('task-22'))).ok && !first.hasUnsavedChanges(), '儲存恢復後重試完整的雙向連結交易');
+      const relationBackup = await first.backupForExport('full');
+      check(relationBackup.formatVersion === 9 && relationBackup.data.workspaces[0].taskLinks?.length === 2 && relationBackup.data.workspaces[0].completionEvents?.length === 4, '格式 9 備份完整保存相關任務及完成歷史');
       const documentWrites: string[] = [];
       IDBObjectStore.prototype.put = function(value, ...args) {if (this.name === 'records') documentWrites.push(value.key); return originalPut.call(this, value, ...args);};
       try {check((await first.saveTask(first.tasks()[0], first.taskContext('task-0'), undefined, [])).ok, '文件移除以交易保存刪除記錄');}

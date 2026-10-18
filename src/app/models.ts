@@ -66,7 +66,7 @@ export interface CalendarTransfer {
 }
 
 export interface BoardState {
-  version: 4 | 5 | 6 | 7;
+  version: 4 | 5 | 6 | 7 | 8;
   projects: Project[];
   categories: Category[];
   statuses: BoardStatus[];
@@ -78,7 +78,11 @@ export interface BoardState {
   documentDetails?: DocumentDetail[];
   documentOrders?: DocumentOrder[];
   completionEvents?: TaskCompletionEvent[];
+  taskLinks?: TaskLink[];
 }
+
+/** An undirected relation. Removing an observed addition never revives that addition. */
+export interface TaskLink {id: string; taskIds: [string, string]; removed?: true}
 
 /** Immutable local status transitions, retained even if the task is later removed. */
 export interface TaskCompletionEvent {

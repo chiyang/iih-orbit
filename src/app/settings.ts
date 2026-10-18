@@ -14,6 +14,7 @@ import { GmailSettings } from './gmail-settings';
 import { GoogleConnection } from './google-connection';
 import { DEFAULT_WEEK_RANGE } from './calendar-display';
 import { DriveBrowserSettings } from './drive-browser-settings';
+import {NotificationSettings} from './notification-settings';
 
 export type SettingsTab = 'appearance' | 'reminders' | 'google' | 'calendar' | 'gmail' | 'drive-files' | 'drive' | 'data' | 'reset';
 export const SETTINGS_TABS: {id: SettingsTab; label: string}[] = [
@@ -21,7 +22,7 @@ export const SETTINGS_TABS: {id: SettingsTab; label: string}[] = [
   {id: 'google', label: 'Google 連線'}, {id: 'calendar', label: 'Google 月曆'}, {id: 'gmail', label: 'Gmail'}, {id: 'drive-files', label: 'Google Drive'}, {id: 'drive', label: '遠端同步備份'}, {id: 'data', label: '資料與備份'}, {id: 'reset', label: '資料重置'}
 ];
 
-@Component({selector: 'app-settings', imports: [FormsModule, Icon, GoogleSettingsPanel, BackupPanel, DrivePanel, GmailSettings, GoogleConnection, DriveBrowserSettings], templateUrl: './settings.html', styleUrl: './settings.css'})
+@Component({selector: 'app-settings', imports: [FormsModule, Icon, GoogleSettingsPanel, BackupPanel, DrivePanel, GmailSettings, GoogleConnection, DriveBrowserSettings, NotificationSettings], templateUrl: './settings.html', styleUrl: './settings.css'})
 export class Settings {
   readonly store = inject(BoardStore);
   readonly preferences = inject(UiPreferences);

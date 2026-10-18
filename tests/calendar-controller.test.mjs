@@ -11,6 +11,7 @@ import { JSDOM } from 'jsdom';
 import { externalEvent } from '../src/app/google-data.ts';
 import { copyEventTask, createEventBody } from '../src/app/calendar-transfer-data.ts';
 import { CALENDAR_DISPLAY_KEY, loadCalendarWidth, loadWeekRange, readWeekRange } from '../src/app/calendar-display.ts';
+import {TASK_LINK_DRAG_TYPE} from '../src/app/task-link-drag.ts';
 
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -21,8 +22,10 @@ await build({stdin: {contents: "export {Calendar} from './src/app/calendar.ts'; 
 const { Calendar, GoogleCalendarService, BoardStore, UiPreferences } = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 const base = {id: 'task', title: '會議', description: '內容保留', projectId: '', categoryId: '', status: 'todo', priority: 'medium', startDate: '2026-10-09', startTime: '09:00', dueDate: '2026-10-09', dueTime: '10:00', subtasks: [{id: 'sub', title: '資料', done: false}]};
+let dragValues = new Map();
 
 function calendarController(tasks = [base], external = []) {
+  dragValues = new Map();
   const state = {version: 1, activeWorkspaceId: 'workspace', workspaces: [{version: 4, id: 'workspace', name: '工作', projects: [], categories: [], statuses: COLUMNS, tasks}]};
   const values = new Map([['orbit-workspaces-v1', JSON.stringify(state)]]);
   globalThis.localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key)};
@@ -43,7 +46,7 @@ function calendarController(tasks = [base], external = []) {
 }
 function dragEvent(x = 20, y = 20) {
   let prevented = false, stopped = false;
-  return {clientX: x, clientY: y, currentTarget: {getBoundingClientRect: () => ({top: 0, left: 0})}, dataTransfer: {setData() {}}, preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }, prevented: () => prevented, stopped: () => stopped};
+  return {clientX: x, clientY: y, currentTarget: {getBoundingClientRect: () => ({top: 0, left: 0})}, dataTransfer: {get types() {return [...dragValues.keys()];}, setData: (type, value) => dragValues.set(type, value), getData: type => dragValues.get(type) ?? ''}, preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }, prevented: () => prevented, stopped: () => stopped};
 }
 
 function googleEntry(id, start, end, title = id) {
@@ -490,5 +493,53 @@ test('郵件可加入月／週既有 Orbit 任務，Google 活動阻擋，空白
     const link = event(); f.calendar.documentEntryOver(link, base); assert.equal(f.calendar.documentLinkTaskId(), base.id); f.calendar.documentEntryDrop(link, base); assert.equal(drops[0].taskId, base.id); assert.equal(drops[0].position, undefined);
     const blocked = event(); f.calendar.documentEntryOver(blocked, external.task); assert.equal(blocked.dataTransfer.dropEffect, 'none'); f.calendar.documentEntryDrop(blocked, external.task); assert.equal(drops.length, 1); assert.equal(blocked.stopped(), true);
     const timed = event(); await f.calendar.drop(timed, {kind: 'time', day: '2026-10-10', minute: 615}); assert.equal(drops[1].position.minute, 615); assert.equal(drops[1].taskId, undefined);
+  } finally {f.close();}
+});
+
+test('月曆與週視圖的 Orbit 任務可拖到另一任務建立雙向連結，不改日期、狀態或開啟編輯', async () => {
+  for (const mode of ['month', 'week']) for (const kind of ['month', 'time', 'all-day']) {
+    if (mode === 'month' && kind !== 'month' || mode === 'week' && kind === 'month') continue;
+    const target = {...base, id: 'target', title: '另一任務', startDate: '2026-10-10', dueDate: '2026-10-10', status: 'progress'}, f = calendarController([base, target]);
+    try {
+      const {calendar, store} = f; calendar.mode.set(mode); f.flush(); let opened = 0; calendar.editTask.subscribe(() => opened++);
+      const fields = () => store.tasks().map(task => [task.id, task.title, task.status, task.startDate, task.startTime, task.dueDate, task.dueTime]), before = fields();
+      calendar.startDrag(dragEvent(), base, {kind, day: base.startDate, ...(kind === 'time' ? {minute: 540} : {})});
+      const over = dragEvent(); calendar.documentEntryOver(over, target); assert.equal(over.stopped(), true); assert.equal(over.dataTransfer.dropEffect, 'link'); assert.equal(calendar.dropPosition(), null); assert.equal(calendar.taskLinkTarget().original.id, target.id);
+      await calendar.documentEntryDrop(dragEvent(), target); assert.deepEqual(store.relatedTaskIds(base.id), [target.id]); assert.deepEqual(store.relatedTaskIds(target.id), [base.id]); assert.deepEqual(fields(), before); assert.equal(calendar.draggedTaskId(), ''); assert.equal(calendar.taskLinkTarget(), null);
+      calendar.openEntry(target); assert.equal(opened, 0); await store.undo(); assert.deepEqual(store.relatedTaskIds(base.id), []); await store.redo(); assert.deepEqual(store.relatedTaskIds(base.id), [target.id]);
+    } finally {f.close();}
+  }
+});
+
+test('Orbit 任務拖放拒絕自己、Google 活動及偽造 payload，已連結不增加事件', async () => {
+  const target = {...base, id: 'target', title: '另一任務'}, external = googleEntry('google-target', {dateTime: '2026-10-09T13:00:00'}, {dateTime: '2026-10-09T14:00:00'}), f = calendarController([base, target], [external]);
+  try {
+    const {calendar, store} = f;
+    for (const task of [base, external.task]) {calendar.startDrag(dragEvent(), store.tasks()[0], {kind: 'month', day: base.startDate}); const event = dragEvent(); calendar.documentEntryOver(event, task); assert.equal(event.dataTransfer.dropEffect, 'none'); await calendar.documentEntryDrop(event, task); assert.deepEqual(store.relatedTaskIds(base.id), []);}
+    calendar.startDrag(dragEvent(), store.tasks()[0], {kind: 'month', day: base.startDate}); const forged = dragEvent(); forged.dataTransfer.setData(TASK_LINK_DRAG_TYPE, JSON.stringify({...JSON.parse(forged.dataTransfer.getData(TASK_LINK_DRAG_TYPE)), token: 'forged'})); await calendar.documentEntryDrop(forged, target); assert.deepEqual(store.relatedTaskIds(base.id), []);
+    calendar.startDrag(dragEvent(), store.tasks()[0], {kind: 'month', day: base.startDate}); await calendar.documentEntryDrop(dragEvent(), target); const count = store.state().taskLinks.length;
+    calendar.startDrag(dragEvent(), store.tasks()[0], {kind: 'month', day: base.startDate}); await calendar.documentEntryDrop(dragEvent(), store.tasks()[1]); assert.equal(store.state().taskLinks.length, count); assert.match(calendar.moveNotice(), /已經連結/);
+  } finally {f.close();}
+});
+
+test('拖曳目標或來源更新後不建立過期連結，離開任務後空白日期仍可改期', async () => {
+  const target = {...base, id: 'target', title: '另一任務'}, f = calendarController([base, target]);
+  try {
+    const {calendar, store} = f;
+    calendar.startDrag(dragEvent(), base, {kind: 'month', day: base.startDate}); calendar.documentEntryOver(dragEvent(), target);
+    await store.saveTask({...target, title: '更新後的目標'}); await calendar.documentEntryDrop(dragEvent(), target); assert.deepEqual(store.relatedTaskIds(base.id), []); assert.match(calendar.moveError(), /已更新/);
+    calendar.startDrag(dragEvent(), store.tasks()[0], {kind: 'month', day: base.startDate}); calendar.documentEntryOver(dragEvent(), store.tasks()[1]);
+    await store.saveTask({...store.tasks()[0], title: '更新後的來源'}); await calendar.documentEntryDrop(dragEvent(), store.tasks()[1]); assert.deepEqual(store.relatedTaskIds(base.id), []);
+    calendar.startDrag(dragEvent(), store.tasks()[0], {kind: 'month', day: base.startDate}); calendar.documentEntryOver(dragEvent(), store.tasks()[1]); calendar.dragOver(dragEvent(), {kind: 'month', day: '2026-10-12'}); assert.equal(calendar.taskLinkTarget(), null); await calendar.drop(dragEvent(), {kind: 'month', day: '2026-10-12'}); assert.equal(store.tasks()[0].startDate, '2026-10-12'); assert.deepEqual(store.relatedTaskIds(base.id), []);
+  } finally {f.close();}
+});
+
+test('切換月週／日期與取消拖曳會清除任務連結落點，舊拖曳不能跨脈絡寫入', async () => {
+  const target = {...base, id: 'target', title: '另一任務'}, f = calendarController([base, target]);
+  try {
+    const {calendar, store} = f; calendar.busy = signal(false); f.flush();
+    for (const change of [() => calendar.mode.set('week'), () => calendar.anchor.set(new Date(2026, 10, 1)), () => calendar.busy.set(true), () => calendar.endDrag()]) {
+      calendar.busy.set(false); f.flush(); calendar.startDrag(dragEvent(), store.tasks()[0], {kind: calendar.mode() === 'month' ? 'month' : 'time', day: base.startDate}); calendar.documentEntryOver(dragEvent(), target); change(); f.flush(); assert.equal(calendar.taskLinkTarget(), null); await calendar.documentEntryDrop(dragEvent(), target); assert.deepEqual(store.relatedTaskIds(base.id), []);
+    }
   } finally {f.close();}
 });

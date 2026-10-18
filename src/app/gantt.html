@@ -27,7 +27,8 @@
   @if (range()) {<p class="range-note">已套用 {{ range()!.start }} — {{ range()!.end }}，未排程暫不列入。@if (!advancedOpen()) {<button type="button" (click)="clearRange()">清除範圍</button>}</p>}
   <div class="gantt-caption"><span aria-live="polite">{{ axis().label }}</span><span>{{ zoom() }}% · {{ scale() === 'day' ? '每小時細格 · ' : '' }}{{ order() === 'start' ? '開始時間優先' : '截止時間優先' }} · 已完成在前</span></div>
 
-    <p class="keyboard-hint" id="gantt-help">可水平捲動時間軸；任務名稱可用上下鍵移動，Home／End 前往首尾。</p>
+  @if (scheduleMessage()) {<p class="schedule-message" role="status">{{ scheduleMessage() }}</p>}
+    <p class="keyboard-hint" id="gantt-help">可水平捲動時間軸；拖曳任務條移動日期，兩端調整起迄，保留原時間。時間條或端點可用左右鍵調整一天，Esc 取消拖曳；任務名稱可用上下鍵移動，Home／End 前往首尾。</p>
     <div #viewport class="gantt-viewport" tabindex="0" aria-label="甘特任務與時間軸" aria-describedby="gantt-help" (scroll)="scrolled()" [style.--row-height.px]="rowHeight()" [style.--header-height.px]="headerHeight()" [style.--label-width.px]="labelWidth()" [style.--column-width.px]="columnWidth()" [style.--past-boundary.px]="pastBoundary()">
       <div class="gantt-canvas" role="table" aria-label="任務時程" [attr.aria-rowcount]="rows().length + 1" aria-colcount="2" [style.width.px]="canvasWidth()">
         <div class="gantt-header" role="row" aria-rowindex="1">
@@ -50,15 +51,20 @@
             <div class="gantt-row" role="row" [attr.aria-rowindex]="item.index + 2" [style.top.px]="item.index * rowHeight()" [class.group-row]="item.row.kind === 'group'" [class.source-link-target]="item.row.kind === 'task' && sourceTarget()?.taskId === item.row.id">
               @if (item.row.kind === 'group') {<div class="group-heading" role="cell" aria-colspan="2" [style.width.px]="viewportWidth()"><strong [title]="item.row.label">{{ item.row.label }}</strong><span>{{ item.row.count }} 項</span><small>已完成 {{ item.row.done }} · 未完成 {{ item.row.pending }}@if (item.row.archived) { · 封存 {{ item.row.archived }}}</small></div>}
               @else {
-                @let task = item.row.task;
+                @let task = preview(item.row.task);
                 <div class="task-label" role="cell" [attr.data-link-task-id]="task.id" [orbitColor]="status(task).color"><button #taskName class="task-name" type="button" [attr.data-task-id]="task.id" [title]="task.title + '\n' + schedule(task)" (click)="editTask.emit(task)" (keydown)="rowKey($event, item.index)">{{ task.title }}</button><div class="task-meta"><span class="status-dot" [orbitColor]="status(task).color" [title]="status(task).label"></span><span [title]="project(task) + ' · ' + status(task).label + ' · ' + (categoryMap().get(task.categoryId)?.name ?? '未分類')">{{ status(task).label }} · {{ categoryMap().get(task.categoryId)?.name ?? '未分類' }}</span></div></div>
                 <div class="task-timeline" role="cell" [orbitColor]="status(task).color" [style.width.px]="axisWidth()" [class.completed]="status(task).kind === 'done'" [class.archived]="status(task).kind === 'archived'">
                   @if (item.span; as span) {
                     @if (span.outside) {<button class="outside-range" [class.after-range]="span.outside === 'after'" type="button" [title]="schedule(task)" [attr.aria-label]="'定位 ' + task.title + '，' + schedule(task)" [style.left.px]="scrollLeft() + 12" (click)="locate(task)">{{ span.outside === 'before' ? '← 範圍之前' : '範圍之後 →' }} · 定位</button>}
-                    @else {<button class="task-bar" type="button" [attr.data-link-task-id]="task.id" [class.marker]="span.marker" [class.overdue]="overdue(task)" [class.clipped-start]="span.clippedStart" [class.clipped-end]="span.clippedEnd" [class.future-marker]="item.futureMarker" [orbitColor]="color(task)" [style.left.px]="span.left" [style.width.px]="span.marker ? 28 : span.width" [title]="task.title + '\n' + colorLabel(task) + ' · ' + status(task).label + (overdue(task) ? ' · 已逾期' : '') + '\n' + schedule(task)" [attr.aria-label]="'開啟 ' + task.title + '，' + status(task).label + '，' + schedule(task) + (overdue(task) ? '，已逾期' : '')" (click)="editTask.emit(task)">
+                    @else {<button class="task-bar" type="button" [attr.data-link-task-id]="task.id" [class.marker]="span.marker" [class.overdue]="overdue(task)" [class.clipped-start]="span.clippedStart" [class.clipped-end]="span.clippedEnd" [class.future-marker]="item.futureMarker" [orbitColor]="color(task)" [style.left.px]="span.left" [style.width.px]="span.marker ? 28 : span.width" [title]="task.title + '\n' + colorLabel(task) + ' · ' + status(task).label + (overdue(task) ? ' · 已逾期' : '') + '\n' + schedule(task)" [attr.aria-label]="'開啟 ' + task.title + '，' + status(task).label + '，' + schedule(task) + (overdue(task) ? '，已逾期' : '')" (pointerdown)="beginSchedule($event, task, 'move')" (keydown)="scheduleKey($event, task, 'move')" (click)="openBar(task)">
                       @if (span.marker) {<i aria-hidden="true"></i>} @else {<span class="bar-fill" aria-hidden="true">@if (item.futureStart < span.width) {<span class="bar-future" [style.left.px]="item.futureStart"></span>}</span>}
                       <span #barTitle class="bar-title" [attr.data-task-id]="task.id" [class.outside]="item.titleOutside" [style.left.px]="item.titleLeft">{{ task.title }}</span>
-                    </button>}
+                    </button>
+                      @if (task.startDate && task.dueDate) {
+                        @if (!span.clippedStart) {<button type="button" class="schedule-handle start-handle" [attr.aria-disabled]="!canAdjust(task)" [style.left.px]="span.marker ? span.left - 14 : span.left" [attr.aria-label]="'調整開始日期：' + task.title + '，左右鍵調整一天'" title="拖曳調整開始日期；左右鍵一天" (pointerdown)="beginSchedule($event, task, 'start')" (keydown)="scheduleKey($event, task, 'start')" (click)="$event.stopPropagation()"><span aria-hidden="true">⋮</span></button>}
+                        @if (!span.clippedEnd) {<button type="button" class="schedule-handle end-handle" [attr.aria-disabled]="!canAdjust(task)" [style.left.px]="span.marker ? span.left + 14 : span.left + span.width" [attr.aria-label]="'調整截止日期：' + task.title + '，左右鍵調整一天'" title="拖曳調整截止日期；左右鍵一天" (pointerdown)="beginSchedule($event, task, 'end')" (keydown)="scheduleKey($event, task, 'end')" (click)="$event.stopPropagation()"><span aria-hidden="true">⋮</span></button>}
+                      }
+                    }
                     @if (!task.startDate || !task.dueDate) {<span class="single-date" [style.left.px]="scrollLeft() + 12">{{ task.startDate ? '僅開始' : '僅截止' }}@if (overdue(task)) { · 已逾期}</span>}
                   } @else {<button type="button" class="unscheduled-action" [style.left.px]="scrollLeft() + 12" (click)="editTask.emit(task)" [attr.aria-label]="'設定時程：' + task.title"><app-icon name="calendar" />設定時程</button>}
                 </div>

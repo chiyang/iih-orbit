@@ -108,6 +108,7 @@ export class Reminders implements OnDestroy {
     void this.historyStorage.save(additions, keys, update, this.now().getTime(), current).then(entries => {if (current()) {this.savedHistory.set(entries); this.historyWarning.set('');}})
       .catch(() => {for (const entry of additions) this.recorded.delete(entry.key); for (const key of keys) this.recordedPopups.delete(key); if (!this.destroyed) this.historyWarning.set('提醒仍可查看，但瀏覽器無法保存這次提醒歷史。');});
   }
+  recordSystemNotification(item: ReminderItem, at: number): void {this.remember([item], {notificationAt: at});}
   markHistoryRead(entries: readonly ReminderHistoryEntry[]): void {
     const keys = entries.filter(entry => entry.generation === this.store.generation()).map(entry => entry.key);
     this.saveHistory([], keys, {readAt: this.now().getTime()}); this.markKeysViewed(keys);

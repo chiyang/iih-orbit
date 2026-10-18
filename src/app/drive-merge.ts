@@ -10,6 +10,7 @@ import { documentsForTask, mergeDocumentLinks, mergeDocumentSources, reconcileDo
 import type { DocumentDetail, DocumentLink, DocumentOrder, DocumentSource } from './models.ts';
 import type {TaskCompletionEvent} from './models.ts';
 import {mergeCompletionEvents, withCompletionEvents} from './task-completion-data.ts';
+import {mergeTaskLinks, reconcileTaskLinks, withTaskLinks} from './task-links-data.ts';
 
 type RecordValue = Record<string, unknown>;
 const object = (value: unknown): value is RecordValue => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -70,6 +71,7 @@ class Merger {
     return structuredClone(values[this.preferred ?? 0]);
   }
   merge(base: unknown, values: unknown[], path: string): unknown {
+    if (path.endsWith('.taskLinks')) return mergeTaskLinks([base ?? [], ...values.map(value => value ?? [])] as import('./models').TaskLink[][]);
     if (path.endsWith('.completionEvents')) return mergeCompletionEvents([base ?? [], ...values.map(value => value ?? [])] as TaskCompletionEvent[][]);
     if (path.endsWith('.documentLinks')) return mergeDocumentLinks([base ?? [], ...values.map(value => value ?? [])] as DocumentLink[][]);
     if (path.endsWith('.documentSources')) return mergeDocumentSources([base ?? [], ...values.map(value => value ?? [])] as DocumentSource[][]);
@@ -274,13 +276,15 @@ export function mergeDriveBackups(baseInput: OrbitBackup, inputs: OrbitBackup[],
   }
   const allWorkspaces = [base, ...backups].flatMap(backup => backup.data.workspaces);
   const modernDocuments = new Set(allWorkspaces.filter(workspace => workspace.version >= 6).map(workspace => workspace.id));
-  const completionWorkspaces = new Set(allWorkspaces.filter(workspace => workspace.version === 7).map(workspace => workspace.id));
+  const completionWorkspaces = new Set(allWorkspaces.filter(workspace => workspace.version >= 7).map(workspace => workspace.id));
+  const linkedWorkspaces = new Set(allWorkspaces.filter(workspace => workspace.version === 8).map(workspace => workspace.id));
+  const taskLinks = new Map([...linkedWorkspaces].map(id => [id, mergeTaskLinks(allWorkspaces.filter(workspace => workspace.id === id).map(workspace => workspace.taskLinks ?? []))]));
   const completionEvents = new Map([...completionWorkspaces].map(id => [id, mergeCompletionEvents(allWorkspaces.filter(workspace => workspace.id === id).map(workspace => workspace.completionEvents ?? []))]));
   const documentStates = new Map([...modernDocuments].map(id => ['data.workspaces[' + id + ']', mergeDocumentLinks(allWorkspaces.filter(workspace => workspace.id === id).map(workspace => workspace.documentLinks ?? []))]));
   const project = (backup: OrbitBackup): RecordValue => {
     const projection = content(backup);
-    projection['workspaces'] = (projection['workspaces'] as OrbitBackup['data']['workspaces']).map(workspace => completionWorkspaces.has(workspace.id) ? withCompletionEvents(workspace, completionEvents.get(workspace.id)!) : workspace).map(workspace => modernDocuments.has(workspace.id)
-      ? {...workspace, version: workspace.version === 7 ? 7 : 6, documentSources: workspace.documentSources ?? [], documentLinks: workspace.documentLinks ?? [], documentDetails: workspace.documentDetails ?? [],
+    projection['workspaces'] = (projection['workspaces'] as OrbitBackup['data']['workspaces']).map(workspace => linkedWorkspaces.has(workspace.id) ? withTaskLinks(workspace, taskLinks.get(workspace.id)!) : workspace).map(workspace => completionWorkspaces.has(workspace.id) ? withCompletionEvents(workspace, completionEvents.get(workspace.id)!) : workspace).map(workspace => modernDocuments.has(workspace.id)
+      ? {...workspace, version: workspace.version >= 7 ? workspace.version : 6, documentSources: workspace.documentSources ?? [], documentLinks: workspace.documentLinks ?? [], documentDetails: workspace.documentDetails ?? [],
         documentOrders: workspace.documentOrders ?? workspace.tasks.map(task => ({id: task.id, documentIds: documentsForTask(workspace, task.id).map(source => source.id)}))} : workspace);
     return projection;
   };
@@ -312,11 +316,14 @@ export function mergeDriveBackups(baseInput: OrbitBackup, inputs: OrbitBackup[],
     return reconcileDocumentTasks({...workspace, tasks, ...(records.length ? {taskConflicts: records.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)} : {})});
   });
   // Interdependent changes can be individually valid yet form an invalid schedule or reference.
-  workspaces = workspaces.flatMap(workspace => {
+  workspaces = workspaces.map(reconcileTaskLinks).flatMap(workspace => {
     if (readWorkspaceState({version: 1, activeWorkspaceId: workspace.id, workspaces: [workspace]})) return [workspace];
     merger.conflicts.add('data.workspaces[' + workspace.id + '].references');
-    const fallback = selected.data.workspaces.find(value => value.id === workspace.id);
-    return fallback ? [fallback] : [];
+    let fallback = selected.data.workspaces.find(value => value.id === workspace.id);
+    if (!fallback) return [];
+    if (linkedWorkspaces.has(fallback.id)) fallback = reconcileTaskLinks(withTaskLinks(fallback, taskLinks.get(fallback.id)!));
+    if (completionWorkspaces.has(fallback.id)) fallback = withCompletionEvents(fallback, completionEvents.get(fallback.id)!);
+    return [fallback];
   });
   const workspaceIds = workspaces.map(workspace => workspace.id);
   const identities = new Map(backups.flatMap(backup => backup.kind === 'full' ? backup.google?.sources ?? [] : backup.calendarSources ?? []).reverse().map(source => [calendarKey(source), source.id]));

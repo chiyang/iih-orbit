@@ -157,3 +157,5 @@ button { border: 0; }
 .brand-name, .brand-institution, .workspace-initial, .mobile-wordmark, .mobile-wordmark strong { color: var(--accent-text); }
 
 .cdk-overlay-container:has(.information-picker-dialog){z-index:1100}
+
+.task-link-drop-hint {position:fixed;z-index:900;left:clamp(8px,calc(var(--drop-x) + 12px),max(8px,calc(100vw - 260px)));top:clamp(8px,calc(var(--drop-y) + 12px),max(8px,calc(100dvh - 96px)));width:max-content;max-width:min(240px,calc(100vw - 32px));box-sizing:border-box;padding:var(--sp8) var(--sp10);border-radius:7px;background:var(--accent-strong);color:var(--on-accent);box-shadow:0 4px 16px #0003;font-size:var(--font-10);line-height:1.5;overflow-wrap:anywhere;pointer-events:none}

@@ -12,6 +12,10 @@ import { COLUMNS } from '../src/app/models.ts';
 import { reminderItems } from '../src/app/reminder-items.ts';
 import { externalEvent } from '../src/app/google-data.ts';
 import { readBrowseState, saveBrowseState } from '../src/app/browse-state.ts';
+import {BOARD_TASK_DRAG_TYPE, TASK_LINK_DRAG_TYPE} from '../src/app/task-link-drag.ts';
+import {editGanttSchedule} from '../src/app/gantt-edit.ts';
+import {Dialog} from '@angular/cdk/dialog';
+import {Subject} from 'rxjs';
 
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -24,14 +28,70 @@ after(() => rm(directory, {recursive: true, force: true}));
 
 const task = {id: 'welcome-task', title: '迎新海報', description: '', projectId: 'welcome', categoryId: 'design', status: 'todo', priority: 'medium', startDate: '2026-10-08', startTime: '', dueDate: '2026-10-08', dueTime: '', subtasks: []};
 
-function application(fresh = false) {
+test('相關任務草稿可恢復及取消，只有儲存才建立雙向跨專案連結', async () => {
+  const f = application(), {app, store} = f;
+  try {
+    app.openTask('todo', store.tasks()[0]); app.draftRelatedTasks.set(['website-task']); app.flushLocalTaskDraft();
+    assert.deepEqual(store.relatedTaskIds('welcome-task'), []); app.closeModal();
+    app.openTask('todo', store.tasks()[0]); assert.ok(app.localTaskDraftRecovery()); app.restoreLocalTaskDraft(); assert.deepEqual(app.draftRelatedTasks(), ['website-task']);
+    app.cancelTaskEdit(); assert.deepEqual(store.relatedTaskIds('welcome-task'), []);
+    app.openTask('todo', store.tasks()[0]); app.draftRelatedTasks.set(['website-task']); await app.saveTask();
+    assert.equal(app.modal(), null); assert.deepEqual(store.relatedTaskIds('welcome-task'), ['website-task']); assert.deepEqual(store.relatedTaskIds('website-task'), ['welcome-task']);
+    app.openTask('done', store.tasks().find(task => task.id === 'website-task')); app.draftRelatedTasks.set([]); app.cancelTaskEdit(); assert.deepEqual(store.relatedTaskIds('welcome-task'), ['website-task']);
+  } finally {f.close();}
+});
+
+test('選取連結不開啟任務、不移動卡片，切換視圖及 Esc 取消，拒絕偽造拖曳', async () => {
+  const f = application(), {app, store} = f;
+  try {
+    f.flush(); const before = store.tasks().map(task => [task.id, task.status, task.projectId]);
+    const source = store.tasks()[0], target = store.tasks()[1];
+    app.beginTaskLink(source); await app.linkSelectedTask(target); assert.equal(app.modal(), null); assert.deepEqual(store.relatedTaskIds(source.id), [target.id]); assert.deepEqual(store.tasks().map(task => [task.id, task.status, task.projectId]), before);
+    app.beginTaskLink(store.tasks()[0]); app.escape(); assert.equal(app.taskLinkSource(), null);
+    app.beginTaskLink(store.tasks()[0]); app.view.set('list'); f.flush(); assert.equal(app.taskLinkSource(), null);
+    const payload = new Map(), event = {dataTransfer: {types: [TASK_LINK_DRAG_TYPE], setData: (type, value) => payload.set(type, value), getData: type => payload.get(type)}, preventDefault() {}, stopPropagation() {}};
+    app.startTaskLinkDrag(event, store.tasks()[0]); assert.ok(payload.get(TASK_LINK_DRAG_TYPE)); payload.set(TASK_LINK_DRAG_TYPE, JSON.stringify({...JSON.parse(payload.get(TASK_LINK_DRAG_TYPE)), token: 'forged'}));
+    app.dropTaskLink(event, store.tasks()[2]); assert.deepEqual(store.relatedTaskIds('daily'), []); assert.equal(app.taskLinkSource(), null);
+    app.startTaskLinkDrag(event, store.tasks()[0]); app.dropTaskLink(event, store.tasks()[2]);
+    await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(store.relatedTaskIds('daily'), ['welcome-task']); assert.equal(app.modal(), null);
+    app.endTaskLinkDrag(); app.openTask('todo', store.tasks()[0]); assert.equal(app.modal(), null);
+  } finally {f.close();}
+});
+
+test('相關任務開啟最新名稱並保護未保存草稿，文件建立及 Calendar 移轉不跳過連結保存', async () => {
+  const f = application(), {app, store} = f;
+  try {
+    await store.linkTasks(store.taskContext('welcome-task'), store.taskContext('daily'));
+    app.openTask('todo', store.tasks()[0]); app.draft.description = '尚未儲存'; app.openRelatedTask('daily'); assert.equal(app.draft.id, 'welcome-task'); assert.match(app.formError(), /先儲存/); app.cancelTaskEdit();
+    await store.saveTask({...store.tasks().find(task => task.id === 'daily'), title: '最新名稱'});
+    app.openTask('todo', store.tasks()[0]); app.openRelatedTask('daily'); assert.equal(app.draft.title, '最新名稱'); app.cancelTaskEdit();
+    let opened = 0; app.openDocumentCreation = async () => {opened++;};
+    app.openTask('todo', store.tasks()[0]); app.draftRelatedTasks.set(['daily', 'website-task']); await app.requestDocumentCreation(); assert.equal(app.documentCreationPrompt(), true); assert.equal(opened, 0);
+    await app.saveTask(false, true); assert.equal(opened, 1); assert.deepEqual(store.relatedTaskIds('website-task'), ['welcome-task']); app.cancelTaskEdit();
+    app.openTask('todo', store.tasks()[0]); app.draftRelatedTasks.set([]); await app.saveTask(true); assert.equal(app.modal(), 'calendar-publish'); assert.deepEqual(store.relatedTaskIds('welcome-task'), []);
+  } finally {f.close();}
+});
+
+test('甘特日期變更不開啟編輯器並可復原重做，過期日期草稿及篩選脈絡不覆寫新資料', async () => {
+  const f = application(), {app, store} = f;
+  try {
+    const original = {...store.tasks()[0], startTime: '09:15', dueDate: '2026-10-10', dueTime: '16:45'}; await store.saveTask(original);
+    const source = structuredClone(store.tasks()[0]), context = app.ganttContext(), next = editGanttSchedule(source, 'move', 2);
+    await app.adjustGanttSchedule({task: next, original: source, context}); assert.equal(app.modal(), null); assert.equal(store.tasks()[0].startDate, '2026-10-10'); assert.equal(store.tasks()[0].startTime, '09:15'); assert.equal(store.tasks()[0].dueTime, '16:45');
+    await store.undo(); assert.equal(store.tasks()[0].dueDate, '2026-10-10'); await store.redo(); assert.equal(store.tasks()[0].dueDate, '2026-10-12');
+    const current = structuredClone(store.tasks()[0]); await app.adjustGanttSchedule({task: editGanttSchedule(source, 'move', 4), original: source, context}); assert.deepEqual(store.tasks()[0], current);
+    app.query.set('其他篩選'); await app.adjustGanttSchedule({task: editGanttSchedule(current, 'end', 1), original: current, context}); assert.deepEqual(store.tasks()[0], current);
+  } finally {f.close();}
+});
+
+function application(fresh = false, providers = []) {
   const state = {version: 1, activeWorkspaceId: 'first', workspaces: [{version: 4, id: 'first', name: '學程工作', projects: [{id: 'welcome', name: '迎新活動'}, {id: 'website', name: '網站改版'}], categories: [{id: 'design', name: '設計', color: 'green'}], statuses: COLUMNS, tasks: [task, {...task, id: 'website-task', title: '網站首頁', projectId: 'website', status: 'done'}, {...task, id: 'daily', title: '日常任務', projectId: ''}]}, {version: 4, id: 'second', name: '個人生活', projects: [], categories: [], statuses: COLUMNS, tasks: []}]};
   const values = new Map(fresh ? [] : [['orbit-workspaces-v1', JSON.stringify(state)]]);
   globalThis.localStorage = {get length() {return values.size;}, key: index => [...values.keys()][index] ?? null, getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key)};
   const store = new BoardStore();
   const effects = new Set();
   const scheduler = {add(effect) {effects.add(effect);}, schedule() {}, remove(effect) {effects.delete(effect);}};
-  const injector = createEnvironmentInjector([DocumentTasks, {provide: BoardStore, useValue: store}, {provide: UiPreferences, useValue: {textSize: () => 'standard'}}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
+  const injector = createEnvironmentInjector([DocumentTasks, {provide: BoardStore, useValue: store}, {provide: UiPreferences, useValue: {textSize: () => 'standard'}}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}, ...providers]);
   // Only the viewport value is needed to construct the action controller; no DOM or browser is used.
   globalThis.window = {innerWidth: 1440};
   let app;
@@ -1269,5 +1329,90 @@ test('總覽分類清單沿用彈窗，重新開啟與編輯返回保留分類�
     assert.equal(f.store.tasks().find(item => item.id === task.id).categoryId, '');
     assert.equal(app.projectFilter(), 'website'); assert.equal(app.categoryFilter(), 'design');
     app.closeModal(); assert.equal(app.overviewOpen(), true); assert.equal(app.modal(), null);
+  } finally {f.close();}
+});
+
+test('建立任務連結視窗確認後只加入資訊草稿，取消不變更；離開表單不接受晚到選擇', async () => {
+  const opened = [], dialog = {open(component, config) {const ref = {closed: new Subject(), backdropClick: new Subject(), close(value) {this.closed.next(value); this.closed.complete();}}; opened.push({component, config, ref}); return ref;}}, f = application(false, [{provide: Dialog, useValue: dialog}]), {app, store} = f;
+  try {
+    app.openTask('todo', store.tasks()[0]); app.draft.description = '保留文字';
+    const pending = app.openTaskLinkPicker(); app.cancelTaskLinkPicker(); await pending; assert.equal(opened.length, 0); assert.equal(app.modal(), 'task');
+    await Promise.all([app.openTaskLinkPicker(), app.openTaskLinkPicker()]); assert.equal(opened.length, 1); assert.equal(opened[0].config.ariaModal, true); assert.equal(opened[0].config.data.taskId, 'welcome-task');
+    opened[0].ref.close(); assert.equal(app.taskLinkPickerOpen(), false); assert.deepEqual(app.draftRelatedTasks(), []); assert.equal(app.draft.description, '保留文字');
+    await app.openTaskLinkPicker(); opened[1].ref.close(['website-task']); assert.deepEqual(app.draftRelatedTasks(), ['website-task']); assert.deepEqual(store.relatedTaskIds('welcome-task'), []); assert.equal(app.modal(), 'task');
+    await app.saveTask(); assert.deepEqual(store.relatedTaskIds('website-task'), ['welcome-task']);
+    app.openTask('todo', store.tasks()[0]); await app.openTaskLinkPicker(); assert.deepEqual(opened[2].config.data.excluded, ['website-task']); app.cancelTaskEdit(); opened[2].ref.closed.next(['daily']); assert.deepEqual(store.relatedTaskIds('daily'), []);
+    app.openTask('todo', store.tasks()[0]); await app.openTaskLinkPicker(); app.escape(); assert.equal(app.modal(), 'task'); assert.equal(app.taskLinkPickerOpen(), false);
+    await app.openTaskLinkPicker(); store.switchWorkspace('second'); opened.at(-1).ref.close(['daily']); assert.deepEqual(app.draftRelatedTasks(), ['website-task']);
+  } finally {f.close();}
+});
+
+function boardDragFixture() {
+  const f = application(), {app, store} = f, dom = new JSDOM('<main></main>'), document = dom.window.document;
+  const previous = {document: globalThis.document, window: globalThis.window, Node: globalThis.Node, navigator: Object.getOwnPropertyDescriptor(globalThis, 'navigator')};
+  globalThis.document = document; globalThis.window = dom.window; globalThis.Node = dom.window.Node;
+  Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {locks: {request: async (_name, action) => action()}}});
+  f.flush();
+  let values = new Map();
+  const dataTransfer = {get types() {return [...values.keys()];}, setData(type, value) {values.set(type, value);}, getData(type) {return values.get(type) ?? '';}};
+  const render = () => {
+    document.querySelector('main').innerHTML = app.columns().map(column => `<section data-status="${column.id}">${column.tasks.map(task => `<article class="task-card" data-task-id="${task.id}"><button class="task-open-area">${task.title}</button></article>`).join('')}</section>`).join('');
+    for (const column of document.querySelectorAll('section')) [...column.children].forEach((card, index) => {card.getBoundingClientRect = () => ({top: 100 + index * 220, bottom: 300 + index * 220});});
+  };
+  const event = (currentTarget, y) => ({currentTarget, target: currentTarget, clientX: 80, clientY: y, dataTransfer, preventDefault() {this.defaultPrevented = true;}, stopPropagation() {}});
+  const start = (id = 'welcome-task') => {render(); values = new Map(); const source = store.tasks().find(task => task.id === id); app.startBoardTaskDrag(event(document.querySelector(`[data-task-id="${id}"] button`), 150), source);};
+  const over = (status, y) => app.boardTaskOver(event(document.querySelector(`[data-status="${status}"]`), y), app.columns().find(column => column.id === status));
+  const drop = (status, y) => app.dropBoardTask(event(document.querySelector(`[data-status="${status}"]`), y), app.columns().find(column => column.id === status));
+  return {...f, dom, document, dataTransfer, event, start, over, drop, close() {f.close(); globalThis.document = previous.document; globalThis.window = previous.window; globalThis.Node = previous.Node; Object.defineProperty(globalThis, 'navigator', previous.navigator); dom.window.close();}};
+}
+
+test('看板沿用檔案的小型預覽與中央連結，懸停不改順序，放開才儲存且不開啟任務', async () => {
+  const f = boardDragFixture(), {app, store, document} = f;
+  try {
+    const before = structuredClone(store.tasks()); f.start();
+    assert.ok(f.dataTransfer.getData(BOARD_TASK_DRAG_TYPE)); assert.equal(f.dataTransfer.effectAllowed, 'all');
+    assert.equal(document.querySelector('.task-drag-preview').textContent, '迎新海報'); assert.equal(document.querySelector('.cdk-drag-preview'), null);
+    assert.equal(f.over('done', 180), true); assert.equal(f.dataTransfer.dropEffect, 'link'); assert.equal(app.boardTaskLinks('website-task'), true);
+    assert.deepEqual(store.tasks(), before); assert.equal(document.querySelector('[data-task-id="website-task"]').style.transform, '');
+    await f.drop('done', 180); assert.deepEqual(store.relatedTaskIds('welcome-task'), ['website-task']); assert.deepEqual(store.tasks().map(task => [task.id, task.status, task.startDate, task.dueDate]), before.map(task => [task.id, task.status, task.startDate, task.dueDate]));
+    assert.equal(app.modal(), null); assert.equal(app.boardTaskDrag(), null); assert.equal(document.querySelector('.task-drag-preview,.document-drag-mask'), null);
+    const links = structuredClone(store.state().taskLinks); f.start(); await f.drop('done', 180); assert.deepEqual(store.state().taskLinks, links);
+    await store.undo(); assert.deepEqual(store.relatedTaskIds('welcome-task'), []); await store.redo(); assert.deepEqual(store.relatedTaskIds('website-task'), ['welcome-task']);
+  } finally {f.close();}
+});
+
+test('看板空白欄位移動、同欄插入位置及佔位提示穩定，放回原位置不產生紀錄', async () => {
+  const f = boardDragFixture(), {app, store, document} = f;
+  try {
+    f.start(); f.over('todo', 310); assert.deepEqual(app.boardTaskPosition(), {kind: 'move', status: 'todo', beforeId: 'daily'}); assert.equal(app.boardTaskMoves('daily', 'todo'), true);
+    const marker = document.createElement('div'); marker.className = 'task-board-placeholder'; marker.getBoundingClientRect = () => ({top: 300, bottom: 380}); document.querySelector('[data-status="todo"]').append(marker);
+    f.over('todo', 360); assert.equal(app.boardTaskMoves('daily', 'todo'), true); assert.equal(f.dataTransfer.dropEffect, 'move');
+    const history = store.history().length; await f.drop('todo', 360); assert.equal(store.history().length, history);
+    f.start(); f.over('progress', 180); assert.deepEqual(app.boardTaskPosition(), {kind: 'move', status: 'progress'}); assert.equal(store.tasks()[0].status, 'todo'); await f.drop('progress', 180); assert.equal(store.tasks().find(task => task.id === 'welcome-task').status, 'progress');
+    await store.undo(); f.start(); await f.drop('todo', 600); assert.deepEqual(store.tasks().filter(task => task.status === 'todo').map(task => task.id), ['daily', 'welcome-task']); assert.deepEqual(store.relatedTaskIds('welcome-task'), []);
+    await store.undo(); f.start('daily'); await f.drop('todo', 105); assert.deepEqual(store.tasks().filter(task => task.status === 'todo').map(task => task.id), ['daily', 'welcome-task']);
+    await store.undo(); assert.deepEqual(store.tasks().filter(task => task.status === 'todo').map(task => task.id), ['welcome-task', 'daily']);
+  } finally {f.close();}
+});
+
+test('看板拒絕自己、偽造資料與過期兩端，取消或切換脈絡清理預覽且不寫入', {timeout: 10000}, async () => {
+  const f = boardDragFixture(), {app, store, document} = f;
+  try {
+    f.start(); assert.equal(f.over('todo', 180), false); await f.drop('todo', 180); assert.deepEqual(store.relatedTaskIds('welcome-task'), []); app.endBoardTaskDrag();
+    f.start(); f.over('done', 180); f.dataTransfer.setData(BOARD_TASK_DRAG_TYPE, JSON.stringify({...JSON.parse(f.dataTransfer.getData(BOARD_TASK_DRAG_TYPE)), token: 'forged'})); await f.drop('done', 180); assert.deepEqual(store.relatedTaskIds('welcome-task'), []); assert.equal(app.boardTaskDrag(), null);
+    f.start(); f.over('done', 180); await store.saveTask({...store.tasks()[1], title: '另一分頁的新目標'}); await f.drop('done', 180); assert.deepEqual(store.relatedTaskIds('welcome-task'), []);
+    f.start(); f.over('done', 180); app.escape(); await f.drop('done', 180); assert.equal(document.querySelector('.task-drag-preview'), null); assert.deepEqual(store.relatedTaskIds('welcome-task'), []);
+    for (const change of [() => app.query.set('其他篩選'), () => app.view.set('list'), () => app.modal.set('settings')]) {
+      app.query.set(''); app.view.set('board'); f.start(); f.over('done', 180); change(); f.flush(); assert.equal(app.boardTaskDrag(), null); assert.equal(document.querySelector('.task-drag-preview'), null); await f.drop('done', 180); assert.deepEqual(store.relatedTaskIds('welcome-task'), []); app.closeModal();
+    }
+  } finally {f.close();}
+});
+
+test('看板來源更新及跨工作空間切換不接受舊拖曳，預覽隨脈絡取消', {timeout: 10000}, async () => {
+  const f = boardDragFixture(), {app, store, document} = f;
+  try {
+    f.start(); f.over('done', 180); await store.saveTask({...store.tasks()[0], title: '來源已更新'}); f.flush(); await f.drop('done', 180);
+    assert.deepEqual(store.relatedTaskIds('welcome-task'), []); assert.equal(store.tasks()[0].status, 'todo'); assert.equal(document.querySelector('.task-drag-preview'), null);
+    f.start(); store.switchWorkspace('second'); f.flush(); await f.drop('done', 180); assert.equal(app.boardTaskDrag(), null); assert.equal(store.tasks().length, 0);
   } finally {f.close();}
 });

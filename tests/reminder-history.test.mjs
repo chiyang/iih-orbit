@@ -12,9 +12,9 @@ function repository() {
 test('提醒歷史跨分頁聯集，保留首次快照並合併查看、提示及關閉狀態', async () => {
   const f = repository();
   await Promise.all([f.first.save([entry()], [], {}, now), f.second.save([entry('other')], [], {}, now)]);
-  await Promise.all([f.first.save([entry('notice', {title: '後來改名', workspaceName: '新空間名', at: now + 100})], ['notice'], {readAt: now + 100}, now + 100), f.second.save([], ['notice'], {popupAt: now + 10, dismissedAt: now + 50}, now + 100)]);
+  await Promise.all([f.first.save([entry('notice', {title: '後來改名', workspaceName: '新空間名', at: now + 100})], ['notice'], {readAt: now + 100}, now + 100), f.second.save([], ['notice'], {popupAt: now + 10, notificationAt: now + 20, dismissedAt: now + 50}, now + 100)]);
   const saved = f.first.read(now + 100); assert.equal(saved.length, 2);
-  assert.deepEqual(saved.find(item => item.key === 'notice'), entry('notice', {readAt: now + 100, popupAt: now + 10, dismissedAt: now + 50}));
+  assert.deepEqual(saved.find(item => item.key === 'notice'), entry('notice', {readAt: now + 100, popupAt: now + 10, notificationAt: now + 20, dismissedAt: now + 50}));
   assert.equal(JSON.stringify(saved).includes('後來改名'), false);
 });
 test('歷史只保留近三十天及五百筆，驗證欄位並捨棄描述、憑證及損壞資料', () => {

@@ -1,5 +1,6 @@
 import type { BoardState } from './models.ts';
 import { indexTaskInformation } from './document-data.ts';
+import {taskLinkPairs} from './task-links-data.ts';
 
 export const HISTORY_LIMIT = 50;
 export interface BoardHistoryEntry {
@@ -13,16 +14,18 @@ export interface BoardHistoryEntry {
 
 export function sameBoard(left: BoardState, right: BoardState): boolean {
   const content = (board: BoardState) => {
-    const {version, documentSources, documentLinks, documentDetails, documentOrders, completionEvents, ...fields} = board;
+    const {version, documentSources, documentLinks, documentDetails, documentOrders, completionEvents, taskLinks, ...fields} = board;
     const tasks = new Set(board.tasks.map(task => task.id));
     const documents = [...indexTaskInformation(board)].filter(([task]) => tasks.has(task)).sort(([a], [b]) => a.localeCompare(b));
-    return {...fields, ...(documents.length ? {documents} : {})};
+    const relations = taskLinkPairs(board);
+    return {...fields, ...(documents.length ? {documents} : {}), ...(relations.length ? {relations} : {})};
   };
   return JSON.stringify(content(left)) === JSON.stringify(content(right));
 }
 
 export function boardChangeLabel(before: BoardState, after: BoardState): string {
   if (JSON.stringify(before.taskConflicts) !== JSON.stringify(after.taskConflicts)) return '選擇任務版本';
+  if (JSON.stringify(taskLinkPairs(before)) !== JSON.stringify(taskLinkPairs(after))) return '變更相關任務';
   for (const [key, label] of [['projects', '專案'], ['categories', '分類'], ['statuses', '狀態']] as const) {
     if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) return `變更${label}`;
   }

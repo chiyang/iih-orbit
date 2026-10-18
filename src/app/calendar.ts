@@ -1,4 +1,4 @@
-import { afterRenderEffect, Component, computed, DestroyRef, effect, ElementRef, inject, input, linkedSignal, output, signal, untracked, viewChild } from '@angular/core';
+import { afterRenderEffect, Component, computed, DestroyRef, effect, ElementRef, HostListener, inject, input, linkedSignal, output, signal, untracked, viewChild } from '@angular/core';
 import { BoardStatus, Category, COLUMNS, Task } from './models';
 import { Icon } from './icon';
 import { ThemeColor } from './theme-color';
@@ -12,6 +12,7 @@ import { CalendarPosition, moveCalendarTask, snapCalendarMinute } from './calend
 import type { TaskEditContext } from './board-store';
 import { GMAIL_MIME } from './gmail-data';
 import { DOCUMENT_DRAG_TYPE } from './document-data';
+import {readTaskLinkDrag, TASK_LINK_DRAG_TYPE} from './task-link-drag';
 
 export interface CalendarCreate {
   date: string;
@@ -48,6 +49,10 @@ export class Calendar {
   readonly editTask = output<Task>();
   readonly readExternal = output<ExternalEvent>();
   readonly createTask = output<CalendarCreate>();
+  readonly busy = input(false);
+  readonly taskDraggingChange = output<boolean>();
+  readonly taskLinkTarget = signal<TaskEditContext | null>(null);
+  readonly taskLinkPointer = signal<{x: number; y: number} | null>(null);
   readonly documentDragging = input(false);
   readonly documentDrop = output<{event: DragEvent; position?: CalendarPosition; taskId?: string}>();
   readonly documentLinkTaskId = signal('');
@@ -151,7 +156,7 @@ export class Calendar {
   private previousHourHeight = HOUR_HEIGHT;
   private previousStartHour = DEFAULT_WEEK_RANGE.startHour;
   private scrollHour = DEFAULT_WEEK_RANGE.startHour;
-  private drag?: {task: Task; context: TaskEditContext; origin: CalendarPosition; pointerOffset: number};
+  private drag?: {task: Task; context: TaskEditContext; origin: CalendarPosition; pointerOffset: number; token: string; mode: 'month' | 'week'; anchor: string};
   private pointer?: {x: number; y: number; timeDay?: HTMLElement};
   private dragScrollTimer?: ReturnType<typeof setInterval>;
   private ignoreClickUntil = 0;
@@ -168,10 +173,10 @@ export class Calendar {
     const timer = setInterval(() => this.now.set(new Date()), 60000);
     inject(DestroyRef).onDestroy(() => { clearInterval(timer); this.endDrag(); });
     effect(() => {
-      const generation = this.google.store.generation(), workspace = this.google.store.currentWorkspace().id, mode = this.mode(), showOrbit = this.showOrbit();
-      untracked(() => { this.hoveredMonthWeek.set(null); if (this.drag && (!showOrbit || this.drag.context.generation !== generation || this.drag.context.workspaceId !== workspace || this.drag.origin.kind === 'month' && mode !== 'month')) this.endDrag(); });
+      const generation = this.google.store.generation(), workspace = this.google.store.currentWorkspace().id, mode = this.mode(), anchor = dateKey(this.anchor()), showOrbit = this.showOrbit(), busy = this.busy();
+      untracked(() => { this.hoveredMonthWeek.set(null); if (this.drag && (busy || !showOrbit || this.drag.context.generation !== generation || this.drag.context.workspaceId !== workspace || this.drag.mode !== mode || this.drag.anchor !== anchor)) this.endDrag(); });
     });
-    effect(() => { const dragging = this.mailDragging() || this.documentDragging(); untracked(() => { if (!dragging && !this.drag) this.endDrag(); }); });
+    effect(() => { const dragging = this.mailDragging() || this.documentDragging(); untracked(() => { if (dragging && this.drag || !dragging && !this.drag) this.endDrag(); }); });
     afterRenderEffect(() => {
       const anchor = this.anchor();
       const hourHeight = this.hourHeight();
@@ -276,16 +281,37 @@ export class Calendar {
   eventHeight(start: number, end: number): number {return (end - start) / this.rangeMinutes() * 100;}
 
   startDrag(event: DragEvent, task: Task, origin: CalendarPosition): void {
-    if (this.isExternal(task) || this.savingMove() || !event.dataTransfer) { event.preventDefault(); return; }
+    if (!this.canDrag(task) || !event.dataTransfer) { event.preventDefault(); return; }
     const context = this.google.store.taskContext(task.id);
     if (!context.original || (Object.keys(context.original) as (keyof Task)[]).some(key => JSON.stringify(context.original![key]) !== JSON.stringify(task[key]))) { event.preventDefault(); this.moveError.set('任務已更新，請重新查看後再拖曳。'); return; }
     this.endDrag();
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     const pointerOffset = origin.kind === 'time' ? Math.max(0, (event.clientY - rect.top) / this.hourHeight() * 60) : 0;
-    this.drag = {task: structuredClone(task), context, origin, pointerOffset};
+    const token = crypto.randomUUID();
+    this.drag = {task: structuredClone(task), context, origin, pointerOffset, token, mode: this.mode(), anchor: dateKey(this.anchor())};
     this.draggedTaskId.set(task.id); this.moveNotice.set(''); this.moveError.set('');
-    event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', task.title);
+    event.dataTransfer.effectAllowed = 'all'; event.dataTransfer.setData('text/plain', task.title);
+    event.dataTransfer.setData(TASK_LINK_DRAG_TYPE, JSON.stringify({token, taskId: task.id, generation: context.generation, workspaceId: context.workspaceId}));
+    this.taskDraggingChange.emit(true);
     this.dragScrollTimer = setInterval(() => this.scrollWhileDragging(), 60);
+  }
+  canDrag(task: Task): boolean {return !this.busy() && !this.savingMove() && !this.google.store.pendingWrites() && !task.deletedAt && !this.isExternal(task) && !this.google.store.taskConflicts().some(entry => entry.workspace.id === this.google.store.currentWorkspace().id && entry.conflict.id === task.id);}
+  private ownTaskEvent(event: DragEvent): boolean {return !!this.drag && !!event.dataTransfer?.types.includes(TASK_LINK_DRAG_TYPE);}
+  private validTaskPayload(event: DragEvent): boolean {
+    const data = readTaskLinkDrag(event.dataTransfer?.getData(TASK_LINK_DRAG_TYPE) ?? ''), drag = this.drag;
+    return !!drag && !!data && data.token === drag.token && data.taskId === drag.task.id && data.generation === drag.context.generation && data.workspaceId === drag.context.workspaceId
+      && data.generation === this.google.store.generation() && data.workspaceId === this.google.store.currentWorkspace().id && drag.mode === this.mode() && drag.anchor === dateKey(this.anchor()) && !this.busy();
+  }
+  private selectTaskLinkTarget(task: Task): boolean {
+    let valid = this.canDrag(task) && task.id !== this.drag?.task.id;
+    if (valid && this.taskLinkTarget()?.original?.id !== task.id) {
+      const context = this.google.store.taskContext(task.id);
+      valid = !!context.original && (Object.keys(context.original) as (keyof Task)[]).every(key => JSON.stringify(context.original![key]) === JSON.stringify(task[key]));
+      if (valid) this.taskLinkTarget.set(context);
+    }
+    this.documentBlocked.set(!valid); this.dropPosition.set(null);
+    if (!valid) this.taskLinkTarget.set(null);
+    return valid;
   }
   startAllDayDrag(event: DragEvent, task: Task, firstDay: string): void {
     const container = (event.currentTarget as HTMLElement).closest<HTMLElement>('.week-all-day');
@@ -301,18 +327,40 @@ export class Calendar {
   private documentEvent(event: DragEvent): boolean {return this.documentDragging() && !!event.dataTransfer?.types.includes(DOCUMENT_DRAG_TYPE);}
   private mailEvent(event: DragEvent): boolean {return this.mailDragging() && !!event.dataTransfer?.types.includes(GMAIL_MIME);}
   documentEntryOver(event: DragEvent, task: Task): void {
+    if (this.ownTaskEvent(event)) {
+      event.preventDefault(); event.stopPropagation(); const valid = this.selectTaskLinkTarget(task);
+      if (event.dataTransfer) event.dataTransfer.dropEffect = valid ? 'link' : 'none';
+      this.taskLinkPointer.set({x: event.clientX, y: event.clientY});
+      const timeDay = (event.currentTarget as HTMLElement).closest?.<HTMLElement>('.time-day');
+      this.pointer = {x: event.clientX, y: event.clientY, ...(timeDay ? {timeDay} : {})}; return;
+    }
     if (!this.documentEvent(event) && !this.mailEvent(event)) return;
     event.preventDefault(); event.stopPropagation();
     const blocked = this.isExternal(task); if (event.dataTransfer) event.dataTransfer.dropEffect = blocked ? 'none' : 'copy';
     this.documentBlocked.set(blocked); this.documentLinkTaskId.set(blocked ? '' : task.id); this.dropPosition.set(null); this.pointer = undefined;
   }
-  documentEntryDrop(event: DragEvent, task: Task): void {
+  async documentEntryDrop(event: DragEvent, task: Task): Promise<void> {
+    if (this.ownTaskEvent(event)) {
+      event.preventDefault(); event.stopPropagation(); const drag = this.drag!, valid = this.validTaskPayload(event) && this.selectTaskLinkTarget(task), target = this.taskLinkTarget();
+      this.endDrag();
+      if (!valid || !target) return;
+      if (this.google.store.relatedTaskIds(drag.task.id).includes(task.id)) {this.moveNotice.set('這兩個任務已經連結。'); return;}
+      this.savingMove.set(true);
+      try {
+        const result = await this.google.store.linkTasks(drag.context, target);
+        if (!result.ok) this.moveError.set('任務連結未儲存：' + result.message);
+        else this.moveNotice.set(result.persisted ? '任務連結已建立，可復原。' : '任務連結只保留於此分頁，請匯出備份。');
+      } catch {this.moveError.set('無法建立任務連結，原任務保留，請重試。');}
+      finally {this.savingMove.set(false);}
+      return;
+    }
     if (!this.documentEvent(event) && !this.mailEvent(event)) return;
     event.preventDefault(); event.stopPropagation();
     if (!this.isExternal(task)) {if (this.documentEvent(event)) this.documentDrop.emit({event, taskId: task.id}); else this.mailDrop.emit({event, taskId: task.id});}
     this.endDrag(); this.ignoreClickUntil = Date.now() + 350;
   }
   dragOver(event: DragEvent, position: CalendarPosition): void {
+    this.taskLinkTarget.set(null); this.taskLinkPointer.set(null); this.documentBlocked.set(false);
     if (this.documentEvent(event)) {
       event.preventDefault(); event.stopPropagation(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
       this.documentBlocked.set(false); this.documentLinkTaskId.set(''); this.dropPosition.set(position); this.pointer = {x: event.clientX, y: event.clientY};
@@ -322,7 +370,7 @@ export class Calendar {
       event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; this.documentBlocked.set(false); this.documentLinkTaskId.set(''); this.dropPosition.set(position); this.pointer = {x: event.clientX, y: event.clientY};
       return;
     }
-    if (!this.drag) return;
+    if (!this.ownTaskEvent(event)) return;
     event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
     this.dropPosition.set(position); this.pointer = {x: event.clientX, y: event.clientY};
   }
@@ -345,6 +393,7 @@ export class Calendar {
     if (this.mailDragging() && event.dataTransfer?.types.includes(GMAIL_MIME)) { this.mailDrop.emit({event, position: target}); this.endDrag(); this.ignoreClickUntil = Date.now() + 350; return; }
     const drag = this.drag;
     if (!drag || this.savingMove()) return;
+    if (!this.validTaskPayload(event)) {event.preventDefault(); event.stopPropagation(); this.endDrag(); return;}
     event.preventDefault(); event.stopPropagation(); this.endDrag(); this.savingMove.set(true);
     try {
       const schedule = moveCalendarTask(drag.task, drag.origin, target);
@@ -356,14 +405,18 @@ export class Calendar {
     } catch (error) { this.moveError.set(error instanceof Error ? error.message : '無法移動任務，原時程已保留。'); }
     finally { this.savingMove.set(false); }
   }
+  @HostListener('window:pagehide')
+  @HostListener('window:blur')
   endDrag(): void {
     if (this.drag) this.ignoreClickUntil = Date.now() + 350;
+    if (this.drag) this.taskDraggingChange.emit(false);
+    this.taskLinkTarget.set(null); this.taskLinkPointer.set(null);
     this.drag = undefined; this.pointer = undefined; this.draggedTaskId.set(''); this.dropPosition.set(null); this.documentLinkTaskId.set(''); this.documentBlocked.set(false);
     clearInterval(this.dragScrollTimer); this.dragScrollTimer = undefined;
   }
   leaveCalendar(event: DragEvent): void {
     const element = event.currentTarget as HTMLElement, rect = element.getBoundingClientRect();
-    if (!element.contains(event.relatedTarget as Node | null) && (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom)) { this.dropPosition.set(null); this.documentLinkTaskId.set(''); this.documentBlocked.set(false); this.pointer = undefined; }
+    if (!element.contains(event.relatedTarget as Node | null) && (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom)) { this.dropPosition.set(null); this.documentLinkTaskId.set(''); this.taskLinkTarget.set(null); this.taskLinkPointer.set(null); this.documentBlocked.set(false); this.pointer = undefined; }
   }
   private scrollWhileDragging(): void {
     const scroller = this.weekScroller()?.nativeElement, pointer = this.pointer;
@@ -374,7 +427,11 @@ export class Calendar {
     const horizontal = pointer.x > rect.right - 35 ? 16 : pointer.x < rect.left + 35 ? -16 : 0;
     if (vertical || horizontal) {
       scroller.scrollBy({top: vertical, left: horizontal, behavior: 'instant'});
-      const element = scroller.ownerDocument.elementFromPoint(pointer.x, pointer.y)?.closest<HTMLElement>('.time-day');
+      const hit = scroller.ownerDocument.elementFromPoint(pointer.x, pointer.y), taskId = hit?.closest<HTMLElement>('[data-orbit-task-id]')?.dataset['orbitTaskId'];
+      const task = this.drag && taskId ? this.tasks().find(task => task.id === taskId) : undefined;
+      if (task) {this.selectTaskLinkTarget(task); this.taskLinkPointer.set({x: pointer.x, y: pointer.y}); return;}
+      this.taskLinkTarget.set(null); this.taskLinkPointer.set(null);
+      const element = hit?.closest<HTMLElement>('.time-day');
       if (element?.dataset['date']) { this.pointer = {...pointer, timeDay: element}; this.dropPosition.set(this.timePosition(element.dataset['date'], element, pointer.y)); }
     }
   }

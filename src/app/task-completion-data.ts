@@ -29,7 +29,7 @@ export function mergeCompletionEvents(groups: readonly (readonly TaskCompletionE
 }
 
 export function withCompletionEvents<T extends BoardState>(board: T, events: TaskCompletionEvent[]): T {
-  return {...board, version: 7, documentSources: board.documentSources ?? [], documentLinks: board.documentLinks ?? [], documentDetails: board.documentDetails ?? [], documentOrders: board.documentOrders ?? [], completionEvents: events};
+  return {...board, version: board.version >= 8 ? 8 : 7, documentSources: board.documentSources ?? [], documentLinks: board.documentLinks ?? [], documentDetails: board.documentDetails ?? [], documentOrders: board.documentOrders ?? [], completionEvents: events};
 }
 
 /** Imports, sync and choosing a stored version do not call this transition recorder. */

@@ -36,3 +36,19 @@ self.addEventListener('fetch', event => {
     return response || fetch(request);
   })());
 });
+
+// Notification data contains identities only; never navigate to an arbitrary notification URL.
+self.addEventListener('notificationclick', event => {
+  const target = event.notification.data?.orbitReminder;
+  if (!target || target.version !== 1 || !['generation', 'workspaceId', 'itemId'].every(key => typeof target[key] === 'string' && target[key].length > 0 && target[key].length <= 1500)
+    || typeof target.sourceContext !== 'string' || target.sourceContext.length > 3000 || !event.notification.tag.startsWith('iih-orbit-start:')) return;
+  const safe = {version: 1, generation: target.generation, workspaceId: target.workspaceId, itemId: target.itemId, sourceContext: target.sourceContext};
+  event.notification.close();
+  event.waitUntil((async () => {
+    const clients = await self.clients.matchAll({type: 'window', includeUncontrolled: true});
+    const matches = clients.filter(client => client.url.startsWith(self.registration.scope)), client = matches.find(client => client.visibilityState === 'visible') || matches[0];
+    if (client) {try {await client.focus(); client.postMessage({type: 'iih-orbit-notification-open', target: safe}); return;} catch { /* The window may have closed after matching. */ }}
+    const url = new URL('./', self.registration.scope); url.hash = 'orbit-notification=' + encodeURIComponent(JSON.stringify(safe));
+    await self.clients.openWindow(url.href);
+  })());
+});

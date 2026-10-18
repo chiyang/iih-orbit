@@ -11,6 +11,7 @@ import {JSDOM} from 'jsdom';
 import {ganttDropPosition} from '../src/app/gantt-data.ts';
 import {GMAIL_MIME} from '../src/app/gmail-data.ts';
 import {DOCUMENT_DRAG_TYPE} from '../src/app/document-data.ts';
+import {editGanttSchedule} from '../src/app/gantt-edit.ts';
 import {civilDay, civilKey, ganttAxis, ganttDayAtPosition, ganttParts, ganttTaskInRange, ganttPosition, ganttRows, ganttSchedule, ganttSpan, ganttZoomScroll, moveGanttDate, readGanttRange, readGanttZoom, virtualRange} from '../src/app/gantt-data.ts';
 
 const task = (id, patch = {}) => ({id, title: id, description: '', categoryId: '', projectId: '', status: 'working', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: [], ...patch});
@@ -20,6 +21,45 @@ const directory = await mkdtemp(resolve('.angular/gantt-test-')), output = resol
 await build({stdin: {contents: "export {Gantt} from './src/app/gantt.ts'; export {UiPreferences} from './src/app/ui-preferences.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
 const {Gantt, UiPreferences} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
+
+test('甘特移動及端點調整保留時刻與單一日期，處理跨年閏日並拒絕反向或超界', () => {
+  const source = task('one', {startDate: '2028-02-28', startTime: '09:15', dueDate: '2028-03-01', dueTime: '17:45'}), original = structuredClone(source);
+  const moved = editGanttSchedule(source, 'move', 1); assert.equal(moved.startDate, '2028-02-29'); assert.equal(moved.dueDate, '2028-03-02'); assert.equal(moved.startTime, '09:15'); assert.equal(moved.dueTime, '17:45'); assert.deepEqual(source, original);
+  const resized = editGanttSchedule(source, 'end', 2); assert.equal(resized.startDate, source.startDate); assert.equal(resized.dueDate, '2028-03-03');
+  assert.equal(editGanttSchedule({...source, startDate: '2027-12-31', dueDate: '2028-01-01'}, 'move', 1).startDate, '2028-01-01');
+  const single = editGanttSchedule(task('single', {dueDate: '2026-10-18', dueTime: '09:00'}), 'move', -1); assert.equal(single.startDate, ''); assert.equal(single.startTime, ''); assert.equal(single.dueDate, '2026-10-17'); assert.equal(single.dueTime, '09:00');
+  assert.throws(() => editGanttSchedule(source, 'start', 4)); assert.throws(() => editGanttSchedule(source, 'end', -4));
+  for (const days of [NaN, Infinity, .5]) assert.throws(() => editGanttSchedule(source, 'move', days));
+  assert.throws(() => editGanttSchedule(task('min', {startDate: '1900-01-01'}), 'move', -1)); assert.throws(() => editGanttSchedule(task('max', {dueDate: '9999-12-31'}), 'move', 1));
+  assert.throws(() => editGanttSchedule(task('unset'), 'move', 1));
+});
+
+test('甘特按日移動在夏令時間切換時保留牆鐘時間，不以二十四小時毫秒平移', () => {
+  const source = new URL('../src/app/gantt-edit.ts', import.meta.url).href;
+  const result = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `import {editGanttSchedule} from ${JSON.stringify(source)}; console.log(JSON.stringify(editGanttSchedule({id:'one',startDate:'2026-03-07',startTime:'09:00',dueDate:'2026-03-08',dueTime:'17:00'},'move',1)));`], {env: {...process.env, TZ: 'America/New_York'}, encoding: 'utf8'}));
+  assert.equal(result.startDate, '2026-03-08'); assert.equal(result.startTime, '09:00'); assert.equal(result.dueDate, '2026-03-09'); assert.equal(result.dueTime, '17:00');
+});
+
+test('甘特指標預覽只在放開後提交一次，取消、拖後點擊、失效脈絡及唯讀不改時程', () => {
+  const dom = new JSDOM('<div id="viewport"><button>task</button></div>'), injector = createEnvironmentInjector([{provide: UiPreferences, useValue: {scale: () => 1}}]);
+  globalThis.ngServerMode = true; let component; try {component = runInInjectionContext(injector, () => new Gantt());} finally {delete globalThis.ngServerMode;}
+  try {
+    const source = task('one', {startDate: '2026-10-18', dueDate: '2026-10-20'}), viewport = dom.window.document.getElementById('viewport'), button = viewport.querySelector('button'), changes = [], edits = [];
+    component.tasks = signal([source]); component.selectedDate = signal('2026-10-18'); component.scale = signal('week'); component.resetKey = signal('context'); component.viewport = () => ({nativeElement: viewport});
+    viewport.getBoundingClientRect = () => ({left: 0, right: 900}); viewport.scrollLeft = ganttPosition(civilDay('2026-10-18'), component.axis(), component.columnWidth());
+    component.scheduleChange.subscribe(value => changes.push(value)); component.editTask.subscribe(value => edits.push(value));
+    const event = (x, patch = {}) => ({button: 0, pointerId: 1, isPrimary: true, clientX: x, clientY: 100, currentTarget: button, preventDefault() {}, stopPropagation() {}, ...patch}), x = component.labelWidth() + 70;
+    component.beginSchedule(event(x), source, 'move'); component.moveSchedule(event(x + 28)); assert.equal(changes.length, 0); assert.equal(component.schedulePreview().startDate, '2026-10-19');
+    component.finishSchedule(event(x + 28)); component.openBar(source); assert.equal(edits.length, 0); assert.equal(changes.length, 1); assert.equal(changes[0].task.dueDate, '2026-10-21'); assert.deepEqual(source.startDate, '2026-10-18');
+    component.beginSchedule(event(x), source, 'end'); component.moveSchedule(event(x + 56)); component.cancelScheduleKey(event(x)); component.finishSchedule(event(x + 56)); component.openBar(source); assert.equal(changes.length, 1); assert.equal(edits.length, 0);
+    component.beginSchedule(event(x), source, 'move'); component.moveSchedule(event(x + 28)); component.resetKey.set('different'); component.finishSchedule(event(x + 28)); assert.equal(changes.length, 1);
+    component.busy = signal(true); component.beginSchedule(event(x), source, 'move'); assert.equal(component.schedulePreview(), null);
+    component.busy.set(false); component.lockedTaskIds = signal(['one']); component.beginSchedule(event(x), source, 'move'); component.moveSchedule(event(x + 28)); assert.equal(changes.length, 1); assert.equal(component.schedulePreview(), null);
+    component.lockedTaskIds.set([]); component.resetKey.set('context'); component.order = signal('start');
+    component.beginSchedule(event(x), source, 'move'); component.moveSchedule(event(x + 28)); component.order.set('end'); component.finishSchedule(event(x + 28)); assert.equal(changes.length, 1);
+    component.beginSchedule(event(x), source, 'move'); component.moveSchedule(event(x + 28)); component.documentDragging = signal(true); component.finishSchedule(event(x + 28)); assert.equal(changes.length, 1);
+  } finally {injector.destroy(); dom.window.close();}
+});
 
 test('甘特空白落點以實際日期定位，日模式以十五分鐘建立，週月依日期且不越過範圍', () => {
   for (const scale of ['day', 'week', 'month']) {

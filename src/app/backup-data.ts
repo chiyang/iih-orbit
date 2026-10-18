@@ -14,7 +14,7 @@ export {TEXT_SIZE_IDS} from './appearance-data.ts';
 
 export interface OrbitBackup {
   application: 'iih-orbit';
-  formatVersion: 5 | 6 | 7 | 8;
+  formatVersion: 5 | 6 | 7 | 8 | 9;
   appVersion: string;
   kind: BackupKind;
   exportedAt: string;
@@ -45,7 +45,7 @@ export function readBackup(value: unknown): OrbitBackup {
   if (!value || typeof value !== 'object') throw new Error('這不是有效的 IIH Orbit 備份檔。');
   const source = value as OrbitBackup;
   if (source.application !== 'iih-orbit') throw new Error('請選擇 IIH Orbit 匯出的 JSON 備份檔。');
-  if (![1, 2, 3, 4, 5, 6, 7, 8].includes(source.formatVersion)) throw new Error('這個備份格式尚未支援，請使用相容版本的 IIH Orbit。');
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(source.formatVersion)) throw new Error('這個備份格式尚未支援，請使用相容版本的 IIH Orbit。');
   if (!['full', 'workspaces'].includes(source.kind) || typeof source.appVersion !== 'string'
     || typeof source.exportedAt !== 'string' || !Number.isFinite(Date.parse(source.exportedAt))) {
     throw new Error('備份的範圍、版本或匯出日期不完整。');
@@ -56,7 +56,8 @@ export function readBackup(value: unknown): OrbitBackup {
   }
   if (source.formatVersion < 6 && data.workspaces.some(workspace => workspace.version >= 5)
     || source.formatVersion < 7 && data.workspaces.some(workspace => workspace.version >= 6)
-    || source.formatVersion < 8 && data.workspaces.some(workspace => workspace.version === 7)) throw new Error('資訊連結需要新版備份格式，原有資料未變更。');
+    || source.formatVersion < 8 && data.workspaces.some(workspace => workspace.version >= 7)) throw new Error('資訊連結需要新版備份格式，原有資料未變更。');
+  if (source.formatVersion < 9 && data.workspaces.some(workspace => workspace.version === 8)) throw new Error('相關任務需要新版備份格式，原有資料未變更。');
   const preferences = source.preferences === undefined ? undefined : readBackupAppearance(source.preferences);
   if (preferences === null) {
     throw new Error('備份的外觀設定不合法。原有資料未變更。');
@@ -77,7 +78,7 @@ export function readBackup(value: unknown): OrbitBackup {
 }
 
 export function backupFormat(workspaces: readonly Workspace[]): OrbitBackup['formatVersion'] {
-  return workspaces.some(workspace => workspace.version === 7) ? 8 : workspaces.some(workspace => workspace.version === 6) ? 7 : workspaces.some(workspace => workspace.version === 5) ? 6 : 5;
+  return workspaces.some(workspace => workspace.version === 8) ? 9 : workspaces.some(workspace => workspace.version === 7) ? 8 : workspaces.some(workspace => workspace.version === 6) ? 7 : workspaces.some(workspace => workspace.version === 5) ? 6 : 5;
 }
 
 function validSubtaskIds(task: Task): boolean {
@@ -92,6 +93,7 @@ export function copyWorkspaces(workspaces: Workspace[], newId: () => string = ()
     const statuses = new Map(workspace.statuses.map(status => [status.id, newId()]));
     const tasks = new Map(workspace.tasks.map(task => [task.id, newId()]));
     for (const conflict of workspace.taskConflicts ?? []) if (!tasks.has(conflict.id)) tasks.set(conflict.id, newId());
+    for (const link of workspace.taskLinks ?? []) for (const id of link.taskIds) if (!tasks.has(id)) tasks.set(id, newId());
     for (const event of workspace.completionEvents ?? []) {
       if (!tasks.has(event.taskId)) tasks.set(event.taskId, newId());
       if (event.projectId && !projects.has(event.projectId)) projects.set(event.projectId, newId());
@@ -106,6 +108,7 @@ export function copyWorkspaces(workspaces: Workspace[], newId: () => string = ()
       projects: workspace.projects.map(project => ({...project, id: projects.get(project.id)!})),
       statuses: workspace.statuses.map(status => ({...status, id: statuses.get(status.id)!})),
       tasks: workspace.tasks.map(copyTask),
+      ...(workspace.taskLinks ? {taskLinks: workspace.taskLinks.map(link => ({...link, id: newId(), taskIds: link.taskIds.map(id => tasks.get(id)!).sort() as [string, string]}))} : {}),
       ...(workspace.completionEvents ? {completionEvents: workspace.completionEvents.map(event => ({...event, id: newId(), taskId: tasks.get(event.taskId)!, projectId: projects.get(event.projectId) ?? ''}))} : {}),
       ...(workspace.documentLinks ? {documentLinks: workspace.documentLinks.map(link => ({...link, id: links.get(link.id)!, taskId: tasks.get(link.taskId) ?? link.taskId}))} : {}),
       ...(workspace.documentDetails ? {documentDetails: workspace.documentDetails.map(item => {const taskId = tasks.get(item.taskId) ?? item.taskId; return {...item, id: JSON.stringify([taskId, item.documentId]), taskId, linkIds: item.linkIds.map(id => links.get(id)!)};})} : {}),

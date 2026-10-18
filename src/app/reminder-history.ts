@@ -24,8 +24,9 @@ export interface ReminderHistoryEntry {
   readAt?: number;
   dismissedAt?: number;
   popupAt?: number;
+  notificationAt?: number;
 }
-export type ReminderHistoryUpdate = Partial<Pick<ReminderHistoryEntry, 'readAt' | 'dismissedAt' | 'popupAt'>>;
+export type ReminderHistoryUpdate = Partial<Pick<ReminderHistoryEntry, 'readAt' | 'dismissedAt' | 'popupAt' | 'notificationAt'>>;
 const text = (value: unknown, limit = 1000): value is string => typeof value === 'string' && value.length <= limit;
 const time = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 8640000000000000;
 
@@ -44,11 +45,11 @@ export function readReminderHistory(value: unknown, now: number): ReminderHistor
       || !text(entry.startDate, 10) || !validDate(entry.startDate) || !text(entry.dueDate, 10) || !validDate(entry.dueDate)
       || !text(entry.startTime, 5) || !validTime(entry.startTime) || !text(entry.dueTime, 5) || !validTime(entry.dueTime)
       || !time(entry.at) || entry.at < now - REMINDER_HISTORY_AGE
-      || [entry.readAt, entry.dismissedAt, entry.popupAt].some(value => value !== undefined && !time(value))) continue;
+      || [entry.readAt, entry.dismissedAt, entry.popupAt, entry.notificationAt].some(value => value !== undefined && !time(value))) continue;
     entries.set(entry.key, {key: entry.key, generation: entry.generation, workspaceId: entry.workspaceId, workspaceIds: [...new Set(entry.workspaceIds as string[])], workspaceName: entry.workspaceName,
       itemId: entry.itemId, taskId: entry.taskId, title: entry.title, source: entry.source, sourceId: entry.sourceId, sourceName: entry.sourceName, stage: entry.stage,
       startDate: entry.startDate, startTime: entry.startTime, dueDate: entry.dueDate, dueTime: entry.dueTime, at: entry.at,
-      ...(entry.readAt === undefined ? {} : {readAt: entry.readAt}), ...(entry.dismissedAt === undefined ? {} : {dismissedAt: entry.dismissedAt}), ...(entry.popupAt === undefined ? {} : {popupAt: entry.popupAt})});
+      ...(entry.readAt === undefined ? {} : {readAt: entry.readAt}), ...(entry.dismissedAt === undefined ? {} : {dismissedAt: entry.dismissedAt}), ...(entry.popupAt === undefined ? {} : {popupAt: entry.popupAt}), ...(entry.notificationAt === undefined ? {} : {notificationAt: entry.notificationAt})});
   }
   return [...entries.values()].sort((a, b) => a.at - b.at || a.key.localeCompare(b.key)).slice(-MAX_REMINDER_HISTORY);
 }

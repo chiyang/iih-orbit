@@ -7,6 +7,7 @@ export interface TaskDraftSnapshot {
   task: Task;
   documents: DocumentSource[];
   descriptions: DocumentDescription[];
+  relatedTaskIds?: string[];
   subtaskDraft: string;
   hasStartTime: boolean;
   hasDueTime: boolean;
@@ -27,6 +28,8 @@ function snapshot(value: TaskDraftSnapshot): boolean {
     && (context.original === null || task(context.original)) && task(value.task)
     && (!context.original || context.original.id === value.task.id)
     && (context.informationKey === undefined || string(context.informationKey, 1000000))
+    && (context.relatedTasksKey === undefined || string(context.relatedTasksKey, 1000000))
+    && (value.relatedTaskIds === undefined || Array.isArray(value.relatedTaskIds) && value.relatedTaskIds.length <= 1000 && value.relatedTaskIds.every(id => string(id, 1000) && !!id && id !== value.task.id) && new Set(value.relatedTaskIds).size === value.relatedTaskIds.length)
     && (context.documentLinks === undefined || Array.isArray(context.documentLinks) && context.documentLinks.every(link => link && string(link.id, 3000) && string(link.taskId, 500) && string(link.documentId, 3000) && (link.removed === undefined || link.removed === true)))
     && Array.isArray(value.documents) && value.documents.length <= 1000 && value.documents.every(item => !!readDocumentSource(item))
     && Array.isArray(value.descriptions) && value.descriptions.every(item => item && string(item.documentId, 3000) && string(item.description, 1000))

@@ -205,7 +205,7 @@ export function setTaskDocuments(board: BoardState, taskId: string, documents: r
   }
   const order = {id: taskId, documentIds: [...selected.keys()]};
   const orders = board.documentOrders?.some(item => item.id === taskId) ? board.documentOrders.map(item => item.id === taskId ? order : item) : [...board.documentOrders ?? [], order];
-  return {...changed, version: board.version === 7 ? 7 : 6, documentDetails: [...details.values()], documentOrders: orders};
+  return {...changed, version: board.version >= 7 ? board.version : 6, documentDetails: [...details.values()], documentOrders: orders};
 }
 
 export function reconcileDocumentTasks<T extends BoardState>(board: T): T {

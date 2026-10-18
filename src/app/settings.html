@@ -34,6 +34,7 @@
       <label class="setting-field">全天安排的當日提示時間<input type="time" aria-label="全天提醒時間" [ngModel]="store.reminders().allDayTime" (change)="setReminderOptions({allDayTime: $any($event.target).value})"></label>
       <label class="reminder-checkbox"><input type="checkbox" [checked]="store.reminders().includeGoogle" (change)="setReminderOptions({includeGoogle: $any($event.target).checked})">右下角提示包含 Google 月曆活動</label>
       <p class="setting-note">提示只在程式開啟且分頁在前景時顯示，不使用桌面通知。全天安排在指定時間後於當天提示一次；有時間的安排若剛開始五分鐘內，回到分頁時仍可提示。多分頁共用提醒記錄，改期後可重新提醒。編輯視窗開啟時暫緩提示，點選提示可開啟任務或唯讀活動。</p>
+      <app-notification-settings />
     </section>
   <section class="settings-section settings-panel" role="tabpanel" id="settings-panel-data" aria-labelledby="settings-tab-data" [hidden]="activeTab() !== 'data'" tabindex="0">
     <h3 id="local-sync-title">本機同步與備份</h3>
