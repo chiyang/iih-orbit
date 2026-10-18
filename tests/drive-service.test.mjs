@@ -603,7 +603,9 @@ test('定期與回到前景的檢查等待最後一次修改的儲存延遲，�
     assert.equal(f.documents.size, count + 1); assert.equal([...f.documents.values()].at(-1).data.workspaces[0].tasks[0].title, '最後一次修改');
     f.service.lastPoll = Date.now() - 5 * 60000; f.store.pendingWrites.set(1);
     f.service.poll(); assert.equal(sync.mock.callCount(), 1);
-    f.store.pendingWrites.set(0); await f.event('focus'); assert.equal(sync.mock.callCount(), 2); assert.equal(f.documents.size, count + 1);
+    f.store.pendingWrites.set(0); await f.event('focus'); assert.equal(sync.mock.callCount(), 2);
+    // Hashing and Drive reads may outlive settle(); finish this check before testing manual sync.
+    assert.equal(await sync.mock.calls[1].result, 'complete'); assert.equal(f.documents.size, count + 1);
     await f.store.saveTask({...f.store.tasks()[0], title: '手動立即同步'}); await settle();
     assert.equal(await f.service.sync(), 'complete'); assert.equal(sync.mock.callCount(), 3); assert.equal(f.documents.size, count + 2);
   } finally {f.close(); t.mock.timers.reset();}
