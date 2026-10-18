@@ -55,6 +55,20 @@ export async function runRecordBrowserTests(): Promise<string[]> {
       await first.snapshotForExport();
       const withDocuments = await first.backupForExport('full');
       check(withDocuments.formatVersion === 7 && withDocuments.data.workspaces[0].documentSources!.length === 1, '新版 JSON 包含來源、關聯與排列，可獨立還原');
+      const completed = await Promise.all([first.moveTask('task-10', 'done'), second.moveTask('task-11', 'done')]);
+      check(completed.every(result => result.ok), '兩個分頁並行完成不同任務皆成功');
+      const completionState = await repository.read();
+      check(completionState!.state.workspaces[0].completionEvents?.length === 2, '完成任務與獨立歷史事件在同一 IndexedDB 交易保存');
+      const completionPut = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function(value, ...args) {if (value.key.includes('completionEvents')) throw new DOMException('測試完成歷史寫入失敗', 'QuotaExceededError'); return completionPut.call(this, value, ...args);};
+      try {const result = await first.moveTask('task-12', 'done'); check(result.ok && !result.persisted && first.hasUnsavedChanges(), '歷史寫入失敗時任務與紀錄一起暫存分頁');}
+      finally {IDBObjectStore.prototype.put = completionPut;}
+      check(JSON.stringify(await repository.read()) === JSON.stringify(completionState), '歷史事件保存失敗不留下只有任務完成的部分交易');
+      check((await first.moveTask('task-12', 'done')).ok && !first.hasUnsavedChanges(), '儲存恢復後可重試完整的完成任務交易');
+      await second.snapshotForExport(); await second.moveTask('task-11', 'todo');
+      const completionBackup = await second.backupForExport('full');
+      check(completionBackup.formatVersion === 8 && completionBackup.data.workspaces[0].completionEvents?.length === 4, '重新開啟及跨分頁更新保留完成歷史，JSON 使用格式 8');
+      await first.snapshotForExport();
       const documentWrites: string[] = [];
       IDBObjectStore.prototype.put = function(value, ...args) {if (this.name === 'records') documentWrites.push(value.key); return originalPut.call(this, value, ...args);};
       try {check((await first.saveTask(first.tasks()[0], first.taskContext('task-0'), undefined, [])).ok, '文件移除以交易保存刪除記錄');}

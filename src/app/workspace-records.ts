@@ -1,7 +1,7 @@
 import { readStoredData, type StoredWorkspaceData } from './stored-data.ts';
 import type { Workspace } from './models';
 
-const entityFields = ['tasks', 'projects', 'categories', 'statuses', 'taskConflicts', 'calendarTransfers', 'documentSources', 'documentLinks', 'documentDetails', 'documentOrders'] as const;
+const entityFields = ['tasks', 'projects', 'categories', 'statuses', 'taskConflicts', 'calendarTransfers', 'documentSources', 'documentLinks', 'documentDetails', 'documentOrders', 'completionEvents'] as const;
 type RecordData = {key: string; value: unknown};
 interface WorkspaceIndex {metadata: Omit<Workspace, typeof entityFields[number]>; entities: Record<string, string[]>}
 interface Root {header: Omit<StoredWorkspaceData, 'state'>; activeWorkspaceId: string; workspaces: string[]}

@@ -16,6 +16,7 @@ Orbit 是瀏覽器端的單人任務管理工具，沒有自建後端。核心�
 | 任務編輯草稿 | localStorage：`iih-orbit-task-edit-draft-v1:` 前綴 | 不匯出／同步；正式儲存後才成為工作資料 |
 | 週視圖顯示時間範圍（預設 08:00–19:00） | localStorage：`iih-orbit-calendar-display-v1` | 不匯出／同步；同瀏覽器分頁可接續 |
 | 提醒徽章的查看紀錄（項目、時程與提醒狀態識別，不含標題或描述） | localStorage：`iih-orbit-reminder-seen-v1` | 不匯出／同步；最多保留 5000 份識別，隔離工作空間及資料世代 |
+| 提醒歷史（當時名稱、空間、時程、階段、已讀及提示狀態，不含描述與憑證） | localStorage：`iih-orbit-reminder-history-v1` | 不匯出／同步；近 30 天、最多 500 筆，同來源分頁接續；依資料世代隔離，重置／登出清理 |
 | 最近 50 步工作資料操作的復原與重做紀錄 | 目前分頁記憶體 | 不匯出；重新整理後清除 |
 | Calendar 活動、來源版本與同步游標 | IndexedDB：`iih-orbit-calendar-v1` | 不匯出／同步 |
 | Calendar 未過期讀取憑證 | localStorage：`iih-orbit-google-session-v1` | 不匯出／同步 |

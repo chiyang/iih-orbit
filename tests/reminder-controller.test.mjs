@@ -11,6 +11,8 @@ import { COLUMNS } from '../src/app/models.ts';
 import { REMINDER_DELIVERY_KEY } from '../src/app/reminder-delivery.ts';
 import { REMINDER_SEEN_KEY } from '../src/app/reminder-attention.ts';
 import { externalEvent } from '../src/app/google-data.ts';
+import {reminderItemKey} from '../src/app/reminder-items.ts';
+import {REMINDER_HISTORY_KEY} from '../src/app/reminder-history.ts';
 
 const require = createRequire(import.meta.url);
 const {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -48,6 +50,64 @@ function controller() {
 }
 const settle = async () => { for (let tick = 0; tick < 4; tick++) await new Promise(resolve => setImmediate(resolve)); };
 
+test('跨空間提醒與徽章聚合，相同任務 ID 不互相蓋掉，目前空間只查看自己的提醒', async () => {
+  storage(); const f = controller();
+  try {
+    f.center.visible = signal(false); f.center.workspaceScope.set('current');
+    await f.store.saveWorkspace('', '教學工作'); const other = f.store.currentWorkspace().id;
+    await f.store.saveTask({...task, title: '另一個空間的同 ID 任務'}); f.store.switchWorkspace('workspace'); f.flush(); await settle();
+    assert.equal(f.reminders.summaryCount(), 2); assert.equal(f.reminders.unseenCount(), 2); assert.equal(f.center.count(), 1);
+    assert.equal(f.reminders.popups().length, 2); const keys = f.reminders.popups().map(popup => popup.key);
+    f.center.visible.set(true); f.flush(); await settle(); assert.equal(f.reminders.unseenCount(), 1); assert.equal(f.reminders.unseenItems()[0].workspaceId, other);
+    f.center.workspaceScope.set('all'); f.flush(); await settle(); assert.equal(f.center.count(), 2); assert.equal(f.reminders.unseenCount(), 0);
+    f.store.switchWorkspace(other); f.flush(); await settle(); assert.deepEqual(f.reminders.popups().map(popup => popup.key), keys);
+    assert.deepEqual(new Set(f.reminders.history().map(entry => entry.workspaceName)), new Set(['工作', '教學工作']));
+  } finally {f.close();}
+});
+
+test('前景產生歷史但背景不補造，已讀、提示及關閉保存；改名、完成和刪除仍保留快照', async () => {
+  const memory = storage(), f = controller(); let reopened;
+  try {
+    f.center.visible = signal(false); f.reminders.active.set(false); f.flush(); await settle(); assert.equal(f.reminders.history().length, 0);
+    f.reminders.active.set(true); f.flush(); await settle(); f.flush(); await settle();
+    assert.equal(f.reminders.history().length, 1); const original = f.reminders.history()[0]; assert.equal(original.readAt, undefined); assert.ok(original.popupAt);
+    f.reminders.dismiss(f.reminders.popups()[0].key); await settle(); assert.ok(f.reminders.history()[0].dismissedAt);
+    await f.store.saveTask({...task, title: '後來改名'}); f.flush(); await settle(); assert.equal(f.reminders.history()[0].title, task.title);
+    f.center.historyMode.set(true); f.center.visible.set(true); f.flush(); await settle(); assert.equal(f.reminders.unseenCount(), 1);
+    f.reminders.markHistoryRead(f.reminders.history()); await settle(); assert.equal(f.reminders.unseenCount(), 0); assert.ok(f.reminders.history()[0].readAt);
+    await f.store.saveTask({...task, status: 'done', title: '已完成的新名稱'}); f.flush(); await settle();
+    assert.equal(f.reminders.summaryCount(), 0); assert.equal(f.reminders.resolveHistory(original).task.title, '已完成的新名稱');
+    await f.store.deleteTask(task.id); f.flush(); await settle(); assert.equal(f.reminders.history().length, 1); assert.equal(f.reminders.resolveHistory(original), undefined);
+    const backup = await f.store.backupForExport('full'); assert.equal(JSON.stringify(backup).includes(original.key), false);
+    reopened = controller(); reopened.center.visible = signal(false); reopened.flush(); await settle(); assert.equal(reopened.reminders.history().length, 1);
+    assert.equal(JSON.parse(memory.values.get(REMINDER_HISTORY_KEY)).entries[0].title, task.title);
+  } finally {reopened?.close(); f.close();}
+});
+
+test('不同分頁接續歷史已讀狀態，改期新增事件，工作空間刪除及世代重置拒絕舊連結', async () => {
+  storage(); const first = controller(), second = controller();
+  try {
+    first.center.visible = signal(false); second.center.visible = signal(false); first.flush(); second.flush(); await settle(); first.flush(); second.flush(); await settle();
+    assert.equal(first.reminders.history().length, 1); first.reminders.markHistoryRead(first.reminders.history()); await settle();
+    second.reminders.seenChanged({key: REMINDER_HISTORY_KEY}); second.reminders.seenChanged({key: REMINDER_SEEN_KEY}); assert.ok(second.reminders.history()[0].readAt); assert.equal(second.reminders.unseenCount(), 0);
+    await first.store.saveTask({...task, startTime: '11:15'}); first.flush(); await settle(); assert.equal(first.reminders.history().length, 2);
+    const old = first.reminders.history()[0]; await first.store.saveWorkspace('', '保留空間'); await first.store.deleteWorkspace('workspace'); first.flush(); await settle();
+    assert.equal(first.reminders.resolveHistory(old), undefined); assert.equal(first.reminders.history().length, 2);
+    await first.store.resetData(false, first.store.revision()); first.flush(); await settle(); assert.equal(first.reminders.history().length, 0); assert.equal(first.reminders.resolveHistory(old), undefined);
+  } finally {second.close(); first.close();}
+});
+
+test('開啟開始提示即標為已讀，單純關閉提示仍保留未讀歷史', async () => {
+  storage([task, {...task, id: 'other'}]); const f = controller();
+  try {
+    f.center.visible = signal(false); f.flush(); await settle(); f.flush(); await settle();
+    const [opened, dismissed] = f.reminders.popups(); f.popups.open(opened.item, opened.key); f.reminders.dismiss(dismissed.key); await settle();
+    assert.ok(f.reminders.history().find(entry => entry.taskId === opened.item.task.id).readAt);
+    assert.equal(f.reminders.history().find(entry => entry.taskId === dismissed.item.task.id).readAt, undefined);
+    assert.equal(f.reminders.unseenCount(), 1);
+  } finally {f.close();}
+});
+
 test('提醒徽章只計算未查看項目，開啟側欄後收起，隱藏及背景時不誤標已查看', async () => {
   const memory = storage(), f = controller(); let reopened;
   try {
@@ -70,7 +130,7 @@ test('開啟側欄後新提醒標記保留至本次瀏覽結束，舊提醒不�
     f.reminders.markViewed(); await settle();
     await f.store.saveTask({...task, id: 'new', title: '新增提醒'}); f.flush(); assert.equal(f.reminders.unseenCount(), 1);
     f.center.active.set(true); f.center.visible.set(true); f.flush(); await settle();
-    const newId = f.reminders.items().find(item => item.task.id === 'new').id, oldId = f.reminders.items().find(item => item.task.id === task.id).id;
+    const newId = reminderItemKey(f.reminders.items().find(item => item.task.id === 'new')), oldId = reminderItemKey(f.reminders.items().find(item => item.task.id === task.id));
     assert.equal(f.reminders.unseenCount(), 0); assert.equal(f.center.newItemIds().has(newId), true); assert.equal(f.center.newItemIds().has(oldId), false);
     f.center.selectTab('this-week'); f.flush(); assert.equal(f.center.newItemIds().has(newId), true);
     f.center.visible.set(false); f.flush(); f.center.visible.set(true); f.flush(); assert.equal(f.center.newItemIds().has(newId), true);
@@ -118,6 +178,7 @@ test('查看紀錄寫入失敗仍收起當前徽章並提示，提醒清單保�
     memory.fail(); f.center.visible.set(true); f.flush(); await settle();
     assert.equal(f.reminders.unseenCount(), 0); assert.equal(f.reminders.summaryCount(), 1); assert.equal(f.center.visibleItems().length, 1);
     assert.match(f.reminders.attentionWarning(), /無法保存查看紀錄/); assert.equal(memory.values.has(REMINDER_SEEN_KEY), false);
+    assert.match(f.reminders.historyWarning(), /無法保存這次提醒歷史/);
     f.reminders.seenChanged({key: REMINDER_SEEN_KEY}); assert.equal(f.reminders.unseenCount(), 0);
   } finally {f.close();}
 });
@@ -302,7 +363,8 @@ test('切換工作空間或重置資料清除訊息中心舊篩選，返回仍�
   try {
     f.google.reminderEvents.set([calendarEvent(source('a'), 'a'), calendarEvent(source('b'), 'b')]);
     f.center.selectSource('google'); f.center.toggleCalendar('a', false);
-    await f.store.saveWorkspace('', '其他工作空間'); assert.equal(f.center.sourceFilter(), 'all'); assert.equal(f.center.calendars().length, 0);
+    await f.store.saveWorkspace('', '其他工作空間'); assert.equal(f.center.sourceFilter(), 'all'); assert.equal(f.center.calendars().length, 2);
+    f.center.workspaceScope.set('current'); assert.equal(f.center.calendars().length, 0); f.center.workspaceScope.set('all');
     f.store.switchWorkspace('workspace'); assert.equal(f.center.sourceFilter(), 'all'); assert.deepEqual(f.center.selectedCalendarIds(), ['a', 'b']);
     f.center.selectSource('orbit'); await f.store.resetData(false, f.store.revision());
     assert.equal(f.center.sourceFilter(), 'all'); assert.equal(f.center.visibleItems().length, 0);

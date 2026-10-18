@@ -1,0 +1,14 @@
+<section aria-label="每日完成數與歷史趨勢">
+  <header><div><h3>完成趨勢</h3><p>依完成當時的專案統計，包含後續封存或刪除的任務。</p></div><div class="controls"><label><span class="visually-hidden">完成趨勢期間</span><select aria-label="完成趨勢期間" [ngModel]="days()" (ngModelChange)="changeDays($event)"><option [ngValue]="7">近 7 天</option><option [ngValue]="30">近 30 天</option><option [ngValue]="90">近 90 天</option></select></label><div class="grouping" role="group" aria-label="完成趨勢彙整方式"><button type="button" [attr.aria-pressed]="!weekly()" (click)="weekly.set(false)">每日</button><button type="button" [attr.aria-pressed]="weekly()" (click)="weekly.set(true)">每週</button></div></div></header>
+  @if (data().recordedFrom) {
+    <div class="summary"><strong>{{ data().total }}<small> 次完成</small></strong><span>今日 {{ data().today }} 項</span><small>{{ data().start }} ～ {{ data().end }}</small></div>
+    <div class="chart-layout">
+      <div class="y-axis" aria-hidden="true"><div><span class="axis-top">{{ chartMaximum() }}</span><span class="axis-middle">{{ chartMaximum() / 2 }}</span><span class="axis-bottom">0</span></div></div>
+      <div class="chart-scroll" role="region" aria-label="完成數折線圖，可水平捲動；資料點標示日期與完成數" tabindex="0"><div class="chart" [style.grid-template-columns]="'repeat(' + data().buckets.length + ', minmax(0, 1fr))'" [style.min-width.px]="data().buckets.length * 30">
+        <svg class="plot" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="grid-lines" d="M0 0H1000 M0 50H1000 M0 100H1000" /><polyline class="trend-line" [attr.points]="linePoints()" /></svg>
+        @for (bucket of data().buckets; track bucket.start; let index = $index) {<div class="column"><div class="point-area"><button type="button" class="point" [style.top.%]="pointY(bucket)" [disabled]="!bucket.count" [attr.title]="label(bucket)" [attr.aria-label]="label(bucket)" (click)="show(bucket)"><span class="dot" aria-hidden="true"></span><span class="count" aria-hidden="true">{{ bucket.count }}</span></button></div><span class="date" aria-hidden="true">{{ index % labelStep() === 0 || $last ? bucket.start.slice(5).replace('-', '/') : '' }}</span></div>}
+      </div></div>
+    </div>
+    <footer>同一任務每天最多計一次；週統計加總每日完成數。點選資料點查看任務。<span>歷史紀錄自 {{ data().recordedFrom }} 起累積，較早日期不推算。</span></footer>
+  } @else {<div class="empty"><strong>還沒有完成歷史</strong><p>完成任務後，這裡會開始累積每日紀錄。既有已完成任務不推算完成日期。</p></div>}
+</section>

@@ -14,7 +14,7 @@ export {TEXT_SIZE_IDS} from './appearance-data.ts';
 
 export interface OrbitBackup {
   application: 'iih-orbit';
-  formatVersion: 5 | 6 | 7;
+  formatVersion: 5 | 6 | 7 | 8;
   appVersion: string;
   kind: BackupKind;
   exportedAt: string;
@@ -45,7 +45,7 @@ export function readBackup(value: unknown): OrbitBackup {
   if (!value || typeof value !== 'object') throw new Error('這不是有效的 IIH Orbit 備份檔。');
   const source = value as OrbitBackup;
   if (source.application !== 'iih-orbit') throw new Error('請選擇 IIH Orbit 匯出的 JSON 備份檔。');
-  if (![1, 2, 3, 4, 5, 6, 7].includes(source.formatVersion)) throw new Error('這個備份格式尚未支援，請使用相容版本的 IIH Orbit。');
+  if (![1, 2, 3, 4, 5, 6, 7, 8].includes(source.formatVersion)) throw new Error('這個備份格式尚未支援，請使用相容版本的 IIH Orbit。');
   if (!['full', 'workspaces'].includes(source.kind) || typeof source.appVersion !== 'string'
     || typeof source.exportedAt !== 'string' || !Number.isFinite(Date.parse(source.exportedAt))) {
     throw new Error('備份的範圍、版本或匯出日期不完整。');
@@ -55,7 +55,8 @@ export function readBackup(value: unknown): OrbitBackup {
     throw new Error('備份資料不完整：請檢查任務日期、分類、狀態與識別碼。原有資料未變更。');
   }
   if (source.formatVersion < 6 && data.workspaces.some(workspace => workspace.version >= 5)
-    || source.formatVersion < 7 && data.workspaces.some(workspace => workspace.version === 6)) throw new Error('資訊連結需要新版備份格式，原有資料未變更。');
+    || source.formatVersion < 7 && data.workspaces.some(workspace => workspace.version >= 6)
+    || source.formatVersion < 8 && data.workspaces.some(workspace => workspace.version === 7)) throw new Error('資訊連結需要新版備份格式，原有資料未變更。');
   const preferences = source.preferences === undefined ? undefined : readBackupAppearance(source.preferences);
   if (preferences === null) {
     throw new Error('備份的外觀設定不合法。原有資料未變更。');
@@ -76,7 +77,7 @@ export function readBackup(value: unknown): OrbitBackup {
 }
 
 export function backupFormat(workspaces: readonly Workspace[]): OrbitBackup['formatVersion'] {
-  return workspaces.some(workspace => workspace.version === 6) ? 7 : workspaces.some(workspace => workspace.version === 5) ? 6 : 5;
+  return workspaces.some(workspace => workspace.version === 7) ? 8 : workspaces.some(workspace => workspace.version === 6) ? 7 : workspaces.some(workspace => workspace.version === 5) ? 6 : 5;
 }
 
 function validSubtaskIds(task: Task): boolean {
@@ -91,6 +92,10 @@ export function copyWorkspaces(workspaces: Workspace[], newId: () => string = ()
     const statuses = new Map(workspace.statuses.map(status => [status.id, newId()]));
     const tasks = new Map(workspace.tasks.map(task => [task.id, newId()]));
     for (const conflict of workspace.taskConflicts ?? []) if (!tasks.has(conflict.id)) tasks.set(conflict.id, newId());
+    for (const event of workspace.completionEvents ?? []) {
+      if (!tasks.has(event.taskId)) tasks.set(event.taskId, newId());
+      if (event.projectId && !projects.has(event.projectId)) projects.set(event.projectId, newId());
+    }
     const subtasks = new Map(workspace.tasks.flatMap(task => task.subtasks.map(subtask => [JSON.stringify([task.id, subtask.id]), newId()])));
     for (const conflict of workspace.taskConflicts ?? []) for (const version of conflict.versions) for (const item of version.task?.subtasks ?? []) if (!subtasks.has(JSON.stringify([conflict.id, item.id]))) subtasks.set(JSON.stringify([conflict.id, item.id]), newId());
     const copyTask = (task: Task): Task => ({...structuredClone(task), id: tasks.get(task.id) ?? task.id, categoryId: categories.get(task.categoryId) ?? '', projectId: projects.get(task.projectId) ?? '', status: statuses.get(task.status) ?? task.status, subtasks: task.subtasks.map(subtask => ({...subtask, id: subtasks.get(JSON.stringify([task.id, subtask.id])) ?? subtask.id}))});
@@ -101,6 +106,7 @@ export function copyWorkspaces(workspaces: Workspace[], newId: () => string = ()
       projects: workspace.projects.map(project => ({...project, id: projects.get(project.id)!})),
       statuses: workspace.statuses.map(status => ({...status, id: statuses.get(status.id)!})),
       tasks: workspace.tasks.map(copyTask),
+      ...(workspace.completionEvents ? {completionEvents: workspace.completionEvents.map(event => ({...event, id: newId(), taskId: tasks.get(event.taskId)!, projectId: projects.get(event.projectId) ?? ''}))} : {}),
       ...(workspace.documentLinks ? {documentLinks: workspace.documentLinks.map(link => ({...link, id: links.get(link.id)!, taskId: tasks.get(link.taskId) ?? link.taskId}))} : {}),
       ...(workspace.documentDetails ? {documentDetails: workspace.documentDetails.map(item => {const taskId = tasks.get(item.taskId) ?? item.taskId; return {...item, id: JSON.stringify([taskId, item.documentId]), taskId, linkIds: item.linkIds.map(id => links.get(id)!)};})} : {}),
       ...(workspace.documentOrders ? {documentOrders: workspace.documentOrders.map(item => ({...item, id: tasks.get(item.id) ?? item.id, documentIds: [...item.documentIds]}))} : {}),

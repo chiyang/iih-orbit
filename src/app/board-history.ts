@@ -13,7 +13,7 @@ export interface BoardHistoryEntry {
 
 export function sameBoard(left: BoardState, right: BoardState): boolean {
   const content = (board: BoardState) => {
-    const {version, documentSources, documentLinks, documentDetails, documentOrders, ...fields} = board;
+    const {version, documentSources, documentLinks, documentDetails, documentOrders, completionEvents, ...fields} = board;
     const tasks = new Set(board.tasks.map(task => task.id));
     const documents = [...indexTaskInformation(board)].filter(([task]) => tasks.has(task)).sort(([a], [b]) => a.localeCompare(b));
     return {...fields, ...(documents.length ? {documents} : {})};

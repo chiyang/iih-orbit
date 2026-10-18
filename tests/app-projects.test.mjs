@@ -848,6 +848,22 @@ test('Google 提醒開啟唯讀活動，隱藏或解除綁定的來源不再開�
   } finally { close(); }
 });
 
+test('跨空間提醒開啟正確任務並保留側欄，歷史可開啟已完成任務，草稿及垃圾桶受保護', async () => {
+  const f = application(), {app, store} = f;
+  try {
+    store.switchWorkspace('second'); await store.saveTask({...task, projectId: '', categoryId: '', title: '其他空間的同 ID 任務'});
+    const item = reminderItems(store.currentWorkspace(), store.generation(), [])[0]; store.switchWorkspace('first');
+    app.openReminders('today'); app.openReminder(item); f.flush();
+    assert.equal(store.currentWorkspace().id, 'second'); assert.equal(app.modal(), 'task'); assert.equal(app.draft.title, '其他空間的同 ID 任務'); assert.equal(app.remindersOpen(), true);
+    app.draft.title = '保留草稿'; store.switchWorkspace('first'); app.openReminder(item); assert.equal(store.currentWorkspace().id, 'first'); assert.equal(app.draft.title, '保留草稿');
+    app.closeModal(); store.switchWorkspace('second'); await store.moveTask(item.task.id, 'done'); store.switchWorkspace('first');
+    app.openReminder(item); assert.equal(app.modal(), null); assert.equal(store.currentWorkspace().id, 'first');
+    app.openReminder({...item, historical: true}); assert.equal(app.modal(), 'task'); assert.equal(app.draft.status, 'done'); assert.equal(store.currentWorkspace().id, 'second');
+    app.closeModal(); await store.deleteTask(item.task.id); store.switchWorkspace('first'); app.openReminder({...item, historical: true}); assert.equal(app.modal(), null); assert.equal(store.currentWorkspace().id, 'first');
+    app.openReminder({...item, generation: 'old'}); assert.equal(app.modal(), null);
+  } finally {f.close();}
+});
+
 test('提醒範圍與目前時間即時更新篩選，跨午夜後全天截止任務變為逾期', async () => {
   const {app, settings, store, close} = application();
   try {

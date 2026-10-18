@@ -51,7 +51,7 @@ async function fixture() {
   await store.updateGoogle({clientId: '123-example.apps.googleusercontent.com'}); await store.updateDrive({accountId: 'account', email: 'a@example.com'});
   let effectsPaused = false;
   const effects = new Set(), scheduler = {add(e) {effects.add(e); queueMicrotask(() => this.flush());}, schedule() {queueMicrotask(() => this.flush());}, remove(e) {effects.delete(e);}, flush() {if (effectsPaused) return; for (let i = 0; i < 30 && [...effects].some(e => e.dirty); i++) for (const e of effects) if (e.dirty) e.run();}};
-  const auth = {connected: signal(true), connectionVersion: signal(0), ready: signal(true), preparing: signal(false), authorizing: signal(false), account: signal({id: 'account', email: 'a@example.com'}), sessionWarning: signal(''), useSession() {}, cancelRequests() {}, prepare: async () => {}, disconnect() {this.connected.set(false); this.connectionVersion.update(v => v + 1);}};
+  const auth = {expired: signal(false), renewForAction: () => {}, connected: signal(true), connectionVersion: signal(0), ready: signal(true), preparing: signal(false), authorizing: signal(false), account: signal({id: 'account', email: 'a@example.com'}), sessionWarning: signal(''), useSession() {}, cancelRequests() {}, prepare: async () => {}, disconnect() {this.connected.set(false); this.connectionVersion.update(v => v + 1);}};
   const api = {
     removals: async () => [...removed.values()].map(file => structuredClone(file)),
     assertAvailable: async dataset => {if ([...removed.values()].some(file => file.cloud.datasetId === dataset)) throw new DriveCollectionDeleted(dataset);},
@@ -100,6 +100,28 @@ async function fixture() {
   }
   return {service, create, panel, store, auth, api, stored, documents, retired, removed, navigator, pauseEffects(value) {effectsPaused = value; if (!value) scheduler.flush();}, async event(name) {for (const fn of listeners.get(name) ?? []) fn({}); await settle();}, close() {for (const s of services) s.ngOnDestroy(); for (const i of injectors) i.destroy(); store.ngOnDestroy(); for (const [key, descriptor] of originals) {if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];}}};
 }
+
+test('雲端重新載入續接原帳號後接續更新，取消、離線及設定改變都保留現有資料', async () => {
+  const f = await fixture(); let finish, renewals = 0, lists = 0;
+  try {
+    const service = f.service, originalList = service.list.bind(service), previous = structuredClone(service.files());
+    service.list = async () => {lists++; return originalList();};
+    f.auth.connected.set(false); f.auth.expired.set(true);
+    f.auth.renewForAction = context => {
+      renewals++; assert.equal(context.accountId, 'account'); f.auth.authorizing.set(true);
+      return new Promise((resolve, reject) => {finish = error => {f.auth.authorizing.set(false); if (error) reject(error); else {f.auth.connected.set(true); f.auth.connectionVersion.update(value => value + 1); resolve();}};});
+    };
+    const cancelled = service.refreshFromAction(); await service.refreshFromAction();
+    assert.equal(renewals, 1); finish(new Error('授權視窗已關閉')); await cancelled;
+    assert.equal(lists, 0); assert.deepEqual(service.files(), previous); assert.match(service.error(), /已關閉/);
+    const retry = service.refreshFromAction(); finish(); await retry;
+    assert.equal(lists, 1); assert.equal(service.error(), '');
+    f.auth.connected.set(false);
+    const stale = service.refreshFromAction(); await f.store.updateDrive({pollMinutes: 15}); finish(); await stale;
+    assert.equal(lists, 1);
+    service.online.set(false); await service.refreshFromAction(); assert.equal(renewals, 3);
+  } finally {f.close();}
+});
 
 test('雲端預覽可讀取每個任務的連結用途與排列順序，關閉不修改本機資料', async () => {
   const f = await fixture();

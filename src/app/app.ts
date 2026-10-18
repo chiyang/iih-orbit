@@ -765,14 +765,17 @@ export class App {
   }
   openReminder(item: ReminderItem): void {
     if (this.modal()) return;
-    if (item.generation !== this.store.generation() || item.workspaceId !== this.store.currentWorkspace().id) return;
+    if (item.generation !== this.store.generation()) return;
+    const workspace = this.store.workspaces().find(workspace => workspace.id === item.workspaceId);
+    if (!workspace) {this.notify('原工作空間已不存在，請重新查看提醒。'); return;}
     if (item.external) {
       const source = this.store.google().sources.find(source => source.id === item.external!.source.id);
       if (!source?.visible || !source.workspaceIds.includes(item.workspaceId) || source.accountId !== this.store.google().accountId) return;
-      this.openExternalEvent(item.external);
+      this.store.switchWorkspace(workspace.id); this.openExternalEvent(item.external);
     } else {
-      const task = this.store.tasks().find(task => task.id === item.task.id);
-      if (task && !this.store.isDone(task) && !this.store.isArchived(task)) this.openTask(task.status, task);
+      const task = workspace.tasks.find(task => task.id === item.task.id && !task.deletedAt);
+      const active = task && workspace.statuses.find(status => status.id === task.status)?.kind === 'active';
+      if (task && (item.historical || active)) {this.store.switchWorkspace(workspace.id); this.openTask(task.status, task);}
     }
   }
   showReminderDeadline(days: number): void {

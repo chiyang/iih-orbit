@@ -8,7 +8,7 @@
 </section>
 
 <section #cloudList tabindex="-1" aria-labelledby="drive-versions-title">
-  <div class="heading"><div><h3 id="drive-versions-title">雲端資料</h3><p>目前使用的資料、其他電腦的資料與另外保存的備份，都在這裡。</p></div><button [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online()" (click)="drive.list()"><app-icon name="sync" />{{ drive.catalogState() === 'loading' ? '讀取中…' : '重新載入' }}</button></div>
+  <div class="heading"><div><h3 id="drive-versions-title">雲端資料</h3><p>目前使用的資料、其他電腦的資料與另外保存的備份，都在這裡。</p></div><button [disabled]="!drive.canRefresh() || saving() || importing() || removing()" (click)="drive.refreshFromAction()"><app-icon name="sync" />{{ drive.auth.authorizing() ? '等待授權…' : drive.refreshing() || drive.catalogState() === 'loading' ? '讀取中…' : '重新載入' }}</button></div>
   <p class="note">每份自動儲存保留最近 8 份內容（最新 1 份＋過去 7 份），更舊的自動移至 Drive 垃圾桶。另存的備份會保留。</p>
   @if (drive.cleanupError() && drive.auth.connected()) {<p class="warning" role="alert">{{ drive.cleanupError() }}</p>}
   @if (drive.blockCleanupNotice() && drive.auth.connected()) {<p class="note" role="status">{{ drive.blockCleanupNotice() }}</p>}
@@ -45,7 +45,7 @@
         <div class="actions">
           @if (collection.current && !collection.deleting) {
             @if (store.drive().mode === 'off') {<button class="primary" [disabled]="!canSave() || drive.unavailable()" (click)="resume()">恢復自動儲存</button>}
-            @else {<button class="primary" [disabled]="drive.busy() || saving() || importing() || removing() || !drive.auth.connected() || !drive.online() || !!drive.runtime().conflict && store.drive().mode === 'backup' || drive.unavailable()" (click)="drive.sync()"><app-icon name="sync" />{{ drive.runtime().conflict ? '再次嘗試整併' : '立即同步' }}</button><button [disabled]="drive.busy() || saving() || importing() || removing()" (click)="options({mode: 'off'})">暫停</button>}
+            @else {<button class="primary" [disabled]="!drive.canRefresh() || saving() || importing() || removing() || !!drive.runtime().conflict && store.drive().mode === 'backup' || drive.unavailable()" (click)="drive.refreshFromAction(true)"><app-icon name="sync" />{{ drive.runtime().conflict ? '再次嘗試整併' : '立即同步' }}</button><button [disabled]="drive.busy() || saving() || importing() || removing()" (click)="options({mode: 'off'})">暫停</button>}
           }
           @if (collection.heads.length === 1 && !(collection.current && drive.runtime().conflict)) {<button [class.primary]="!collection.current" [disabled]="drive.busy() || saving() || importing() || !drive.auth.connected() || !drive.online() || !collection.heads[0].size || collection.deleting || !collection.current && !drive.catalogFresh()" (click)="inspect(collection.heads[0], !collection.current)">{{ collection.current ? '查看內容' : '查看並使用' }}<app-icon name="arrow" /></button>}
         </div>

@@ -5,7 +5,7 @@ import { ThemeColor } from './theme-color';
 
 @Component({
   selector: 'app-calendar-sources', imports: [Icon, ThemeColor],
-  template: `<div class="sources-heading"><span>外部月曆</span>@if (clientId() && (calendar.syncing() || calendar.auth.connected()) && calendar.visibleSources().length) {<button class="sync-source" [disabled]="calendar.syncing() || !calendar.online()" [attr.aria-label]="calendar.syncing() ? '月曆同步中' : '立即同步外部月曆'" [title]="calendar.syncing() ? '同步中…' : '立即同步'" (click)="calendar.refresh()"><app-icon name="sync" [class.syncing]="calendar.syncing()" /></button>}</div>
+  template: `<div class="sources-heading"><span>外部月曆</span>@if (clientId() && (calendar.syncing() || calendar.refreshing() || calendar.auth.connected() || calendar.auth.expired()) && calendar.visibleSources().length) {<button class="sync-source" [disabled]="!calendar.canRefresh()" [attr.aria-label]="calendar.syncing() ? '月曆同步中' : '立即同步外部月曆'" [title]="calendar.syncing() ? '同步中…' : '立即同步'" (click)="calendar.refreshFromAction()"><app-icon name="sync" [class.syncing]="calendar.syncing()" /></button>}</div>
     @if (workspaceSources().length) {
     <div class="source-actions">
       @if (!clientId()) {

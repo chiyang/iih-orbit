@@ -37,6 +37,8 @@ export class GmailPanel {
   readonly expanded = signal(new Set<string>());
   readonly threadViews = signal(new Map<string, ThreadView>());
   readonly refreshing = signal(false);
+  readonly canRefresh = computed(() => !this.refreshing() && !this.gmail.busy() && !this.gmail.auth.authorizing() && this.gmail.online()
+    && (this.gmail.auth.connected() || this.gmail.auth.expired() && this.gmail.auth.ready()));
   private readonly viewedNewThreadIds = linkedSignal(() => {this.gmail.previewIdentity(); return new Set<string>();});
   readonly newThreadIds = computed(() => new Set([...this.gmail.newThreadIds(), ...this.viewedNewThreadIds()]));
   private readonly context = computed(() => JSON.stringify([this.gmail.previewIdentity(), [...this.gmail.selected()].sort(), this.gmail.query()]));
@@ -85,12 +87,19 @@ export class GmailPanel {
     if (selector) {selector.open = false; selector.querySelector('summary')?.focus();}
   }
   async refresh(): Promise<void> {
-    if (this.refreshing() || this.gmail.busy() || !this.gmail.auth.connected() || !this.gmail.online()) return;
-    const context = this.context(); this.refreshing.set(true);
+    if (!this.canRefresh()) return;
+    const configuration = () => JSON.stringify([this.gmail.store.generation(), this.gmail.clientId(), this.gmail.preferences().accountId, this.gmail.selected(), this.gmail.query()]);
+    const original = configuration(); this.refreshing.set(true);
     try {
+      const renewal = this.gmail.auth.renewForAction({generation: this.gmail.store.generation(), clientId: this.gmail.clientId(), accountId: this.gmail.preferences().accountId});
+      if (renewal) await renewal;
+      if (this.destroyed || original !== configuration()) return;
+      const context = this.context();
       await this.gmail.load(true);
       if (this.destroyed || context !== this.context() || this.gmail.error()) return;
       await mapMailRequests(this.gmail.threads().filter(thread => this.expanded().has(thread.mail.threadId)), thread => this.loadThread(thread.mail, true));
+    } catch (error) {
+      if (!this.destroyed && original === configuration()) this.gmail.error.set(error instanceof Error ? error.message : 'Google 授權未完成，原有郵件已保留。');
     } finally { if (!this.destroyed) this.refreshing.set(false); }
   }
   replies(mail: MailPreview): MailPreview[] { return this.threadViews().get(mail.threadId)?.messages.filter(item => item.id !== mail.id) ?? []; }

@@ -614,7 +614,7 @@ test('新版雲端摘要可辨識格式且維持索引上限，舊檔原校驗�
   assert.deepEqual(readDriveFile(metadata(document)).cloud, document.cloud); assert.deepEqual(await readDriveDocument(document), document);
   const corrupted = structuredClone(document); corrupted.preferences.accent = '#3264ad'; corrupted.cloud.fileHash = await checksum(readBackup(corrupted));
   await assert.rejects(readDriveDocument(corrupted), /校驗/);
-  const unknown = metadata(document); unknown.appProperties.syncHash = 'v8:' + document.cloud.syncHash;
+  const unknown = metadata(document); unknown.appProperties.syncHash = 'v9:' + document.cloud.syncHash;
   assert.throws(() => readDriveFile(unknown));
 });
 

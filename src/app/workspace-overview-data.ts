@@ -4,15 +4,17 @@ import {taskDocumentIds} from './document-data.ts';
 import {unresolvedTaskConflicts} from './task-conflict-data.ts';
 import {dateKey, isTaskOverdue, startOfWeek} from './task-schedule.ts';
 import {deadlineState} from './reminder-data.ts';
+import {completionRange} from './completion-trend-data.ts';
 
-export type OverviewKind = 'total' | 'pending' | 'done' | 'overdue' | 'unscheduled' | 'linked' | 'archived' | 'today-start' | 'week-start' | 'due-soon' | 'status' | 'category' | 'project' | 'conflicts' | 'unavailable';
+export type OverviewKind = 'total' | 'pending' | 'done' | 'overdue' | 'unscheduled' | 'linked' | 'archived' | 'today-start' | 'week-start' | 'due-soon' | 'status' | 'category' | 'project' | 'conflicts' | 'unavailable' | 'completion-history';
 export interface OverviewSelection {kind: OverviewKind; value?: string}
 export interface OverviewOptions {project: string; includeArchived: boolean; dueSoonDays: number}
-const KINDS: readonly OverviewKind[] = ['total', 'pending', 'done', 'overdue', 'unscheduled', 'linked', 'archived', 'today-start', 'week-start', 'due-soon', 'status', 'category', 'project', 'conflicts', 'unavailable'];
-export const OVERVIEW_LABELS: Record<OverviewKind, string> = {total: '範圍內任務', pending: '待完成', done: '已完成', overdue: '已逾期', unscheduled: '未排程', linked: '有資訊連結', archived: '封存任務', 'today-start': '今日開始', 'week-start': '本週開始', 'due-soon': '即將截止', status: '任務狀態', category: '任務分類', project: '專案任務', conflicts: '衝突任務', unavailable: '有待處理連結的任務'};
+const KINDS: readonly OverviewKind[] = ['total', 'pending', 'done', 'overdue', 'unscheduled', 'linked', 'archived', 'today-start', 'week-start', 'due-soon', 'status', 'category', 'project', 'conflicts', 'unavailable', 'completion-history'];
+export const OVERVIEW_LABELS: Record<OverviewKind, string> = {total: '範圍內任務', pending: '待完成', done: '已完成', overdue: '已逾期', unscheduled: '未排程', linked: '有資訊連結', archived: '封存任務', 'today-start': '今日開始', 'week-start': '本週開始', 'due-soon': '即將截止', status: '任務狀態', category: '任務分類', project: '專案任務', conflicts: '衝突任務', unavailable: '有待處理連結的任務', 'completion-history': '完成歷史'};
 export function readOverviewSelection(value: unknown): OverviewSelection | null {
   const selection = value as OverviewSelection | null;
   if (!selection || !KINDS.includes(selection.kind)) return null;
+  if (selection.kind === 'completion-history') return completionRange(selection.value) ? {kind: selection.kind, value: selection.value} : null;
   if (selection.kind === 'status' || selection.kind === 'category' || selection.kind === 'project') return typeof selection.value === 'string' && selection.value.length <= 500 ? {kind: selection.kind, value: selection.value} : null;
   return {kind: selection.kind};
 }

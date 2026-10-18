@@ -46,6 +46,9 @@ export class DriveService implements OnDestroy {
   readonly message = signal('');
   readonly lastSyncAt = signal('');
   readonly syncing = signal(false);
+  readonly refreshing = signal(false);
+  readonly canRefresh = computed(() => !this.refreshing() && !this.busy() && !this.syncing() && this.online()
+    && (this.auth.connected() || this.auth.expired() && this.auth.ready()));
   readonly loggingOut = signal(false);
   readonly active = signal(false);
   readonly online = signal(typeof navigator === 'undefined' || navigator.onLine !== false);
@@ -172,8 +175,8 @@ export class DriveService implements OnDestroy {
       if (this.busy() || this.syncing()) this.schedule(); else void this.sync(false);
     }, this.store.drive().debounceSeconds * 1000);
   }
-  private autoReady(): boolean {
-    return !this.destroyed && !this.suspended && !this.loggingOut() && !this.store.cloudResume() && this.auth.connected() && this.online() && !this.unavailable() && this.store.drive().mode !== 'off' && !this.store.hasUnsavedChanges();
+  private autoReady(manual = false): boolean {
+    return (manual || !this.refreshing()) && !this.destroyed && !this.suspended && !this.loggingOut() && !this.store.cloudResume() && this.auth.connected() && this.online() && !this.unavailable() && this.store.drive().mode !== 'off' && !this.store.hasUnsavedChanges();
   }
   private poll(): void {
     if (this.store.pendingWrites() || this.debounce !== undefined) return;
@@ -311,6 +314,18 @@ export class DriveService implements OnDestroy {
     if (!completed && key === this.catalogKey()) {this.catalogState.set('error'); this.catalogError.set(this.error() || '雲端清單尚未讀取完成，請再試一次。');}
     return completed;
   }
+  async refreshFromAction(synchronize = false): Promise<void> {
+    if (!this.canRefresh()) return;
+    const configuration = () => JSON.stringify([this.store.generation(), this.store.google().clientId, this.store.drive()]);
+    const original = configuration(); this.refreshing.set(true);
+    try {
+      const renewal = this.auth.renewForAction({generation: this.store.generation(), clientId: this.store.google().clientId, accountId: this.store.drive().accountId});
+      if (renewal) await renewal;
+      if (this.destroyed || this.suspended || original !== configuration()) return;
+      if (synchronize) await this.sync(); else await this.list();
+    } catch (error) {if (!this.destroyed && original === configuration()) this.error.set(this.describe(error));}
+    finally {this.refreshing.set(false);}
+  }
   async organize(): Promise<void> {
     await this.run(async (_, current) => {
       const result = await this.api.organize(current);
@@ -390,7 +405,7 @@ export class DriveService implements OnDestroy {
     return completed;
   }
   async sync(manual = true): Promise<DriveSyncResult> {
-    if (!this.autoReady() || this.busy() || this.syncing() || (!manual && this.runtime().conflict)) return 'skipped';
+    if (!this.autoReady(manual) || this.busy() || this.syncing() || (!manual && this.runtime().conflict)) return 'skipped';
     const settings = this.store.drive(), link = this.runtime().link;
     if (!link || settings.mode === 'off') return 'skipped';
     if (link.kind !== 'full' || settings.kind !== 'full' || settings.mode === 'backup' || settings.workspaceIds.length) {

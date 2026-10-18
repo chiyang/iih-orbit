@@ -10,17 +10,35 @@ import {workspaceOverview, overviewTasks, readOverviewSelection} from '../src/ap
 import {documentFromUrl} from '../src/app/document-data.ts';
 import {dateKey} from '../src/app/task-schedule.ts';
 import {donutSegments} from '../src/app/overview-charts.ts';
+import {withCompletionEvents} from '../src/app/task-completion-data.ts';
 
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/overview-test-')), output = resolve(directory, 'overview.mjs');
-await build({stdin: {contents: "export {WorkspaceOverview} from './src/app/workspace-overview.ts'; export {BoardStore} from './src/app/board-store.ts'; export {DocumentMetadataService} from './src/app/document-metadata-service.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const {WorkspaceOverview, BoardStore, DocumentMetadataService} = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {CompletionTrend} from './src/app/completion-trend.ts'; export {WorkspaceOverview} from './src/app/workspace-overview.ts'; export {BoardStore} from './src/app/board-store.ts'; export {DocumentMetadataService} from './src/app/document-metadata-service.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const {CompletionTrend, WorkspaceOverview, BoardStore, DocumentMetadataService} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 const now = new Date(2026, 9, 15, 12), options = {project: 'all', includeArchived: false, dueSoonDays: 3};
 const makeTask = (id, patch = {}) => ({id, title: id, description: '', projectId: 'research', categoryId: '', status: 'working', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: [], ...patch});
 const workspace = (tasks = []) => ({version: 6, id: 'first', name: '研究工作', projects: [{id: 'research', name: '研究計畫'}, {id: 'old', name: '封存計畫', archived: true}], categories: [], statuses: [{id: 'working', label: '研究進行中', kind: 'active', color: '#45a677', subtitle: ''}, {id: 'accepted', label: '審核通過', kind: 'done', color: 'blue', subtitle: ''}, {id: 'stored', label: '留存', kind: 'archived', color: 'gray', subtitle: ''}], tasks});
 const count = (data, kind) => overviewTasks(data, {kind}).length;
+
+test('完成歷史下鑽只接受有效日期，趨勢期間在任務更新及專案切換後保持', () => {
+  assert.deepEqual(readOverviewSelection({kind: 'completion-history', value: '2026-10-01/2026-10-15'}), {kind: 'completion-history', value: '2026-10-01/2026-10-15'});
+  for (const value of [undefined, '2026-02-30/2026-03-01', '2026-10-15/2026-10-01', '2026-10-15']) assert.equal(readOverviewSelection({kind: 'completion-history', value}), null);
+  const injector = createEnvironmentInjector([]);
+  try {
+    const trend = runInInjectionContext(injector, () => new CompletionTrend());
+    trend.workspace = signal(withCompletionEvents(workspace(), [{id: 'event', taskId: 'removed', kind: 'completed', at: '2026-10-15T04:00:00.000Z', day: '2026-10-15', title: '完成記錄', projectId: 'research', projectName: '研究計畫'}]));
+    trend.now = signal(now); trend.project = signal('all');
+    assert.equal(trend.days(), 30); trend.changeDays(90); assert.equal(trend.weekly(), true);
+    trend.workspace.update(board => ({...board, tasks: [makeTask('new')]})); trend.project.set('research');
+    assert.equal(trend.days(), 90); assert.equal(trend.weekly(), true); assert.equal(trend.data().total, 1);
+    let opened; trend.selectRange.subscribe(value => {opened = value;}); trend.show(trend.data().buckets[0]);
+    assert.equal(opened, '2026-10-15/2026-10-15');
+    trend.workspace.update(board => ({...board, id: 'other'})); assert.equal(trend.days(), 30); assert.equal(trend.weekly(), false);
+  } finally {injector.destroy();}
+});
 
 test('任務分類按識別、名稱、配色與順序統計，含未分類及零任務分類，完成率與占比分開', () => {
   const state = workspace([

@@ -191,8 +191,8 @@ export function setTaskDocuments(board: BoardState, taskId: string, documents: r
   selected.forEach((source, id) => {if (!sources.has(id)) sources.set(id, source);});
   const links: DocumentLink[] = (board.documentLinks ?? []).map(link => link.taskId === taskId && !link.removed && !selected.has(link.documentId) ? {...link, removed: true} : {...link});
   for (const source of selected.values()) if (!links.some(link => link.taskId === taskId && link.documentId === source.id && !link.removed)) links.push({id: newId(), taskId, documentId: source.id});
-  const changed: BoardState = {...board, version: board.version === 6 ? 6 : 5, documentSources: [...sources.values()], documentLinks: links};
-  if (descriptions === undefined && board.version !== 6) return changed;
+  const changed: BoardState = {...board, version: board.version >= 6 ? board.version : 5, documentSources: [...sources.values()], documentLinks: links};
+  if (descriptions === undefined && board.version < 6) return changed;
   const notes = descriptions ?? descriptionsForTask(board, taskId).filter(item => selected.has(item.documentId));
   if (notes.some(item => !selected.has(item.documentId) || typeof item.description !== 'string' || item.description.length > DOCUMENT_DESCRIPTION_LIMIT)
     || new Set(notes.map(item => item.documentId)).size !== notes.length) throw new Error('連結用途說明最多 1000 字，請確認後再儲存。');
@@ -205,7 +205,7 @@ export function setTaskDocuments(board: BoardState, taskId: string, documents: r
   }
   const order = {id: taskId, documentIds: [...selected.keys()]};
   const orders = board.documentOrders?.some(item => item.id === taskId) ? board.documentOrders.map(item => item.id === taskId ? order : item) : [...board.documentOrders ?? [], order];
-  return {...changed, version: 6, documentDetails: [...details.values()], documentOrders: orders};
+  return {...changed, version: board.version === 7 ? 7 : 6, documentDetails: [...details.values()], documentOrders: orders};
 }
 
 export function reconcileDocumentTasks<T extends BoardState>(board: T): T {

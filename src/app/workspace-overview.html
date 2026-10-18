@@ -4,10 +4,12 @@
   <p class="scope-note">目前工作空間 · {{ selectedProject() === 'all' ? '所有專案' : projectName(selectedProject()) }} · {{ includeArchived() ? '包含封存，排除垃圾桶' : '排除垃圾桶、封存任務與封存專案' }}</p>
   }
   @if (detailsOnly() && selection()) {
-    <div class="detail-heading"><h3 #detailTitle id="overview-detail-title" tabindex="-1">{{ selectionLabel() }} <span>{{ selection()?.kind === 'conflicts' ? data().conflicts.length : selectedTasks().length }} 項</span></h3><p>{{ store.currentWorkspace().name }} · {{ selectedProject() === 'all' ? '所有專案' : projectName(selectedProject()) }} · {{ includeArchived() ? '包含封存，排除垃圾桶' : '排除封存與垃圾桶' }}<br>點選任務可編輯，關閉編輯器後回到這份清單。</p></div>
+    <div class="detail-heading"><h3 #detailTitle id="overview-detail-title" tabindex="-1">{{ selectionLabel() }} <span>{{ selectionCount() }} {{ selection()?.kind === 'completion-history' ? '次' : '項' }}</span></h3><p>{{ store.currentWorkspace().name }} · {{ selectedProject() === 'all' ? '所有專案' : projectName(selectedProject()) }} · {{ selection()?.kind === 'completion-history' ? '依完成當時專案，包含後續封存或刪除的任務' : includeArchived() ? '包含封存，排除垃圾桶' : '排除封存與垃圾桶' }}<br>點選任務可編輯，關閉編輯器後回到這份清單。</p></div>
     <div #detailPane class="overview-detail-pane" (scroll)="scrollChange.emit($any($event.target).scrollTop)"><div class="overview-task-list" role="region" [attr.aria-label]="selectionLabel() + '清單'">
       @if (selection()?.kind === 'conflicts') {
         @for (conflict of conflictRows(); track conflict.id) {<button type="button" class="task-row" (click)="openConflict.emit({workspace: store.currentWorkspace(), conflict})"><app-icon name="conflict" /><span><strong>{{ conflictTitle(conflict) }}</strong><small>{{ conflict.versions.length }} 份內容待比較 · 開啟比較與編輯</small></span><app-icon name="chevron" /></button>} @empty {<p class="empty-state">目前範圍沒有待處理的任務衝突。</p>}
+      } @else if (selection()?.kind === 'completion-history') {
+        @for (row of historyRows(); track row.event.id) {<div class="task-row history-task"><span><strong>{{ row.event.title }}</strong><small>{{ row.event.day }} · {{ row.event.projectName || '未指定專案' }} · {{ row.task ? row.task.deletedAt ? '已在垃圾桶' : '目前：' + (statusMap().get(row.task.status)?.label || '未指定狀態') : '已移除，保留完成紀錄' }}</small></span>@if (row.task && !row.task.deletedAt) {<button type="button" class="history-open" [attr.aria-label]="'開啟任務：' + row.event.title" (click)="openTask.emit(row.task)">開啟任務<app-icon name="chevron" /></button>}</div>} @empty {<p class="empty-state">這段期間沒有符合專案的完成紀錄。</p>}
       } @else {
         @for (task of taskRows(); track task.id) {<button type="button" class="task-row" (click)="openTask.emit(task)"><span class="status-dot" [orbitColor]="statusMap().get(task.status)?.color || 'gray'"></span><span><strong>{{ task.title }}</strong><small>{{ projectName(task.projectId) }} · {{ statusMap().get(task.status)?.label || '未指定狀態' }}@if (task.dueDate) { · 截止 {{ task.dueDate }} {{ task.dueTime }}} @else if (task.startDate) { · 開始 {{ task.startDate }} {{ task.startTime }}} @else { · 未排程}</small></span><app-icon name="chevron" /></button>} @empty {<p class="empty-state">目前範圍沒有符合條件的任務。</p>}
       }
@@ -46,6 +48,7 @@
         </div>
       </section>
       <section class="overview-card schedule-card" aria-label="時程重點"><div><h3>時程重點</h3><p>本週：{{ data().weekLabel }}（週日～週六）</p></div><div class="schedule-list" aria-label="時程任務數長條圖">@for (kind of schedules; track kind) {<button type="button" class="schedule-row" [orbitColor]="kind === 'overdue' ? 'orange' : 'blue'" (click)="show(kind)"><span>{{ kind === 'due-soon' ? store.reminders().dueSoonDays + ' 天內到期' : labels[kind] }}</span><span class="schedule-bar" aria-hidden="true"><span [style.width.%]="count(kind) / scheduleMax() * 100"></span></span><strong>{{ count(kind) }} <small>項</small></strong></button>}</div><small>只計待完成任務，各項可能重複；全天截止算至當天結束。</small></section>
+      <app-completion-trend [workspace]="store.currentWorkspace()" [now]="now()" [project]="selectedProject()" (selectRange)="show('completion-history', $event)" />
       <section class="overview-card category-card" aria-label="任務分類統計">
         <div class="card-heading"><h3>任務分類</h3><small>分類占比與完成情況 · 點選查看任務</small></div>
         <div class="donut-layout category-layout">

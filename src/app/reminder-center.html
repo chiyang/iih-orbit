@@ -1,7 +1,23 @@
+<div class="reminder-navigation"><div role="group" aria-label="提醒檢視"><button type="button" [class.selected]="!historyMode()" [attr.aria-pressed]="!historyMode()" (click)="historyMode.set(false)">近期提醒</button><button type="button" [class.selected]="historyMode()" [attr.aria-pressed]="historyMode()" (click)="historyMode.set(true)">提醒歷史</button></div><div role="group" aria-label="提醒工作空間"><button type="button" [class.selected]="workspaceScope() === 'all'" [attr.aria-pressed]="workspaceScope() === 'all'" (click)="workspaceScope.set('all')">全部工作空間</button><button type="button" [class.selected]="workspaceScope() === 'current'" [attr.aria-pressed]="workspaceScope() === 'current'" (click)="workspaceScope.set('current')">目前空間</button></div></div>
+@if (historyMode()) {
+  <div class="reminder-center-content">
+    <div class="history-actions"><label><input type="checkbox" [checked]="unreadOnly()" (change)="unreadOnly.set($any($event.target).checked)">只看未讀</label><button type="button" [disabled]="!unreadHistory().length" (click)="reminders.markHistoryRead(unreadHistory())">全部標為已讀</button></div>
+    <p class="reminder-result-count" role="status">{{ historyEntries().length }} 筆歷史 · {{ workspaceScope() === 'all' ? '全部工作空間' : reminders.store.currentWorkspace().name }}</p>
+    <div class="reminder-items">
+      @for (row of historyRows(); track row.entry.key) {
+        <article class="reminder-history-item" [class.unread]="row.entry.readAt === undefined"><div class="history-heading"><span>{{ historyLabel(row.entry) }} · {{ historyTime(row.entry) }}</span><small>{{ row.entry.readAt === undefined ? '未讀' : '已讀' }}</small></div><strong>{{ row.entry.title }}</strong><span>{{ historySchedule(row.entry) }}</span><small>{{ row.entry.workspaceName }} · {{ row.entry.source === 'google' ? 'Google・' + row.entry.sourceName : 'Orbit 任務' }}</small>@if (row.entry.popupAt) {<small>{{ row.entry.dismissedAt ? '已顯示並關閉提示' : '已顯示開始提示' }}</small>}<div class="history-row-actions">@if (row.item) {<button type="button" (click)="openHistory(row.entry)">{{ row.entry.source === 'google' ? '開啟目前活動' : '開啟目前任務' }}<app-icon name="chevron" /></button>} @else {<small>{{ row.entry.source === 'google' ? '活動目前無法開啟，保留提醒紀錄' : '任務在垃圾桶或已移除，保留提醒紀錄' }}</small>}@if (row.entry.readAt === undefined) {<button type="button" (click)="reminders.markHistoryRead([row.entry])">標為已讀</button>}</div></article>
+      } @empty {<div class="reminder-empty"><app-icon name="clock" /><strong>{{ unreadOnly() ? '沒有未讀的提醒歷史' : '還沒有提醒歷史' }}</strong><p>程式開啟後收到的新提醒會保留在這裡。</p></div>}
+    </div>
+    @if (historyEntries().length > historyLimit()) {<button type="button" class="history-more" (click)="showMoreHistory()">顯示更多歷史</button>}
+    <p class="reminder-help">保留近 30 天，最多 500 筆。歷史只在這個瀏覽器保存，不隨任務備份或跨裝置同步；名稱與時程保留提醒當時的內容。</p>
+    @if (reminders.historyWarning()) {<p class="reminder-warning" role="status">{{ reminders.historyWarning() }}</p>}
+    @if (reminders.attentionWarning()) {<p class="reminder-warning" role="status">{{ reminders.attentionWarning() }}</p>}
+  </div>
+} @else {
   <div class="reminder-center-tabs" role="group" aria-label="提醒範圍">@for (tab of tabs(); track tab.id) {<button [class.selected]="activeTab() === tab.id" [attr.aria-pressed]="activeTab() === tab.id" (click)="selectTab(tab.id)"><app-icon [name]="tab.id === 'due-soon' || tab.id === 'overdue' ? 'clock' : 'calendar'" />{{ tab.label }}<small>{{ tab.count }}</small></button>}</div>
   <div class="reminder-center-content">
     <div class="reminder-range"><p>{{ rangeLabel() }}</p><button (click)="openSettings.emit()"><app-icon name="settings" />提醒設定</button></div>
-    @if (activeTab() === 'due-soon') {<div class="reminder-presets" role="group" aria-label="到期天數">@for (days of presets; track days) {<button [class.selected]="dueDays() === days" [attr.aria-pressed]="dueDays() === days" (click)="dueDays.set(days)">{{ days }} 天</button>}<button class="deadline-list" (click)="showDeadline.emit(dueDays())"><app-icon name="list" />查看任務清單</button></div>}
+    @if (activeTab() === 'due-soon') {<div class="reminder-presets" role="group" aria-label="到期天數">@for (days of presets; track days) {<button [class.selected]="dueDays() === days" [attr.aria-pressed]="dueDays() === days" (click)="dueDays.set(days)">{{ days }} 天</button>}<button class="deadline-list" (click)="showDeadline.emit(dueDays())"><app-icon name="list" />查看目前空間清單</button></div>}
     @if (hasMixedSources() || showCalendarFilter()) {
       <div class="reminder-list-filters">
         @if (hasMixedSources()) {<div class="reminder-source-filters" role="group" aria-label="此列表的提醒來源">@for (source of sources; track source.id) {<button [class.selected]="effectiveSource() === source.id" [attr.aria-pressed]="effectiveSource() === source.id" (click)="selectSource(source.id)">{{ source.label }}</button>}</div>}
@@ -19,13 +35,16 @@
     }
     @if (listItems().length) {<p class="reminder-result-count" role="status">顯示 {{ visibleItems().length }}／{{ listItems().length }} 筆@if (visibleItems().length !== listItems().length) {<button (click)="clearFilters()">清除此列表篩選</button>}</p>}
     <div class="reminder-items">
-      @for (item of visibleItems(); track item.id) {
-        <button class="reminder-item" [orbitColor]="color(item)" (click)="open(item)"><span class="reminder-source" [class.google-source]="item.external">{{ item.external ? 'G' : 'O' }}</span><span class="reminder-item-content"><span class="reminder-item-title"><strong>{{ item.task.title }}</strong>@if (newItemIds().has(item.id)) {<small class="reminder-new-tag">新提醒</small>}</span><span>{{ dateLabel(item) }}</span><small>{{ item.external ? 'Google・' + item.external.source.name + '・唯讀' : 'Orbit 任務' }}</small></span><app-icon name="chevron" /></button>
+      @for (item of visibleItems(); track itemKey(item)) {
+        <button class="reminder-item" [orbitColor]="color(item)" (click)="open(item)"><span class="reminder-source" [class.google-source]="item.external">{{ item.external ? 'G' : 'O' }}</span><span class="reminder-item-content"><span class="reminder-item-title"><strong>{{ item.task.title }}</strong>@if (newItemIds().has(itemKey(item))) {<small class="reminder-new-tag">新提醒</small>}</span><span>{{ dateLabel(item) }}</span><small>{{ reminders.workspaceLabel(item) }} · {{ item.external ? 'Google・' + item.external.source.name + '・唯讀' : 'Orbit 任務' }}</small></span><app-icon name="chevron" /></button>
       } @empty {<div class="reminder-empty"><app-icon name="circleCheck" /><strong>{{ listItems().length ? '目前篩選沒有符合的提醒' : '這個範圍沒有提醒' }}</strong><p>{{ listItems().length ? '可調整來源與月曆選擇，或清除此列表篩選。' : '可切換其他日期或查看到期任務。' }}</p></div>}
     </div>
     @if (activeTab() === 'today' || activeTab() === 'tomorrow' || activeTab() === 'next-week') {<p class="reminder-help">依開始日期整理，包含全天安排；跨日項目只在開始日列入。Google 活動為唯讀。</p>}
     @if (activeTab() === 'this-week') {<p class="reminder-help">包含排程與本週重疊的待完成任務及 Google 活動。</p>}
-    <p class="reminder-help">開啟此側欄後收起現有提醒徽章，「新提醒」標記保留至這次瀏覽結束。新增、改期或進入今日／逾期時會再提示。</p>
+    <p class="reminder-help">查看近期提醒後，收起所選空間範圍的提醒徽章；「新提醒」標記保留至這次瀏覽結束。新增、改期或進入今日／逾期時會再提示。</p>
+    @if (reminders.historyWarning()) {<p class="reminder-warning" role="status">{{ reminders.historyWarning() }}</p>}
     @if (reminders.warning()) {<p class="reminder-warning" role="status">{{ reminders.warning() }}</p>}
     @if (reminders.attentionWarning()) {<p class="reminder-warning" role="status">{{ reminders.attentionWarning() }}</p>}
   </div>
+
+}

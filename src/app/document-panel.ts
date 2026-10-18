@@ -28,6 +28,8 @@ export class DocumentPanel {
   readonly openTask = output<{workspaceId: string; task: Task}>();
   readonly searchDraft = linkedSignal(() => this.browser.query());
   readonly canUse = computed(() => this.browser.auth.connected() && !this.browser.selectedConnection().connecting() && !this.browser.busy() && !this.documents.busy());
+  readonly canRefresh = computed(() => !this.browser.refreshing() && !this.browser.busy() && !this.documents.busy() && !this.browser.selectedConnection().connecting() && !this.browser.auth.authorizing()
+    && (this.browser.auth.connected() || this.browser.auth.expired() && this.browser.auth.ready()));
   readonly folder = isDriveFolder;
   readonly label = driveFileLabel;
   private readonly references = computed(() => new Map(this.browser.visibleFiles().map(file => [file.id, sourceFromDriveEntry(file)])));

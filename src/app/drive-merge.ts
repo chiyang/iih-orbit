@@ -8,6 +8,8 @@ import type { Task, TaskConflict, TaskConflictVersion } from './models.ts';
 import { taskVersionKey } from './task-conflict-data.ts';
 import { documentsForTask, mergeDocumentLinks, mergeDocumentSources, reconcileDocumentTasks } from './document-data.ts';
 import type { DocumentDetail, DocumentLink, DocumentOrder, DocumentSource } from './models.ts';
+import type {TaskCompletionEvent} from './models.ts';
+import {mergeCompletionEvents, withCompletionEvents} from './task-completion-data.ts';
 
 type RecordValue = Record<string, unknown>;
 const object = (value: unknown): value is RecordValue => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -68,6 +70,7 @@ class Merger {
     return structuredClone(values[this.preferred ?? 0]);
   }
   merge(base: unknown, values: unknown[], path: string): unknown {
+    if (path.endsWith('.completionEvents')) return mergeCompletionEvents([base ?? [], ...values.map(value => value ?? [])] as TaskCompletionEvent[][]);
     if (path.endsWith('.documentLinks')) return mergeDocumentLinks([base ?? [], ...values.map(value => value ?? [])] as DocumentLink[][]);
     if (path.endsWith('.documentSources')) return mergeDocumentSources([base ?? [], ...values.map(value => value ?? [])] as DocumentSource[][]);
     if (path.endsWith('.documentDetails')) return this.documentDetails(base as DocumentDetail[] ?? [], values.map(value => value as DocumentDetail[] ?? []), path);
@@ -270,12 +273,14 @@ export function mergeDriveBackups(baseInput: OrbitBackup, inputs: OrbitBackup[],
     }));
   }
   const allWorkspaces = [base, ...backups].flatMap(backup => backup.data.workspaces);
-  const modernDocuments = new Set(allWorkspaces.filter(workspace => workspace.version === 6).map(workspace => workspace.id));
+  const modernDocuments = new Set(allWorkspaces.filter(workspace => workspace.version >= 6).map(workspace => workspace.id));
+  const completionWorkspaces = new Set(allWorkspaces.filter(workspace => workspace.version === 7).map(workspace => workspace.id));
+  const completionEvents = new Map([...completionWorkspaces].map(id => [id, mergeCompletionEvents(allWorkspaces.filter(workspace => workspace.id === id).map(workspace => workspace.completionEvents ?? []))]));
   const documentStates = new Map([...modernDocuments].map(id => ['data.workspaces[' + id + ']', mergeDocumentLinks(allWorkspaces.filter(workspace => workspace.id === id).map(workspace => workspace.documentLinks ?? []))]));
   const project = (backup: OrbitBackup): RecordValue => {
     const projection = content(backup);
-    projection['workspaces'] = (projection['workspaces'] as OrbitBackup['data']['workspaces']).map(workspace => modernDocuments.has(workspace.id)
-      ? {...workspace, version: 6, documentSources: workspace.documentSources ?? [], documentLinks: workspace.documentLinks ?? [], documentDetails: workspace.documentDetails ?? [],
+    projection['workspaces'] = (projection['workspaces'] as OrbitBackup['data']['workspaces']).map(workspace => completionWorkspaces.has(workspace.id) ? withCompletionEvents(workspace, completionEvents.get(workspace.id)!) : workspace).map(workspace => modernDocuments.has(workspace.id)
+      ? {...workspace, version: workspace.version === 7 ? 7 : 6, documentSources: workspace.documentSources ?? [], documentLinks: workspace.documentLinks ?? [], documentDetails: workspace.documentDetails ?? [],
         documentOrders: workspace.documentOrders ?? workspace.tasks.map(task => ({id: task.id, documentIds: documentsForTask(workspace, task.id).map(source => source.id)}))} : workspace);
     return projection;
   };

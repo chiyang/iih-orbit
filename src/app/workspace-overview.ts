@@ -7,9 +7,11 @@ import {donutSegments} from './overview-charts';
 import {ThemeColor} from './theme-color';
 import type {Task, TaskConflict, Workspace} from './models';
 import {OVERVIEW_LABELS, overviewTasks, workspaceOverview, type OverviewKind, type OverviewSelection} from './workspace-overview-data';
+import {CompletionTrend} from './completion-trend';
+import {completionHistory, completionRange} from './completion-trend-data';
 
 @Component({
-  selector: 'app-workspace-overview', imports: [FormsModule, Icon, ThemeColor],
+  selector: 'app-workspace-overview', imports: [FormsModule, Icon, ThemeColor, CompletionTrend],
   host: {'[class.details-only]': 'detailsOnly()'},
   templateUrl: './workspace-overview.html', styleUrl: './workspace-overview.css', changeDetection: ChangeDetectionStrategy.OnPush
 })
@@ -68,12 +70,19 @@ export class WorkspaceOverview {
   readonly projectLimit = linkedSignal(() => {this.project(); this.includeArchived(); this.store.currentWorkspace().id; return 12;});
   readonly categoryLimit = linkedSignal(() => {this.project(); this.includeArchived(); this.store.currentWorkspace().id; return 12;});
   readonly selectedTasks = computed(() => {const selection = this.selection(); return selection ? overviewTasks(this.data(), selection) : [];});
-  readonly pageCount = computed(() => Math.max(1, Math.ceil((this.selection()?.kind === 'conflicts' ? this.data().conflicts.length : this.selectedTasks().length) / 30)));
+  readonly selectedHistory = computed(() => {
+    const selection = this.selection(), range = selection?.kind === 'completion-history' ? completionRange(selection.value) : null;
+    return range ? completionHistory(this.store.currentWorkspace(), this.selectedProject(), range.start, range.end) : [];
+  });
+  readonly selectionCount = computed(() => this.selection()?.kind === 'conflicts' ? this.data().conflicts.length : this.selection()?.kind === 'completion-history' ? this.selectedHistory().length : this.selectedTasks().length);
+  readonly pageCount = computed(() => Math.max(1, Math.ceil(this.selectionCount() / 30)));
   readonly currentPage = computed(() => Math.min(this.page(), this.pageCount() - 1));
   readonly taskRows = computed(() => this.selectedTasks().slice(this.currentPage() * 30, (this.currentPage() + 1) * 30));
+  readonly historyRows = computed(() => this.selectedHistory().slice(this.currentPage() * 30, (this.currentPage() + 1) * 30));
   readonly conflictRows = computed(() => this.data().conflicts.slice(this.currentPage() * 30, (this.currentPage() + 1) * 30));
   readonly selectionLabel = computed(() => {
     const selection = this.selection(); if (!selection) return '';
+    if (selection.kind === 'completion-history') {const range = completionRange(selection.value); return range ? (range.start === range.end ? range.start : range.start + ' ～ ' + range.end) + ' 完成紀錄' : '完成歷史';}
     return selection.kind === 'status' ? this.store.statuses().find(status => status.id === selection.value)?.label ?? '已移除的狀態'
       : selection.kind === 'category' ? selection.value === '' ? '未分類' : this.store.currentWorkspace().categories.find(category => category.id === selection.value)?.name ?? '已移除的分類'
       : selection.kind === 'project' ? this.projectName(selection.value ?? '') : this.labels[selection.kind];

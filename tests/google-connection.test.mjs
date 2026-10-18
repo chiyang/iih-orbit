@@ -111,12 +111,12 @@ test('Token Model 只申請讀取及帳號識別，憑證保存於 localStorage�
 });
 
 function authController(sessions = tabStorage(), control = tabStorage(), Type = GoogleAuth) {
-  let options, closed = false, authorizationRequests = 0;
-  const oauth = {initTokenClient: config => { options = config; return {requestAccessToken: () => {authorizationRequests++;}}; }, hasGrantedAllScopes: () => true};
+  let options, closed = false, authorizationRequests = 0; const prompts = [];
+  const oauth = {initTokenClient: config => { options = config; return {requestAccessToken: prompt => {authorizationRequests++; prompts.push(prompt);}}; }, hasGrantedAllScopes: () => true};
   const injector = createEnvironmentInjector([{provide: DOCUMENT, useValue: {defaultView: {google: {accounts: {oauth2: oauth}}, sessionStorage: sessions, localStorage: control}}}]);
   const auth = runInInjectionContext(injector, () => new Type());
   auth.useSession(sessionContext);
-  return {auth, sessions, control, authorizationRequests: () => authorizationRequests, callback: () => options.callback, close: () => { if (!closed) { closed = true; auth.ngOnDestroy(); injector.destroy(); } }};
+  return {auth, sessions, control, prompts, options: () => options, authorizationRequests: () => authorizationRequests, callback: () => options.callback, close: () => { if (!closed) { closed = true; auth.ngOnDestroy(); injector.destroy(); } }};
 }
 async function authorizeController(fixture, token = 'session-token') {
   await fixture.auth.prepare();
@@ -124,6 +124,50 @@ async function authorizeController(fixture, token = 'session-token') {
   await fixture.callback()({access_token: token, expires_in: 3600});
   await connection;
 }
+
+test('使用者更新時直接續接原帳號；有效授權不開窗，手動解除後不自動重連', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({sub: 'account', email: 'a@example.com'});
+  try {
+    for (const Type of [GoogleAuth, GmailAuth, DriveAuth]) {
+      const f = authController(tabStorage(), tabStorage(), Type);
+      try {
+        await authorizeController(f);
+        await f.auth.renewForAction(sessionContext); assert.equal(f.authorizationRequests(), 1);
+        f.auth.disconnect('expired', 'expired');
+        const renewal = f.auth.renewForAction(sessionContext);
+        assert.equal(f.authorizationRequests(), 2, '在第一個非同步等待前開啟授權視窗');
+        assert.deepEqual(f.prompts.at(-1), {prompt: '', login_hint: 'account'});
+        await f.callback()({access_token: 'renewed-token', expires_in: 3600}); await renewal;
+        assert.equal(f.auth.connected(), true); assert.equal(f.auth.account().id, 'account');
+        f.auth.disconnect();
+        await assert.rejects(f.auth.renewForAction(sessionContext), /請先連線原本/);
+        assert.equal(f.authorizationRequests(), 2);
+      } finally {f.close();}
+    }
+  } finally {globalThis.fetch = originalFetch;}
+});
+
+test('更新續接取消、彈窗受阻與錯誤帳號都保留可重試狀態，不接受其他帳號', async () => {
+  const f = authController(), originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({sub: 'account', email: 'a@example.com'});
+  try {
+    await authorizeController(f); f.auth.disconnect('expired', 'expired');
+    for (const type of ['popup_closed', 'popup_failed_to_open']) {
+      const renewal = f.auth.renewForAction(sessionContext), rejected = assert.rejects(renewal, /視窗/);
+      f.options().error_callback({type}); await rejected;
+      assert.equal(f.auth.connected(), false); assert.equal(f.auth.expired(), true);
+    }
+    globalThis.fetch = async () => Response.json({sub: 'other', email: 'other@example.com'});
+    const wrong = f.auth.renewForAction(sessionContext), rejected = assert.rejects(wrong, /帳號與此來源不同/);
+    await f.callback()({access_token: 'wrong-account-token', expires_in: 3600}); await rejected;
+    assert.equal(f.auth.connected(), false); assert.equal(f.auth.account(), null);
+    globalThis.fetch = async () => Response.json({sub: 'account', email: 'a@example.com'});
+    const retry = f.auth.renewForAction(sessionContext);
+    await f.callback()({access_token: 'retry-token', expires_in: 3600}); await retry;
+    assert.equal(f.auth.connected(), true);
+  } finally {f.close(); globalThis.fetch = originalFetch;}
+});
 
 test('跨分頁續期漏接通知時，下一次 API 讀取接續新憑證與真實期限，舊到期計時不清除新連線', async t => {
   t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: 100000});
@@ -400,7 +444,7 @@ async function calendarController({emptyAccount = false} = {}) {
     remove: async key => values.delete(key), clear: async () => { clears++; values.clear(); }
   };
   const auth = {
-    connectionVersion: signal(0), connected: signal(false), account: signal(null), ready: signal(false), preparing: signal(false), authorizing: signal(false), message: signal('尚未連線 Google'), sessionWarning: signal(''),
+    expired: signal(false), renewForAction: () => {}, connectionVersion: signal(0), connected: signal(false), account: signal(null), ready: signal(false), preparing: signal(false), authorizing: signal(false), message: signal('尚未連線 Google'), sessionWarning: signal(''),
     useSession() {},
     cancelRequests() {},
     async prepare() { prepares++; if (prepareFailure) throw new Error('無法載入元件'); this.ready.set(true); },
@@ -597,6 +641,21 @@ test('近期提醒與月曆共用涵蓋範圍，同月不重複請求，瀏覽�
   } finally { fixture.close(); }
 });
 
+test('提醒讀取其他工作空間的綁定快取，月曆檢視仍限目前空間，隱藏及帳號更換移除提醒', async () => {
+  const f = await calendarController();
+  try {
+    const first = f.store.currentWorkspace().id;
+    f.service.setReminderMonth(new Date(2026, 9, 9)); await f.auth.authorize(); await settle(); await f.service.refresh();
+    assert.equal(f.service.reminderEvents().length, 1);
+    await f.store.saveWorkspace('', '其他空間'); const second = f.store.currentWorkspace().id;
+    assert.equal(f.service.events().length, 0); assert.equal(f.service.reminderEvents().length, 1);
+    await f.store.bindCalendar(f.store.google().sources[0], second, true); assert.equal(f.service.reminderEvents().length, 1);
+    f.store.switchWorkspace(first); assert.equal(f.service.reminderEvents().length, 1); assert.equal(f.service.events().length, 1);
+    await f.store.updateCalendarSource('source', {visible: false}); assert.equal(f.service.reminderEvents().length, 0);
+    await f.store.updateCalendarSource('source', {visible: true}); await f.store.updateGoogle({accountId: 'different', email: 'other@example.com'}); assert.equal(f.service.reminderEvents().length, 0);
+  } finally {f.close();}
+});
+
 test('跨月提醒範圍按需更新，新資料不取代日曆檢視日期，快取有效時安靜檢查', async () => {
   const fixture = await calendarController();
   try {
@@ -639,6 +698,28 @@ test('首次連線的帳號確認不被設定尚未保存的短暫狀態中斷',
     assert.equal(fixture.store.google().accountId, 'account');
     assert.equal(fixture.service.available().length, 1);
   } finally { fixture.close(); }
+});
+
+test('月曆手動更新可續接並完成活動或可用清單更新，取消保留活動快取', async () => {
+  const f = await calendarController(); let finish, renewals = 0;
+  try {
+    await f.auth.authorize(); await settle(); await f.service.refresh();
+    const previous = structuredClone(f.service.events());
+    f.auth.connected.set(false); f.auth.expired.set(true); f.auth.ready.set(true); await settle();
+    const count = f.requests.length;
+    f.auth.renewForAction = context => {
+      renewals++; assert.equal(context.accountId, 'account'); f.auth.authorizing.set(true);
+      return new Promise((resolve, reject) => {finish = error => {f.auth.authorizing.set(false); if (error) reject(error); else {f.auth.connected.set(true); f.auth.connectionVersion.update(value => value + 1); resolve();}};});
+    };
+    const cancelled = f.service.refreshFromAction(); await f.service.refreshFromAction();
+    assert.equal(renewals, 1); finish(new Error('視窗已關閉')); await cancelled;
+    assert.deepEqual(f.service.events(), previous); assert.equal(f.requests.length, count); assert.match(f.service.error(), /已關閉/);
+    const retry = f.service.refreshFromAction(); finish(); await retry; await settle();
+    assert.ok(f.requests.length > count); assert.equal(f.service.events().length, 1);
+    f.auth.connected.set(false); await settle(); const beforeList = f.requests.length;
+    const listing = f.service.refreshFromAction(true); finish(); await listing;
+    assert.equal(f.requests[beforeList].path, 'users/me/calendarList'); assert.equal(f.service.available().length, 1);
+  } finally {f.close();}
 });
 
 test('手動排程不自動重讀，活動顯示不改本機進度，隱藏來源立即移除顯示', async () => {

@@ -20,6 +20,7 @@ import { DEVICE_NAME_LIMIT, DEVICE_STORAGE_KEY, loadDeviceIdentity } from './dev
 import { WorkspaceRecordRepository } from './workspace-records';
 import { descriptionsForTask, documentIdentity, documentsForTask, indexDocumentTasks, indexTaskInformation, mergeDocumentLinks, mergeDocumentSources, reconcileDocumentTasks, setTaskDocuments, taskDocumentIds, taskInformationKey } from './document-data';
 import {documentCleanupCandidates} from './document-source-cleanup';
+import {recordCompletions} from './task-completion-data';
 
 export type StoreResult = {ok: true; persisted: boolean} | {ok: false; message: string};
 export interface TaskEditContext {
@@ -255,12 +256,13 @@ export class BoardStore implements OnDestroy {
       const target = structuredClone(redo ? entry.after : entry.before);
       let restored: BoardState = target;
       if (workspace.documentSources) {
-        const modern = workspace.version === 6 || target.version === 6;
-        restored = {...target, version: modern ? 6 : 5, documentSources: mergeDocumentSources([workspace.documentSources, target.documentSources ?? []]), documentLinks: mergeDocumentLinks([workspace.documentLinks ?? [], target.documentLinks ?? []]),
+        const modern = workspace.version >= 6 || target.version >= 6;
+        restored = {...target, version: workspace.version === 7 || target.version === 7 ? 7 : modern ? 6 : 5, documentSources: mergeDocumentSources([workspace.documentSources, target.documentSources ?? []]), documentLinks: mergeDocumentLinks([workspace.documentLinks ?? [], target.documentLinks ?? []]),
           ...(modern ? {documentDetails: [...new Map([...(workspace.documentDetails ?? []), ...(target.documentDetails ?? [])].map(item => [item.id, item])).values()], documentOrders: target.documentOrders ?? []} : {})};
         for (const task of target.tasks.filter(task => !task.deletedAt)) restored = setTaskDocuments(restored, task.id, documentsForTask(target, task.id), undefined, modern ? descriptionsForTask(target, task.id) : undefined);
         restored = reconcileDocumentTasks(restored);
       }
+      restored = recordCompletions(workspace, restored);
       return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspace.id ? {...item, ...restored} : item)}};
     }, {generation: entry.generation, afterApply: () => this.history.update(entries => entries.map(item => item === entry ? {...item, undone: !redo} : item))});
     if (!result.ok) this.refreshFromStorage();
@@ -284,9 +286,12 @@ export class BoardStore implements OnDestroy {
       if (!version) throw new Error('選定的任務版本已不存在，請重新查看。');
       if (draft && (!version.task || draft.id !== conflict.id)) throw new Error('草稿不屬於選定的任務版本，原有內容保留。');
       const task = draft ?? (version.task ? structuredClone(version.task) : null);
-      if (task && (!task.title.trim() || task.title.length > 100 || task.description.length > 20000 || task.subtasks.some(item => !item.title.trim() || item.title.length > 200) || !readBoardState({...board, version: 4, documentSources: undefined, documentLinks: undefined, documentDetails: undefined, documentOrders: undefined, tasks: [task]}))) throw new Error('請確認名稱、描述、子任務、分類及時程，原有版本尚未變更。');
+      if (task && (!task.title.trim() || task.title.length > 100 || task.description.length > 20000 || task.subtasks.some(item => !item.title.trim() || item.title.length > 200) || !readBoardState({...board, version: 4, documentSources: undefined, documentLinks: undefined, documentDetails: undefined, documentOrders: undefined, completionEvents: undefined, tasks: [task]}))) throw new Error('請確認名稱、描述、子任務、分類及時程，原有版本尚未變更。');
       const tasks = task ? board.tasks.some(value => value.id === task.id) ? board.tasks.map(value => value.id === task.id ? task : value) : [...board.tasks, task] : board.tasks.filter(value => value.id !== conflict.id);
-      return {...board, tasks, taskConflicts: board.taskConflicts!.map(value => value.id === conflict.id ? {...value, resolved: key} : value)};
+      const changed = {...board, tasks, taskConflicts: board.taskConflicts!.map(value => value.id === conflict.id ? {...value, resolved: key} : value)};
+      if (!draft || !version.task) return changed;
+      const baseline = {...board, tasks: [...board.tasks.filter(value => value.id !== draft.id), version.task]};
+      return recordCompletions(baseline, changed);
     }, workspaceId, generation, true);
   }
 
@@ -619,7 +624,7 @@ export class BoardStore implements OnDestroy {
         google: all ? structuredClone(DEFAULT_GOOGLE) : {...data.google!, sources: []},
         state: {version: 1, activeWorkspaceId: workspace.id, workspaces: [workspace]}};
     }, {requirePersistence: true, select: workspace.id, afterPersist: () => {
-      for (const key of ['orbit-workspaces-v1', 'orbit-board-v1', 'orbit-board-v1-backup', 'orbit-text-size-v1', 'orbit-reminder-delivery-v1']) localStorage.removeItem(key);
+      for (const key of ['orbit-workspaces-v1', 'orbit-board-v1', 'orbit-board-v1-backup', 'orbit-text-size-v1', 'orbit-reminder-delivery-v1', 'iih-orbit-reminder-history-v1']) localStorage.removeItem(key);
       this.selectionStorage?.removeItem(WORKSPACE_SELECTION_KEY);
     }});
   }
@@ -699,7 +704,8 @@ export class BoardStore implements OnDestroy {
       const changed = change(workspace);
       if (!resolvingConflict && unresolvedTaskConflicts(workspace.taskConflicts).some(conflict => JSON.stringify(workspace.tasks.find(task => task.id === conflict.id)) !== JSON.stringify(changed.tasks.find(task => task.id === conflict.id)))) throw new Error('這個任務有同步衝突，請先在右側欄選擇版本後再編輯。');
       const now = new Date(), tasks = recordTaskEdits(workspace.tasks, changed.tasks, now, this.device()), previousInformation = indexTaskInformation(workspace), nextInformation = indexTaskInformation(changed);
-      const board = reconcileDocumentTasks({...changed, tasks: tasks.map(task => JSON.stringify(previousInformation.get(task.id) ?? []) === JSON.stringify(nextInformation.get(task.id) ?? []) ? task : {...task, updatedAt: now.toISOString(), editSource: {...this.device()}})});
+      const updated = {...changed, tasks: tasks.map(task => JSON.stringify(previousInformation.get(task.id) ?? []) === JSON.stringify(nextInformation.get(task.id) ?? []) ? task : {...task, updatedAt: now.toISOString(), editSource: {...this.device()}})};
+      const board = reconcileDocumentTasks(resolvingConflict ? updated : recordCompletions(workspace, updated, now));
       return {...data, state: {...data.state, workspaces: data.state.workspaces.map(item => item.id === workspaceId ? {...workspace, ...board} : item)}};
     }, {generation, requirePersistence: options.requirePersistence, afterApply: () => {
       const after = readBoardState(this.workspaces().find(workspace => workspace.id === workspaceId))!;
@@ -714,6 +720,7 @@ export class BoardStore implements OnDestroy {
       await this.ready;
       if (this.storageFailure) throw new Error(this.storageFailure);
       let prepared: StoredWorkspaceData | undefined;
+      let preparedBaseRevision = this.lastSavedRevision;
       const prepare = (disk: StoredWorkspaceData): StoredWorkspaceData => {
         if (this.hasUnsavedChanges() && disk.revision !== this.lastSavedRevision) throw new Error('其他分頁已更新資料，請先匯出本分頁未儲存的內容，再重新整理。');
         const latest = this.hasUnsavedChanges() ? {...this.snapshot, state: this.workspaceState()} : disk;
@@ -732,10 +739,12 @@ export class BoardStore implements OnDestroy {
         if (!drive) throw new Error('Drive 設定不合法，未儲存這次變更。');
         const onboarding = changed.generation === latest.generation && isInitialWorkspace(state) ? changed.onboarding : undefined;
         const next: StoredWorkspaceData = {...changed, onboarding, state, google, drive, revision: crypto.randomUUID(), updatedAt: new Date().toISOString()};
-        prepared = next; return next;
+        preparedBaseRevision = disk.revision; prepared = next; return next;
       };
       const unsaved = (next: StoredWorkspaceData): StoreResult => {
           if (options.requirePersistence) throw new Error(options.persistenceMessage ?? '瀏覽器儲存空間不足或無法保存，還原或重置未套用；原有資料保留。');
+          // The draft already includes this committed revision, even if our previous view was older.
+          this.lastSavedRevision = preparedBaseRevision;
           this.apply(next, options.select, false);
           options.afterApply?.();
           this.hasUnsavedChanges.set(true);

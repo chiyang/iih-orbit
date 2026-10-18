@@ -90,6 +90,18 @@ export class GoogleAuth implements OnDestroy {
     this.refreshHistory();
   }
 
+  /** Only call from a user action: open the popup before the first asynchronous wait. */
+  renewForAction(context: GoogleSessionContext): Promise<void> | undefined {
+    this.useSession(context);
+    if (this.connected()) return;
+    if (!context.accountId || !this.expired()) return Promise.reject(new Error('請先連線原本的 Google 帳號。'));
+    return this.authorize(context.clientId, {selectAccount: false, expectedAccountId: context.accountId, loginHint: context.accountId}).then(account => {
+      if (account.id !== context.accountId || this.sessionContext?.generation !== context.generation || this.sessionContext.clientId !== context.clientId || this.sessionContext.accountId !== context.accountId || !this.connected()) {
+        throw new Error('Google 帳號或設定已變更，請重新整理。');
+      }
+    });
+  }
+
   authorizationMarker(): string { return this.bridge.currentNonce(); }
   authorizationIsCurrent(nonce: string): boolean { return !nonce || this.bridge.isCurrent(nonce); }
   hasScope(scope: string): boolean { return scope.split(' ').every(value => this.approvedScopes.has(value)); }

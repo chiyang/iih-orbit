@@ -17,6 +17,9 @@ export class GoogleCalendarService implements OnDestroy {
   private readonly api = new CalendarApi((path, parameters) => this.auth.request(path, parameters));
   readonly available = signal<AvailableCalendar[]>([]);
   readonly listing = signal(false);
+  readonly refreshing = signal(false);
+  readonly canRefresh = computed(() => !this.refreshing() && !this.listing() && !this.syncing() && !this.auth.authorizing() && this.online()
+    && (this.auth.connected() || this.auth.expired() && this.auth.ready()));
   private readonly listCache = new CalendarListCache();
   private availableScope = '';
   private calendarListing?: {scope: string; connection: number; promise: Promise<void>};
@@ -40,10 +43,10 @@ export class GoogleCalendarService implements OnDestroy {
   readonly sources = computed(() => this.store.google().sources.filter(source => source.accountId === this.store.google().accountId));
   readonly visibleSources = computed(() => this.sources().filter(source => source.visible && source.workspaceIds.includes(this.store.currentWorkspace().id)));
   readonly events = computed<ExternalEvent[]>(() => this.entriesFor(this.range()));
-  readonly reminderEvents = computed<ExternalEvent[]>(() => this.reminderRange() ? this.entriesFor(this.reminderRange()!) : []);
-  private entriesFor(range: CalendarRange): ExternalEvent[] {
+  readonly reminderEvents = computed<ExternalEvent[]>(() => this.reminderRange() ? this.entriesFor(this.reminderRange()!, this.sources().filter(source => source.visible && source.workspaceIds.some(id => this.store.workspaces().some(workspace => workspace.id === id)))) : []);
+  private entriesFor(range: CalendarRange, sources = this.visibleSources()): ExternalEvent[] {
     const entries = new Map<string, ExternalEvent>();
-    for (const source of this.visibleSources()) {
+    for (const source of sources) {
       const snapshot = this.snapshots()[this.key(source)];
       const view = calendarViewForRange(snapshot, range);
       for (const event of view?.events ?? []) {
@@ -137,7 +140,7 @@ export class GoogleCalendarService implements OnDestroy {
     for (const key of this.keys) if (!keys.has(key)) { this.snapshots.update(values => { const next = {...values}; delete next[key]; return next; }); void this.cache.remove(key).catch(() => {}); }
     this.keys = keys;
     await this.hydrate(epoch);
-    if (epoch === this.epoch) await this.refresh(false);
+    if (epoch === this.epoch && !this.refreshing()) await this.refresh(false);
   }
 
   private async hydrate(epoch: number): Promise<void> {
@@ -210,8 +213,24 @@ export class GoogleCalendarService implements OnDestroy {
     if (!result.ok) this.error.set(result.message);
   }
 
+  async refreshFromAction(list = false): Promise<void> {
+    if (!this.canRefresh()) return;
+    const scope = this.syncScope(), workspaceId = this.store.currentWorkspace().id, ranges = JSON.stringify(this.requestedRanges());
+    const current = () => !this.destroyed && !this.suspended && scope === this.syncScope() && workspaceId === this.store.currentWorkspace().id && ranges === JSON.stringify(this.requestedRanges());
+    this.refreshing.set(true);
+    try {
+      const renewal = this.auth.renewForAction({generation: this.store.generation(), clientId: this.store.google().clientId, accountId: this.store.google().accountId});
+      if (renewal) await renewal;
+      if (!current()) return;
+      if (list) await this.listCalendars();
+      else {await this.configure(); if (current()) await this.refresh();}
+    } catch (error) {if (current()) this.error.set(this.message(error));}
+    finally {this.refreshing.set(false);}
+  }
+
   refresh(force = true): Promise<void> {
     if (this.destroyed || this.suspended) return Promise.resolve();
+    if (!force && this.refreshing()) return Promise.resolve();
     if (this.running) { if (!force) this.refreshAgain = true; return this.running; }
     this.coordinator.activate(this.syncScope());
     if (this.running) return this.running;

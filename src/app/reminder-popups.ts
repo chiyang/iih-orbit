@@ -14,7 +14,7 @@ export class ReminderPopups {
     if (this.blocked()) return;
     const current = this.reminders.resolve(item);
     this.reminders.dismiss(key);
-    if (current) this.openItem.emit(current);
+    if (current) {this.reminders.markViewed([current]); this.openItem.emit(current);}
   }
   popupLabel(item: ReminderItem): string {
     if (item.allDay) return '今天的全天安排';

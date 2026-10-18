@@ -42,7 +42,7 @@ function fixture(saved = []) {
   const state = {version: 1, activeWorkspaceId: 'workspace', workspaces: [{version: 4, id: 'workspace', name: '工作', projects: [{id: 'project', name: '工作'}], categories: [], statuses: COLUMNS, tasks: []}, {version: 4, id: 'other', name: '其他', projects: [], categories: [], statuses: COLUMNS, tasks: []}]};
   values.set('orbit-workspaces-v1', JSON.stringify(state)); const store = new BoardStore(), effects = new Set();
   const scheduler = {add(effect) {effects.add(effect);}, schedule() {}, remove(effect) {effects.delete(effect);}};
-  const auth = {connected: signal(false), authorizing: signal(false), ready: signal(false), preparing: signal(false), account: signal(null), connectionVersion: signal(0), cancelRequests() {}, useSession(context) {this.context = context;}, disconnect() {this.connected.set(false); this.account.set(null); this.connectionVersion.update(n => n + 1);}, api: async () => {throw new Error('未設定模擬 API');}};
+  const auth = {expired: signal(false), renewForAction: () => {}, connected: signal(false), authorizing: signal(false), ready: signal(false), preparing: signal(false), account: signal(null), connectionVersion: signal(0), cancelRequests() {}, useSession(context) {this.context = context;}, disconnect() {this.connected.set(false); this.account.set(null); this.connectionVersion.update(n => n + 1);}, api: async () => {throw new Error('未設定模擬 API');}};
   const injector = createEnvironmentInjector([{provide: BoardStore, useValue: store}, {provide: GmailAuth, useValue: auth}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   const gmail = runInInjectionContext(injector, () => new GmailService());
   const panelViews = [], notifications = {acknowledgeCurrent(identity) {panelViews.push(identity); return true;}};
@@ -54,6 +54,31 @@ function fixture(saved = []) {
   return {store, gmail, auth, tasks, reader, panelViews, values, child, flush, close() {child.destroy(); gmail.ngOnDestroy(); injector.destroy();}};
 }
 const event = () => {const data = new Map(); return {dataTransfer: {types: [], effectAllowed: '', dropEffect: '', setData(type, value) {data.set(type, value); this.types.push(type);}, getData: type => data.get(type) ?? ''}, prevented: false, stopped: false, preventDefault() {this.prevented = true;}, stopPropagation() {this.stopped = true;}};};
+
+test('郵件更新先續接再讀取；取消及重複點擊不清除郵件，篩選改變不執行舊更新', async () => {
+  const f = fixture(); let panel, finish, renewals = 0, pages = 0;
+  try {
+    f.gmail.api.labels = async () => [{id: 'INBOX', name: 'INBOX', type: 'system'}];
+    f.gmail.api.page = async () => {pages++; return {messages: [preview], cursor: newMailCursor(['INBOX'], '')};};
+    f.gmail.api.summary = async () => ({mail: preview, count: 1, unread: false});
+    await f.gmail.load();
+    panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(false); f.flush();
+    f.auth.connected.set(false); f.auth.expired.set(true); f.auth.ready.set(true); f.flush();
+    f.auth.renewForAction = context => {
+      renewals++; assert.equal(context.accountId, 'account'); f.auth.authorizing.set(true);
+      return new Promise((resolve, reject) => {finish = error => {f.auth.authorizing.set(false); if (error) reject(error); else {f.auth.connected.set(true); f.auth.connectionVersion.update(value => value + 1); resolve();}};});
+    };
+    const cancelled = panel.refresh(); await panel.refresh();
+    assert.equal(renewals, 1); assert.equal(pages, 1); assert.deepEqual(f.gmail.messages(), [preview]);
+    finish(new Error('授權視窗已關閉')); await cancelled;
+    assert.match(f.gmail.error(), /已關閉/); assert.deepEqual(f.gmail.messages(), [preview]);
+    const retry = panel.refresh(); finish(); await retry; f.flush();
+    assert.equal(pages, 2); assert.equal(f.gmail.error(), ''); assert.deepEqual(f.gmail.selected(), ['INBOX']);
+    f.auth.connected.set(false); f.flush();
+    const stale = panel.refresh(); f.gmail.search('new-filter'); finish(); await stale;
+    assert.equal(pages, 2); assert.equal(f.gmail.query(), 'new-filter');
+  } finally {panel?.ngOnDestroy(); f.close();}
+});
 
 test('Google 403 依原因區分頻率、每日配額、管理員政策與權限，錯誤回應大小受限', async () => {
   const response = reason => Response.json({error: {errors: [{reason}], message: 'PRIVATE-ACCOUNT-DETAIL'}}, {status: 403, headers: {'Retry-After': '2'}});

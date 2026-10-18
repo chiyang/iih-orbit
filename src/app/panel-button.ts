@@ -2,7 +2,7 @@ import { Component, computed, inject, input, output } from '@angular/core';
 import { BoardStore } from './board-store';
 import { Reminders } from './reminders';
 import { GmailNotifications } from './gmail-notifications';
-import { itemsForReminderTab, type ReminderTab } from './reminder-items';
+import { reminderItemKey, type ReminderTab } from './reminder-items';
 import { panelAttention } from './panel-attention';
 import { Icon } from './icon';
 import { Tooltip } from './tooltip';
@@ -24,8 +24,8 @@ export class PanelButton {
     : this.opened() && this.activeTab() === 'gmail' && this.attention().target === 'gmail' ? '查看 ' + this.attention().count + ' 封新郵件通知'
     : this.opened() && this.activeTab() === this.attention().target ? '關閉右側欄；' + this.attention().label.split('，')[0] : this.attention().label);
   readonly reminderTab = computed(() => {
-    const unseen = new Set(this.reminders.unseenItems().map(item => item.id));
+    const unseen = new Set(this.reminders.unseenItems().map(reminderItemKey));
     return (['today', 'overdue', 'due-soon', 'tomorrow', 'this-week', 'next-week'] as const).find(tab =>
-      itemsForReminderTab(this.reminders.items(), tab, this.reminders.now(), this.store.reminders().dueSoonDays, this.store.currentWorkspace()).some(item => unseen.has(item.id))) ?? 'today';
+      this.reminders.entries(tab).some(item => unseen.has(reminderItemKey(item)))) ?? 'today';
   });
 }

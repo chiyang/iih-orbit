@@ -1,13 +1,27 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { currentWeekRange, DEFAULT_REMINDERS, deadlineState, readReminders, taskInWeek } from '../src/app/reminder-data.ts';
-import { itemsForReminderTab, reminderItems, startPopupCandidates, startWindow } from '../src/app/reminder-items.ts';
+import { allReminderItems, inReminderWorkspace, itemsForReminderTab, reminderItemKey, reminderItems, startPopupCandidates, startWindow } from '../src/app/reminder-items.ts';
 import { ReminderDelivery, REMINDER_DELIVERY_KEY } from '../src/app/reminder-delivery.ts';
 import { COLUMNS } from '../src/app/models.ts';
 import { externalEvent, calendarMonthRange } from '../src/app/google-data.ts';
 import { dateKey } from '../src/app/task-schedule.ts';
 
 const task = {id: 'task', title: '截止任務', description: '', categoryId: '', projectId: '', status: 'todo', priority: 'medium', startDate: '', startTime: '', dueDate: '2026-10-09', dueTime: '', subtasks: []};
+
+test('跨空間保留相同任務 ID，依各自狀態類型計算，Google 多空間綁定只列一次', () => {
+  const first = {version: 4, id: 'a', name: '研究', projects: [], categories: [], statuses: COLUMNS, tasks: [task]}, second = {...first, id: 'b', name: '教學', statuses: [{id: 'todo', kind: 'done'}, {id: 'waiting', kind: 'active'}], tasks: [task, {...task, id: 'other', status: 'waiting'}]};
+  const source = {id: 'shared', accountId: 'account', calendarId: 'calendar', name: '共同月曆', color: '#345678', visible: true, workspaceIds: ['a', 'b']};
+  const external = externalEvent(source, {id: 'event', start: {date: '2026-10-09'}, end: {date: '2026-10-10'}});
+  const items = allReminderItems([second, first], 'generation', [external, external]);
+  assert.equal(items.length, 3); assert.equal(items.filter(item => item.external).length, 1);
+  const shared = items.find(item => item.external); assert.deepEqual(shared.workspaceIds, ['a', 'b']); assert.equal(shared.workspaceId, 'a'); assert.equal(inReminderWorkspace(shared, 'b'), true);
+  assert.equal(itemsForReminderTab(items, 'overdue', new Date(2026, 9, 10), 3, [first, second]).length, 2);
+  assert.equal(new Set(items.map(reminderItemKey)).size, 3);
+  second.statuses = COLUMNS; second.tasks = [task];
+  const colliding = allReminderItems([first, second], 'generation', []); assert.equal(colliding.length, 2); assert.equal(new Set(colliding.map(reminderItemKey)).size, 2);
+  assert.deepEqual(allReminderItems([first, second], 'generation', [external]).map(reminderItemKey), allReminderItems([second, first], 'generation', [external]).map(reminderItemKey));
+});
 
 test('截止提醒依實際日期時間及當天結束判斷，範圍包含邊界且排除無截止日期', () => {
   const now = new Date(2026, 9, 9, 12);

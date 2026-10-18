@@ -24,7 +24,7 @@ function fixture(api = async () => ({files: [raw('folder', true), raw('file')]})
   const values = new Map([['orbit-workspaces-v1', JSON.stringify({version: 1, activeWorkspaceId: 'workspace', workspaces: [{version: 4, id: 'workspace', name: '工作', projects: [], categories: [], statuses: COLUMNS, tasks: [base]}]})]]);
   globalThis.localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: key => values.delete(key)};
   const store = new BoardStore(), dom = new JSDOM('', {url: 'https://example.test'}), effects = new Set(), calls = [];
-  const auth = {connectionVersion: signal(0), connected: signal(true), authorizing: signal(false), account: signal(null), ready: signal(true), message: signal(''), useSession() {}, disconnect() {this.connected.set(false); this.authorizing.set(false); this.connectionVersion.update(v => v + 1);}, prepare: async () => {}, authorize: async () => ({id: 'new-account', email: 'new@example.test'}), api: (...args) => {calls.push(args); return api(...args);}};
+  const auth = {expired: signal(false), renewForAction: () => {}, connectionVersion: signal(0), connected: signal(true), authorizing: signal(false), account: signal(null), ready: signal(true), message: signal(''), useSession() {}, disconnect() {this.connected.set(false); this.authorizing.set(false); this.connectionVersion.update(v => v + 1);}, prepare: async () => {}, authorize: async () => ({id: 'new-account', email: 'new@example.test'}), api: (...args) => {calls.push(args); return api(...args);}};
   const injector = createEnvironmentInjector([DocumentMetadataService, DriveBrowserConnection, {provide: BoardStore, useValue: store}, {provide: DOCUMENT, useValue: dom.window.document}, {provide: DriveBrowserAuth, useValue: auth}, {provide: ɵEffectScheduler, useValue: {add: e => effects.add(e), schedule() {}, remove: e => effects.delete(e)}}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   globalThis.ngServerMode = true;
   let browser, documents;
@@ -35,6 +35,28 @@ function fixture(api = async () => ({files: [raw('folder', true), raw('file')]})
 function event() {
   const data = new Map(); return {clientX: 20, clientY: 20, currentTarget: null, dataTransfer: {types: [], setData(type, value) {data.set(type, value); this.types = [...data.keys()];}, getData: type => data.get(type) ?? '', setDragImage() {}}, preventDefault() {}, stopPropagation() {}};
 }
+
+test('檔案更新在原來源續接並保留資料夾與搜尋；取消或換位置不讀取舊列表', async () => {
+  const f = fixture(); let finish, renewals = 0;
+  try {
+    await f.browser.activate(); await f.browser.open(f.browser.files().find(file => file.id === 'folder')); await f.browser.search('proposal');
+    const previous = structuredClone(f.browser.files()), count = f.calls.length;
+    f.browser.selectedConnection().account.set({id: 'original-account', email: 'original@example.test'});
+    f.auth.connected.set(false); f.auth.expired.set(true); f.flush();
+    f.auth.renewForAction = context => {
+      renewals++; assert.equal(context.accountId, 'original-account'); f.auth.authorizing.set(true);
+      return new Promise((resolve, reject) => {finish = error => {f.auth.authorizing.set(false); if (error) reject(error); else {f.auth.connected.set(true); f.auth.connectionVersion.update(value => value + 1); resolve();}};});
+    };
+    const cancelled = f.browser.refresh(); await f.browser.refresh();
+    assert.equal(renewals, 1); finish(new Error('視窗已關閉')); await cancelled;
+    assert.equal(f.calls.length, count); assert.deepEqual(f.browser.files(), previous); assert.equal(f.browser.query(), 'proposal');
+    const retry = f.browser.refresh(); finish(); await retry;
+    assert.equal(f.calls.length, count + 1); assert.match(f.calls.at(-1)[1].q, /'folder' in parents/); assert.match(f.calls.at(-1)[1].q, /name contains 'proposal'/);
+    f.auth.connected.set(false); f.flush();
+    const stale = f.browser.refresh(); f.browser.query.set('new-filter'); finish(); await stale;
+    assert.equal(f.calls.length, count + 1); assert.equal(f.browser.query(), 'new-filter');
+  } finally {f.close();}
+});
 test('只載入直接子項，回上層與重開使用五分鐘快取，手動更新與過期才重讀', async t => {
   t.mock.timers.enable({apis: ['Date'], now: 1800000000000});
   const f = fixture(async (_, params) => ({files: [raw(params.q.includes("'folder' in parents") ? 'child' : 'folder', !params.q.includes("'folder' in parents"))]}));

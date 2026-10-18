@@ -84,28 +84,30 @@ export class GmailService implements OnDestroy {
       const identity = JSON.stringify([this.store.generation(), this.clientId(), this.preferences().accountId, this.preferences().email, this.selected(), this.query(), this.auth.connectionVersion()]);
       const connected = this.auth.connected(), active = this.active();
       untracked(() => {
-        if (identity !== this.identity) {
-          this.listController?.abort();
-          const configuration = JSON.stringify([this.store.generation(), this.clientId(), this.preferences().accountId]);
-          const sameAccount = this.configuration === configuration;
-          if (!sameAccount) {
-            if (this.configuration) this.clearCache();
-            else this.api.clearCache();
-          }
-          this.configuration = configuration;
-          this.identity = identity; this.epoch++; this.pending = undefined; this.busy.set(false); this.error.set(''); this.cursor = undefined; this.hasMore.set(false);
-          if (!sameAccount) {this.labels.set([]); this.messages.set([]); this.summaries.set([]);}
-          this.showingPrevious.set(sameAccount && this.messages().length > 0);
-          this.expandedMessages.set([]); this.updatedAt.set(0); this.hydrate();
-          const failure = this.failedLoads.get(this.scope());
-          if (failure && failure.retryAt > Date.now()) this.error.set(failure.message);
-        }
+        this.useIdentity(identity);
         clearTimeout(this.refreshTimer);
         if (active && connected && !this.auth.authorizing()) this.refreshTimer = setTimeout(() => void this.load(), 400);
       });
     });
     effect(() => { const identity = this.previewIdentity(); untracked(() => this.useThreadIdentity(identity)); });
     window.addEventListener('online', this.wake); window.addEventListener('offline', this.wake); window.addEventListener('storage', this.changed); document.addEventListener('visibilitychange', this.wake);
+  }
+  private useIdentity(identity: string): void {
+    if (identity === this.identity) return;
+    this.listController?.abort();
+    const configuration = JSON.stringify([this.store.generation(), this.clientId(), this.preferences().accountId]);
+    const sameAccount = this.configuration === configuration;
+    if (!sameAccount) {
+      if (this.configuration) this.clearCache();
+      else this.api.clearCache();
+    }
+    this.configuration = configuration;
+    this.identity = identity; this.epoch++; this.pending = undefined; this.busy.set(false); this.error.set(''); this.cursor = undefined; this.hasMore.set(false);
+    if (!sameAccount) {this.labels.set([]); this.messages.set([]); this.summaries.set([]);}
+    this.showingPrevious.set(sameAccount && this.messages().length > 0);
+    this.expandedMessages.set([]); this.updatedAt.set(0); this.hydrate();
+    const failure = this.failedLoads.get(this.scope());
+    if (failure && failure.retryAt > Date.now()) this.error.set(failure.message);
   }
   private readPreferences(): MailPreferences {
     const fallback = {generation: this.store.generation(), clientId: '', accountId: '', email: '', selected: ['INBOX']};
@@ -184,6 +186,7 @@ export class GmailService implements OnDestroy {
   }
   async load(force = false, more = false): Promise<void> {
     if (!this.auth.connected() || navigator.onLine === false) return;
+    this.useIdentity(JSON.stringify([this.store.generation(), this.clientId(), this.preferences().accountId, this.preferences().email, this.selected(), this.query(), this.auth.connectionVersion()]));
     if (this.pending) return this.pending;
     if (!force && !more && (this.failedLoads.get(this.scope())?.retryAt ?? 0) > Date.now()) return;
     if (!force && !more && this.updatedAt() && Date.now() - this.updatedAt() < TTL) return;

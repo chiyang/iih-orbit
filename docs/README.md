@@ -37,7 +37,7 @@
 | --- | --- |
 | [下一輪改版規劃（2026-10-15）](task-hub-next-release-plan.md) | 第一至五階段與 G1 閱讀型甘特已實作；後續為 G2 拖移／伸縮及來源永久壓縮 |
 | [Calendar 移轉設計](calendar-transfer-design.md) | 可寫入月曆、截止任務的時段、子任務格式、獨立副本及中斷處理 |
-| [提醒設計](reminder-design.md) | 已實作的訊息提醒、前景提示，以及尚未加入的系統通知／背景推播 |
+| [提醒設計](reminder-design.md) | 跨工作空間訊息提醒、提醒歷史、前景提示，以及尚未加入的系統通知／背景推播 |
 | [改版設計與實作順序](next-release-design.md) | 早期規劃、資料格式及各階段演進；部分段落描述的是當時的設計起點 |
 | [任務文件連結與儲存演進規劃](task-document-hub-design.md) | 早期儲存與文件關聯設計、後續交付索引；pCloud／Microsoft 365 仍未串接 |
 

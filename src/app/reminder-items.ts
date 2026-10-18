@@ -9,10 +9,26 @@ export interface ReminderItem {
   id: string;
   generation: string;
   workspaceId: string;
+  workspaceIds?: string[];
+  historical?: boolean;
   task: Task;
   external?: ExternalEvent;
   start: number | null;
   allDay: boolean;
+}
+
+export function reminderItemKey(item: ReminderItem): string {return JSON.stringify([item.workspaceId, item.id]);}
+export function inReminderWorkspace(item: ReminderItem, workspaceId: string): boolean {return (item.workspaceIds ?? [item.workspaceId]).includes(workspaceId);}
+
+/** A calendar instance shared by several spaces is one reminder with several memberships. */
+export function allReminderItems(workspaces: readonly Workspace[], generation: string, external: readonly ExternalEvent[]): ReminderItem[] {
+  const items = new Map<string, ReminderItem>();
+  for (const workspace of [...workspaces].sort((a, b) => a.id.localeCompare(b.id))) for (const item of reminderItems(workspace, generation, external)) {
+    const key = item.external ? item.id : reminderItemKey(item), previous = items.get(key);
+    if (previous) previous.workspaceIds = [...previous.workspaceIds ?? [previous.workspaceId], workspace.id];
+    else items.set(key, {...item, workspaceIds: [workspace.id]});
+  }
+  return [...items.values()];
 }
 
 export function reminderItems(workspace: Workspace, generation: string, external: readonly ExternalEvent[]): ReminderItem[] {
@@ -42,15 +58,16 @@ export function startWindow(now: Date, tab: 'today' | 'tomorrow' | 'this-week' |
   return {start: start.getTime(), end: end.getTime(), label: weekly ? `${format(start)} — ${format(last)}（週日至週六）` : format(start)};
 }
 
-export function itemsForReminderTab(items: readonly ReminderItem[], tab: ReminderTab, now: Date, days: number, workspace: Workspace): ReminderItem[] {
+export function itemsForReminderTab(items: readonly ReminderItem[], tab: ReminderTab, now: Date, days: number, workspace: Workspace | readonly Workspace[]): ReminderItem[] {
+  const workspaces = new Map((Array.isArray(workspace) ? workspace : [workspace] as Workspace[]).map(item => [item.id, item]));
   if (tab === 'due-soon' || tab === 'overdue') {
-    return items.filter(item => !item.external && deadlineState(item.task, now, days, workspace.statuses) === tab)
+    return items.filter(item => !item.external && workspaces.has(item.workspaceId) && deadlineState(item.task, now, days, workspaces.get(item.workspaceId)!.statuses) === tab)
       .sort((left, right) => taskMoment(left.task.dueDate, left.task.dueTime, true)! - taskMoment(right.task.dueDate, right.task.dueTime, true)! || left.task.title.localeCompare(right.task.title, 'zh-Hant-TW'));
   }
   const window = startWindow(now, tab);
   if (tab === 'this-week') {
     const scheduledStart = (item: ReminderItem) => item.start ?? taskMoment(item.task.dueDate, item.task.dueTime)!;
-    return items.filter(item => taskInWeek(item.task, window, item.external ? [] : workspace.statuses))
+    return items.filter(item => workspaces.has(item.workspaceId) && taskInWeek(item.task, window, item.external ? [] : workspaces.get(item.workspaceId)!.statuses))
       .sort((left, right) => scheduledStart(left) - scheduledStart(right) || left.task.title.localeCompare(right.task.title, 'zh-Hant-TW'));
   }
   return items.filter(item => item.start !== null && item.start >= window.start && item.start < window.end

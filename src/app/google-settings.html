@@ -1,9 +1,11 @@
 <section class="google-settings" aria-label="Google 月曆設定">
   <app-google-service-header title="Google 月曆" serviceName="Google 月曆" description="將 Google 活動顯示在月曆與週視圖。Orbit 任務可移至可寫入月曆；Google 活動可複製為 Orbit 任務。" [auth]="calendar.auth" [clientId]="store.google().clientId" [email]="store.google().email" [busy]="connectionBusy()" [canDisconnect]="calendar.auth.connected()" (connect)="calendar.connect()" (disconnect)="disconnect()" (prepare)="prepare()" (configure)="configure.emit()" />
   <label class="google-field">月曆更新頻率<select aria-label="Google 月曆更新頻率" [ngModel]="store.google().refreshMinutes" (ngModelChange)="interval($event)"><option [ngValue]="0">手動更新</option><option [ngValue]="1">每 1 分鐘</option><option [ngValue]="5">每 5 分鐘</option><option [ngValue]="15">每 15 分鐘</option></select></label>
-  <p class="google-note">切換日期時會讀取該段活動。自動更新限程式開啟、網路可用及授權有效期間；授權到期後需點擊重新連線。</p>
+  <p class="google-note">切換日期時會讀取該段活動。自動更新限程式開啟、網路可用及授權有效期間；授權到期後，點擊更新會先續接原帳號再繼續。</p>
+  @if (calendar.auth.connected() || calendar.auth.expired()) {
+    <div class="google-actions"><button type="button" [disabled]="!calendar.canRefresh()" (click)="calendar.refreshFromAction(true)">{{ calendar.listing() ? '讀取中…' : '更新可用月曆清單' }}</button><button type="button" [disabled]="!calendar.canRefresh()" (click)="calendar.refreshFromAction()">{{ calendar.syncing() ? '同步中…' : '立即同步活動' }}</button></div>
+  }
   @if (calendar.auth.connected()) {
-    <div class="google-actions"><button type="button" [disabled]="calendar.listing()" (click)="calendar.listCalendars()">{{ calendar.listing() ? '讀取中…' : '更新可用月曆清單' }}</button><button type="button" [disabled]="calendar.syncing()" (click)="calendar.refresh()">{{ calendar.syncing() ? '同步中…' : '立即同步活動' }}</button></div>
     @for (available of calendar.available(); track available.id) {
       <fieldset class="calendar-choice"><legend><span class="calendar-dot" [orbitColor]="available.color"></span>{{ available.name }} · {{ writable(available) ? '可寫入' : available.accessRole === 'reader' || available.accessRole === 'freeBusyReader' ? '唯讀' : '權限待確認' }}</legend><div class="workspace-choices">@for (workspace of store.workspaces(); track workspace.id) {<label><input type="checkbox" [checked]="bound(available, workspace.id)" (change)="calendar.bind(available, workspace.id, $any($event.target).checked)">{{ workspace.name }}</label>}</div></fieldset>
     } @empty {<p>{{ calendar.listing() ? '正在讀取可用月曆…' : '尚未讀取到可用月曆，請更新清單並檢查讀取權限。' }}</p>}

@@ -22,6 +22,7 @@ export class DriveBrowser implements OnDestroy {
   readonly sourceContext = computed(() => JSON.stringify([this.selectedConnection().id, this.selectedConnection().context()]));
   get auth() {return this.selectedConnection().auth;}
   readonly busy = signal(false);
+  readonly refreshing = signal(false);
   readonly error = signal('');
   readonly notice = signal('');
   readonly path = signal<DriveBrowserFolder[]>([{...ROOT}]);
@@ -75,7 +76,7 @@ export class DriveBrowser implements OnDestroy {
     this.cancel(); this.selectedConnection().disconnect(); this.epoch++; this.cache.clear(); this.navigation.delete(this.context); this.files.set([]); this.path.set([{...ROOT}]); this.query.set(''); this.nextPageToken.set('');
     this.notice.set('檔案瀏覽已解除連線，任務中的資訊連結保留。');
   }
-  async activate(): Promise<void> {this.useSource(this.sourceContext()); if (this.auth.connected() && !this.selectedConnection().connecting()) await this.load(); else void this.prepare();}
+  async activate(): Promise<void> {this.useSource(this.sourceContext()); if (this.refreshing()) return; if (this.auth.connected() && !this.selectedConnection().connecting()) await this.load(); else void this.prepare();}
   async root(shared = false): Promise<void> {await this.load([shared ? {id: 'shared', name: '與我共用', shared: true} : {...ROOT}], '');}
   async open(file: DriveBrowserEntry): Promise<void> {
     if (!this.isListed(file)) return;
@@ -86,7 +87,20 @@ export class DriveBrowser implements OnDestroy {
   }
   async back(index = this.path().length - 2): Promise<void> {if (index >= 0 && index < this.path().length) await this.load(this.path().slice(0, index + 1), '');}
   async search(query: string): Promise<void> {await this.load(this.path(), query.trim());}
-  async refresh(): Promise<void> {await this.load(this.path(), this.query(), false, true);}
+  async refresh(): Promise<void> {
+    const source = this.selectedConnection();
+    if (this.destroyed || this.refreshing() || this.busy() || source.connecting() || source.auth.authorizing()) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {this.error.set('目前離線，原有檔案列表已保留。'); return;}
+    const context = this.sourceContext(), epoch = this.epoch, path = this.path(), query = this.query();
+    const current = () => !this.destroyed && context === this.sourceContext() && epoch === this.epoch && path === this.path() && query === this.query();
+    this.refreshing.set(true);
+    try {
+      const renewal = source.auth.renewForAction({generation: this.store.generation(), clientId: source.clientId(), accountId: source.account().id});
+      if (renewal) await renewal;
+      if (current()) {this.notice.set(''); await this.load(path, query, false, true);}
+    } catch (error) {if (current()) this.error.set(this.message(error));}
+    finally {this.refreshing.set(false);}
+  }
   async more(): Promise<void> {if (this.nextPageToken() && !this.busy()) await this.load(this.path(), this.query(), true);}
   isListed(file: DriveBrowserEntry): boolean {return this.auth.connected() && !this.selectedConnection().connecting() && this.visibleFiles().some(item => item.id === file.id && item.url === file.url);}
   sourceLabel(): string {const source = this.selectedConnection(); return source.id === DEFAULT_DRIVE_SOURCE ? 'Google Drive' : source.name();}

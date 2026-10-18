@@ -66,7 +66,7 @@ export interface CalendarTransfer {
 }
 
 export interface BoardState {
-  version: 4 | 5 | 6;
+  version: 4 | 5 | 6 | 7;
   projects: Project[];
   categories: Category[];
   statuses: BoardStatus[];
@@ -77,6 +77,19 @@ export interface BoardState {
   documentLinks?: DocumentLink[];
   documentDetails?: DocumentDetail[];
   documentOrders?: DocumentOrder[];
+  completionEvents?: TaskCompletionEvent[];
+}
+
+/** Immutable local status transitions, retained even if the task is later removed. */
+export interface TaskCompletionEvent {
+  id: string;
+  taskId: string;
+  kind: 'completed' | 'reopened';
+  at: string;
+  day: string;
+  title: string;
+  projectId: string;
+  projectName: string;
 }
 
 export type DocumentProvider = 'google-drive' | 'gmail' | 'pcloud' | 'microsoft-365';

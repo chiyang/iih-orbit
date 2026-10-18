@@ -1,4 +1,17 @@
 :host { display: flex; flex-direction: column; min-height: 0; }
+.reminder-navigation{display:grid;gap:var(--sp8);padding:var(--sp12);border-bottom:1px solid var(--border);flex-shrink:0}
+.reminder-navigation>div{display:flex;flex-wrap:wrap;gap:var(--sp6)}
+.reminder-navigation button{padding:var(--sp7) var(--sp10);border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:var(--font-10)}
+.reminder-navigation .selected{background:var(--accent-soft);color:var(--accent-text);border-color:var(--accent-text)}
+.history-actions,.history-heading,.history-row-actions{display:flex;align-items:center;justify-content:space-between;gap:var(--sp8);flex-wrap:wrap}
+.history-actions{margin-bottom:var(--sp12);font-size:var(--font-10)}.history-actions label{display:flex;align-items:center;gap:var(--sp6)}
+.history-actions button,.history-row-actions button,.history-more{display:inline-flex;align-items:center;gap:var(--sp4);background:transparent;color:var(--accent-text);font-size:var(--font-10);padding:var(--sp5)}
+.history-actions button:disabled{color:var(--text-muted);cursor:default}
+.reminder-history-item{display:grid;gap:var(--sp6);padding:var(--sp12);border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+.reminder-history-item.unread{border-left:3px solid var(--accent-strong)}
+.reminder-history-item strong{font-size:var(--font-12);overflow-wrap:anywhere}.reminder-history-item>span{font-size:var(--font-10);color:var(--text-muted)}
+.reminder-history-item small,.history-heading{font-size:var(--font-9);color:var(--text-muted);overflow-wrap:anywhere}.history-heading small{white-space:nowrap}
+.history-row-actions{justify-content:flex-start}.history-row-actions app-icon{width:13px;height:13px}.history-more{margin-top:var(--sp12)}
 button { color: var(--text); }
 .reminder-center-tabs { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: var(--sp5); padding: var(--sp12); border-bottom: 1px solid var(--border); background: var(--header-bg); }
 .reminder-center-tabs button, .reminder-presets button { flex-shrink: 0; display: inline-flex; align-items: center; gap: var(--sp7); padding: var(--sp9) var(--sp12); border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: var(--font-11); }

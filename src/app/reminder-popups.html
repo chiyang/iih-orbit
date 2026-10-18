@@ -1,7 +1,7 @@
 @if (!blocked() && reminders.active() && reminders.popups().length) {
   <aside class="reminder-popups" aria-label="即將開始提醒" aria-live="polite" aria-relevant="additions">
     @for (popup of reminders.popups(); track popup.key) {
-      <article class="reminder-popup"><div class="popup-heading"><span><app-icon name="bell" />{{ popupLabel(popup.item) }}</span><button class="popup-close" aria-label="關閉此提醒" (click)="reminders.dismiss(popup.key)"><app-icon name="close" /></button></div><button class="popup-open" (click)="open(popup.item, popup.key)"><strong>{{ popup.item.task.title }}</strong><span>{{ popup.item.task.startDate.replaceAll('-', '/') }} · {{ popup.item.task.startTime || '全天' }}</span><small>{{ popup.item.external ? 'Google・' + popup.item.external.source.name + '・唯讀' : 'Orbit 任務' }} · 點選查看</small>@if (popup.item.external) {<small>{{ googleStatus(popup.item) }}</small>}</button></article>
+      <article class="reminder-popup"><div class="popup-heading"><span><app-icon name="bell" />{{ popupLabel(popup.item) }}</span><button class="popup-close" aria-label="關閉此提醒" (click)="reminders.dismiss(popup.key)"><app-icon name="close" /></button></div><button class="popup-open" (click)="open(popup.item, popup.key)"><strong>{{ popup.item.task.title }}</strong><span>{{ popup.item.task.startDate.replaceAll('-', '/') }} · {{ popup.item.task.startTime || '全天' }}</span><small>{{ popup.item.external ? 'Google・' + popup.item.external.source.name + '・唯讀' : 'Orbit 任務' }} · {{ reminders.workspaceLabel(popup.item) }} · 點選查看</small>@if (popup.item.external) {<small>{{ googleStatus(popup.item) }}</small>}</button></article>
     }
     <button class="popup-center" (click)="openCenter.emit('today')">開啟訊息提醒<app-icon name="arrow" /></button>
   </aside>

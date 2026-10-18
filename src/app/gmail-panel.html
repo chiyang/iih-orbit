@@ -1,8 +1,8 @@
 <div class="mail-controls">
   <div class="mail-toolbar">
-    @if (gmail.preferences().accountId && gmail.auth.connected()) {
+    @if (gmail.preferences().accountId && (gmail.auth.connected() || gmail.auth.expired())) {
       @if (!gmail.online()) {<span class="mail-offline" role="status">離線</span>}
-      <button type="button" [disabled]="gmail.busy() || refreshing() || !gmail.online()" (click)="refresh()" [attr.title]="'更新 ' + gmail.preferences().email + ' 的郵件'"><app-icon name="sync" />{{ gmail.busy() || refreshing() ? '更新中…' : '更新' }}</button>
+      <button type="button" [disabled]="!canRefresh()" (click)="refresh()" [attr.title]="'更新 ' + gmail.preferences().email + ' 的郵件'"><app-icon name="sync" />{{ gmail.auth.authorizing() ? '等待授權…' : gmail.busy() || refreshing() ? '更新中…' : '更新' }}</button>
     } @else {<button type="button" (click)="configure.emit()"><app-icon name="settings" />{{ gmail.preferences().accountId ? '重新連線 Gmail' : '設定 Gmail' }}</button>}
   </div>
   @if (gmail.preferences().accountId) {
@@ -20,7 +20,7 @@
     @if (labelsChanged()) {<div class="mail-filter-actions" role="group" aria-label="儲存標籤篩選"><button type="button" (click)="resetLabels()">取消變更</button><button type="button" class="mail-apply-filter" (click)="applyLabels(labelSelector)">儲存並套用</button></div>}
     <form class="mail-search" (ngSubmit)="gmail.search(searchDraft())"><label for="mail-search" class="visually-hidden">搜尋 Gmail 郵件</label><input id="mail-search" name="mailSearch" [(ngModel)]="searchDraft" maxlength="500" type="search" placeholder="搜尋郵件、寄件人…"><button type="submit" aria-label="搜尋郵件"><app-icon name="search" /></button>@if (gmail.query()) {<button type="button" (click)="gmail.search('')" aria-label="清除搜尋"><app-icon name="close" /></button>}</form>
   }
-  @if (gmail.error()) {<p class="mail-error" role="alert">{{ gmail.error() }}<button type="button" [disabled]="gmail.busy() || !gmail.auth.connected() || !gmail.online()" (click)="gmail.load(true)">重試</button></p>}
+  @if (gmail.error()) {<p class="mail-error" role="alert">{{ gmail.error() }}<button type="button" [disabled]="!canRefresh()" (click)="refresh()">重試</button></p>}
   @if (gmail.warning() || gmail.auth.sessionWarning()) {<p class="mail-help" role="status">{{ gmail.warning() || gmail.auth.sessionWarning() }}</p>}
   @if (gmail.arrivalWarning()) {<p class="mail-help" role="status">{{ gmail.arrivalWarning() }}</p>}
   @if (mailTasks.notice()) {<div class="mail-inline-notice" role="status"><span>{{ mailTasks.notice() }}</span><div class="mail-actions">@if (mailTasks.undoContext()) {<button type="button" [disabled]="mailTasks.busy()" (click)="mailTasks.undo()">撤銷建立</button>}<button type="button" (click)="mailTasks.dismiss()">關閉</button></div></div>}
