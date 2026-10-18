@@ -1133,15 +1133,25 @@ test('重新載入發現新的不同內容時，原確認失效，重新確認�
   } finally {f.close();}
 });
 
-test('重新授權與換帳號期間舊清單不變成有效結果，找不到原連結時不假裝正在使用', async () => {
+test('重新授權與換帳號期間舊清單不變成有效結果，找不到原連結時不假裝正在使用', async t => {
   const f = await fixture(); let finish;
   try {
     await f.service.start('full', [], 'sync'); const panel = f.panel(); await settle(); const list = f.api.list;
+    const sync = t.mock.method(f.service, 'sync', f.service.sync.bind(f.service));
     f.api.list = () => new Promise(resolve => {finish = resolve;}); const loading = f.service.list();
     while (!finish) await new Promise(resolve => setImmediate(resolve)); f.auth.connectionVersion.update(value => value + 1);
-    finish([]); await loading; assert.equal(f.service.catalogFresh(), false);
-    f.api.list = list; await settle();
-    f.documents.clear(); await f.service.list(); assert.equal(f.service.catalogFresh(), true); assert.equal(f.service.unavailable(), true);
+    // Keep renewed reads slower than settle() so the test cannot depend on a fast API or hashing.
+    f.api.list = async () => {for (let i = 0; i < 200; i++) await new Promise(resolve => setImmediate(resolve)); return list();};
+    finish([]); assert.equal(await loading, false); assert.equal(f.service.catalogFresh(), false);
+    // Credential renewal starts a sync; wait for its completion before testing a missing collection.
+    assert.equal(await waitForSync(sync), 'complete');
+    const started = performance.now();
+    while (f.service.busy() || f.service.syncing() || !f.service.catalogFresh()) {
+      assert.ok(performance.now() - started < 5000, '重新授權後的清單未完成更新');
+      await delay(1);
+    }
+    f.api.list = list;
+    f.documents.clear(); assert.equal(await f.service.list(), true); assert.equal(f.service.catalogFresh(), true); assert.equal(f.service.unavailable(), true);
     assert.equal(panel.currentCollection(), undefined); assert.equal(panel.showCreateForm(), false); assert.ok(f.service.runtime().link);
     await panel.requestRemoval(f.service.runtime().link.datasetId); await panel.acceptRemoval(); await settle();
     assert.equal(f.service.runtime().link, undefined); assert.equal(panel.showCreateForm(), true);
