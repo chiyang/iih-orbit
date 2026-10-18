@@ -49,6 +49,15 @@
 .modal-header h2 { font-size: var(--font-20); font-weight: 600; color: var(--text); margin: var(--sp7) 0 0; }
 .modal[data-modal='task'] > .modal-header { padding: var(--sp10) var(--sp20); }
 .modal[data-modal='task'] > .modal-header h2 { font-size: var(--font-16); margin: 0; }
+.modal-header-actions { display: flex; align-items: center; gap: var(--sp4); }
+.task-size-toggle { display: none; }
+@media (min-width: 1280px) and (min-height: 640px) {
+  .task-size-toggle { display: inline-flex; }
+  .modal-backdrop.task-editor-expanded { padding: 16px; }
+  .modal-backdrop.task-editor-expanded .modal[data-modal='task'] { width: 100%; height: calc(100dvh - 32px); max-height: calc(100dvh - 32px); }
+  .modal-backdrop.task-editor-expanded .task-form { flex: 1; }
+  .modal-backdrop.task-editor-expanded .task-form > .modal-body { flex: 1; }
+}
 .modal[data-modal='task'] .modal-body { padding: var(--sp16) var(--sp20); }
 .modal[data-modal='task'] .modal-footer { padding: var(--sp12) var(--sp20); }
 .modal-body { padding: var(--sp23) var(--sp27); }

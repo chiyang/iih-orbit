@@ -56,7 +56,7 @@
 
 沿用 `drive.metadata.readonly`，僅呼叫 `files.get` 取得固定欄位的 metadata，以及原有 `files.list`；不下載內文或匯出檔案。不加入全硬碟索引或 changes 增量追蹤。欄位含名稱、MIME、URL、父項、硬碟 ID、resource key、垃圾桶與捷徑資訊。[Google files.get](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/get)、[Files 欄位](https://developers.google.com/workspace/drive/api/reference/rest/v3/files)。404 可能是檔案不存在或沒有讀取權限；403 依原因區分檔案權限、授權與限流。[Google Drive 錯誤處理](https://developers.google.com/workspace/drive/api/guides/handle-errors)。
 
-查驗與清理不寫入 BoardStore、復原紀錄、IndexedDB 工作資料或備份摘要，不觸發任務同步版本。維持第二階段看板格式 6、JSON／Drive 格式 7，無新增資料遷移。跨裝置看到新名稱的方式，是各裝置使用自己的可用來源查驗；授權與快取不隨任務同步。
+查驗與清理不寫入 BoardStore、復原紀錄、IndexedDB 工作資料或備份摘要，不觸發任務同步版本。本功能沒有新增格式遷移；用途／順序至少需要看板格式 6、JSON／Drive 格式 7，含完成歷史或相關任務的資料沿用較新格式，不降版。[現行相容性](data-storage.md#舊資料升級與備份格式)。跨裝置看到新名稱的方式，是各裝置使用自己的可用來源查驗；授權與快取不隨任務同步。
 
 ## 驗證邊界
 

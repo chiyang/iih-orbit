@@ -27,6 +27,8 @@ const PATHS: Record<string, string> = {
   redo: 'M21 8H11a7 7 0 0 0 0 14M21 8l-5-5M21 8l-5 5',
   calendar: 'M3 5h18v16H3zM16 3v4M8 3v4M3 11h18',
   close: 'M6 6l12 12M18 6 6 18',
+  expand: 'M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5',
+  collapse: 'M3 8h5V3M21 8h-5V3M16 21v-5h5M8 21v-5H3',
   flag: 'M4 22V3M4 3c4-3 8 3 12 0v10c-4 3-8-3-12 0',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   edit: 'm16 3 5 5M3 21l5-1L21 7a2.1 2.1 0 0 0-4-4L4 16z',

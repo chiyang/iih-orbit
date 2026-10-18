@@ -4,12 +4,9 @@
     <div class="scale-controls" role="group" aria-label="甘特顯示尺度"><button type="button" [attr.aria-pressed]="scale() === 'day'" (click)="selectScale('day')">日</button><button type="button" [attr.aria-pressed]="scale() === 'week'" (click)="selectScale('week')">週</button><button type="button" [attr.aria-pressed]="scale() === 'month'" (click)="selectScale('month')">月</button></div>
     <button type="button" class="advanced-toggle" aria-label="進階選項" [attr.aria-expanded]="advancedOpen()" aria-controls="gantt-advanced-options" (click)="advancedOpen.set(!advancedOpen())"><app-icon name="settings" />進階選項@if (advancedCount()) {<span>{{ advancedCount() }}</span>}<app-icon class="toggle-arrow" [class.expanded]="advancedOpen()" name="chevron" /></button>
   </div>
-  <div class="gantt-options">
-    <label>任務<select aria-label="甘特完成狀態篩選" [ngModel]="completion()" (ngModelChange)="completionChange.emit($event)"><option value="all">全部</option><option value="done">已完成</option><option value="pending">未完成</option></select></label>
-    @if (groups().length) {<label class="section-jump">前往<select aria-label="前往甘特專案區段" [ngModel]="selectedGroup()" (ngModelChange)="jumpGroup($event)">@for (group of groups(); track group.id) {<option [value]="group.id">{{ group.label }}（{{ group.count }}）</option>}</select></label>}
-  </div>
   <div class="advanced-options" id="gantt-advanced-options" [hidden]="!advancedOpen()">
   <div class="gantt-options advanced-row">
+    <label>任務<select aria-label="甘特完成狀態篩選" [ngModel]="completion()" (ngModelChange)="completionChange.emit($event)"><option value="all">全部</option><option value="done">已完成</option><option value="pending">未完成</option></select></label>
     <label>排序<select aria-label="甘特日期排序" [ngModel]="order()" (ngModelChange)="orderChange.emit($event)"><option value="start">開始時間優先</option><option value="end">截止時間優先</option></select></label>
     <div class="zoom-controls" role="group" aria-label="時間軸縮放"><button type="button" aria-label="縮小時間軸" [disabled]="zoom() <= 50" (click)="zoomBy(-1)">−</button><input type="range" min="50" max="250" step="25" aria-label="時間軸縮放比例" [attr.aria-valuetext]="zoom() + '%'" [ngModel]="zoom()" (ngModelChange)="selectZoom($event)" /><button type="button" aria-label="放大時間軸" [disabled]="zoom() >= 250" (click)="zoomBy(1)">＋</button><button type="button" class="zoom-value" aria-label="重設時間軸縮放為 100%" (click)="selectZoom(100)">{{ zoom() }}%</button></div>
   </div>
@@ -25,7 +22,7 @@
   </div>
   @if (legendFilterActive()) {<div class="legend-filter-summary" role="group" aria-label="已套用甘特圖例篩選"><span aria-live="polite">顯示 {{ visibleTaskCount() }} 項</span>@for (entry of activeLegendFilters().statuses; track entry.id) {<button type="button" [attr.aria-label]="'取消狀態篩選：' + entry.label" (click)="toggleStatus(entry.id)">狀態・{{ entry.label }} ×</button>}@for (entry of activeLegendFilters().categories; track entry.id) {<button type="button" [attr.aria-label]="'取消分類篩選：' + entry.label" (click)="toggleCategory(entry.id)">分類・{{ entry.label }} ×</button>}<button type="button" (click)="clearLegendFilters()">清除圖例篩選</button></div>}
   @if (range()) {<p class="range-note">已套用 {{ range()!.start }} — {{ range()!.end }}，未排程暫不列入。@if (!advancedOpen()) {<button type="button" (click)="clearRange()">清除範圍</button>}</p>}
-  <div class="gantt-caption"><span aria-live="polite">{{ axis().label }}</span><span>{{ zoom() }}% · {{ scale() === 'day' ? '每小時細格 · ' : '' }}{{ order() === 'start' ? '開始時間優先' : '截止時間優先' }} · 已完成在前</span></div>
+  <div class="gantt-caption"><span aria-live="polite">{{ axis().label }}</span><span>@if (completion() !== 'all') {{{ completion() === 'done' ? '已完成任務' : '未完成任務' }} · }{{ zoom() }}% · {{ scale() === 'day' ? '每小時細格 · ' : '' }}{{ order() === 'start' ? '開始時間優先' : '截止時間優先' }} · 已完成在前</span></div>
 
   @if (scheduleMessage()) {<p class="schedule-message" role="status">{{ scheduleMessage() }}</p>}
     <p class="keyboard-hint" id="gantt-help">可水平捲動時間軸；拖曳任務條移動日期，兩端調整起迄，保留原時間。時間條或端點可用左右鍵調整一天，Esc 取消拖曳；任務名稱可用上下鍵移動，Home／End 前往首尾。</p>

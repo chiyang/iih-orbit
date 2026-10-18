@@ -85,6 +85,7 @@ Manifest 的 `start_url`、`scope` 與圖示路徑皆相對於 manifest 所在�
 | 檔案資訊查驗與共用快取 | [document-metadata-service.ts](../src/app/document-metadata-service.ts)、[document-metadata-manager.ts](../src/app/document-metadata-manager.ts)、[document-metadata-visible.ts](../src/app/document-metadata-visible.ts) |
 | 文件建立、結果接續與安全整理 | [document-create-dialog.ts](../src/app/document-create-dialog.ts)、[document-create-auth.ts](../src/app/document-create-auth.ts)、[document-create-service.ts](../src/app/document-create-service.ts)、[document-create-recovery.ts](../src/app/document-create-recovery.ts)、[document-source-cleanup.ts](../src/app/document-source-cleanup.ts) |
 | 空間總覽與統計圖表 | [workspace-overview.ts](../src/app/workspace-overview.ts)、[workspace-overview-data.ts](../src/app/workspace-overview-data.ts)、[overview-charts.ts](../src/app/overview-charts.ts) |
+| 完成事件與每日／每週折線趨勢 | [task-completion-data.ts](../src/app/task-completion-data.ts)、[completion-trend.ts](../src/app/completion-trend.ts)、[completion-trend-data.ts](../src/app/completion-trend-data.ts) |
 | 甘特時間軸與日期範圍 | [gantt.ts](../src/app/gantt.ts)、[gantt-data.ts](../src/app/gantt-data.ts)、[gantt-edit.ts](../src/app/gantt-edit.ts) |
 | 雙向相關任務與拖曳 | [task-links-data.ts](../src/app/task-links-data.ts)、[related-tasks-editor.ts](../src/app/related-tasks-editor.ts)、[task-link-picker.ts](../src/app/task-link-picker.ts)、[task-link-drag.ts](../src/app/task-link-drag.ts)、[source-drag-preview.ts](../src/app/source-drag-preview.ts) |
 | 設定、外觀與瀏覽狀態 | [settings.ts](../src/app/settings.ts)、[appearance-data.ts](../src/app/appearance-data.ts)、[ui-preferences.ts](../src/app/ui-preferences.ts)、[browse-state.ts](../src/app/browse-state.ts) |
@@ -98,10 +99,10 @@ Manifest 的 `start_url`、`scope` 與圖示路徑皆相對於 manifest 所在�
 | 系統開始通知與點擊接續 | [system-notifications.ts](../src/app/system-notifications.ts)、[system-notification-data.ts](../src/app/system-notification-data.ts)、[browser-notifications.ts](../src/app/browser-notifications.ts)、[notification-settings.ts](../src/app/notification-settings.ts)、[notification-bridge.ts](../src/app/notification-bridge.ts)、[offline-worker.js](../scripts/offline-worker.js) |
 | 品牌與配色 | [brand-mark.ts](../src/app/brand-mark.ts)、[theme-color.ts](../src/app/theme-color.ts)、[theme.css](../src/theme.css)、[styles.css](../src/styles.css) |
 
-拖曳使用 [Angular CDK](https://angular.dev/guide/drag-drop)，表單及狀態採 [Angular Forms](https://angular.dev/guide/forms/template-driven-forms) 與 [Signals](https://angular.dev/guide/signals)。週排版參考 [FullCalendar TimeGrid](https://fullcalendar.io/docs/timegrid-view)，由現有 Angular 元件實作。
+看板、月／週任務及郵件／檔案來源使用原生拖放、共用小型預覽與觸控協調；任務內郵件／檔案連結排序使用 [Angular CDK](https://angular.dev/guide/drag-drop)。表單及狀態採 [Angular Forms](https://angular.dev/guide/forms/template-driven-forms) 與 [Signals](https://angular.dev/guide/signals)。週排版參考 [FullCalendar TimeGrid](https://fullcalendar.io/docs/timegrid-view)，由現有 Angular 元件實作。
 
 ## 測試與驗收範圍
 
-[tests](../tests/) 包含日期／週排列、工作空間／專案、任務草稿與垃圾桶刪除、文件關聯／用途／排序、多來源、查驗／建立／安全整理、總覽／甘特、備份相容、儲存失敗及跨分頁競態，另有 Calendar、Drive、Gmail 與合併授權的模擬測試。各次實際結果與建置限制記錄於 [QA.md](../QA.md)。
+[tests](../tests/) 包含日期／週排列、工作空間／專案、任務草稿與垃圾桶刪除、文件關聯／用途／排序、多來源、查驗／建立／安全整理、完成歷史與折線趨勢、任務連結、甘特日期操作、跨空間提醒／歷史及系統通知、備份相容、儲存失敗與跨分頁競態，另有 Calendar、Drive、Gmail 與合併授權的模擬測試。各次實際結果與建置限制記錄於 [QA.md](../QA.md)。
 
-程式測試不代替瀏覽器版面或真實 Google 帳號驗收。真實 OAuth、API 回覆、郵件／活動內容、限流改善與跨裝置操作由使用者手動驗收；系統通知、背景推播、WebMCP 與 AI 日期判讀尚未加入。
+程式測試不代替瀏覽器版面或真實 Google 帳號驗收。真實 OAuth、API 回覆、郵件／活動內容、限流改善與跨裝置操作由使用者手動驗收。系統開始通知已實作，預設停用、需保持程式開啟；模擬通知測試不代表作業系統實際顯示、聲音或手機 PWA 驗收，詳見 [通知限制](reminder-design.md#純前端與裝置限制)。背景推播、WebMCP 與 AI 日期判讀尚未加入。

@@ -79,7 +79,7 @@ export class Gantt {
   readonly labelWidth = computed(() => Math.min(244 * this.preferences.scale(), Math.max(136, this.viewportWidth() * 0.4)));
   readonly columnWidth = computed(() => ({day: 288, week: 196, month: 196}[this.scale()] * this.preferences.scale() * readGanttZoom(this.zoom()) / 100));
   readonly hourLabelStep = computed(() => [1, 2, 3, 6, 12, 24].find(step => this.columnWidth() / 24 * step >= 40 * this.preferences.scale()) ?? 24);
-  readonly advancedCount = computed(() => Number(this.zoom() !== 100) + Number(this.order() !== 'start') + Number(!!this.range()) + Number(!!this.selectedStatuses().length) + Number(!!this.selectedCategories().length));
+  readonly advancedCount = computed(() => Number(this.completion() !== 'all') + Number(this.zoom() !== 100) + Number(this.order() !== 'start') + Number(!!this.range()) + Number(!!this.selectedStatuses().length) + Number(!!this.selectedCategories().length));
   readonly axis = computed(() => ganttAxis(this.selectedDate(), this.scale(), this.range()));
   readonly axisWidth = computed(() => this.axis().units * this.columnWidth());
   readonly canvasWidth = computed(() => this.labelWidth() + this.axisWidth());
@@ -94,9 +94,6 @@ export class Gantt {
     return ganttRows(tasks, this.projects(), this.statuses(), 'all', this.order());
   });
   readonly visibleTaskCount = computed(() => this.rows().filter(row => row.kind === 'task').length);
-  readonly groups = computed(() => this.rows().flatMap((row, index) => row.kind === 'group' ? [{...row, index}] : []));
-  private readonly sectionTarget = signal('');
-  readonly selectedGroup = computed(() => this.groups().some(group => group.id === this.sectionTarget()) ? this.sectionTarget() : this.groups()[0]?.id ?? '');
   readonly rowWindow = computed(() => virtualRange(this.rows().length, this.scrollTop(), this.viewportHeight() - this.headerHeight(), this.rowHeight()));
   readonly visibleRows = computed(() => this.rows().slice(this.rowWindow().start, this.rowWindow().end).map((row, index) => {
     const span = row.kind === 'task' ? ganttSpan(this.preview(row.task), this.axis(), this.columnWidth()) : null;
@@ -165,7 +162,7 @@ export class Gantt {
       const element = this.viewport()?.nativeElement, nextContext = this.resetKey() + this.completion() + this.order() + JSON.stringify([this.range(), this.selectedStatuses(), this.selectedCategories()]), nextAxis = this.selectedDate() + this.scale(), size = this.rowHeight(), count = this.rows().length, width = this.viewportWidth(), columnWidth = this.columnWidth();
       if (!element) return;
       untracked(() => {
-        if (context !== nextContext) {element.scrollTop = 0; this.sectionTarget.set('');}
+        if (context !== nextContext) element.scrollTop = 0;
         else if (rowSize && rowSize !== size) element.scrollTop = element.scrollTop / rowSize * size;
         element.scrollTop = Math.min(element.scrollTop, Math.max(0, count * size + this.headerHeight() - element.clientHeight));
         if (axisKey !== nextAxis || context !== nextContext || viewportSize !== width || rowSize !== size) this.centerAnchor(element);
@@ -315,7 +312,6 @@ export class Gantt {
   }
   locate(task: Task): void {this.pendingFocus.set(task.id); const date = task.startDate || task.dueDate, range = this.range(); this.dateChange.emit(range ? date < range.start ? range.start : date > range.end ? range.end : date : date);}
   jump(index: number): void {const element = this.viewport()?.nativeElement; if (element) {element.scrollTop = index * this.rowHeight(); this.scrolled(); element.focus({preventScroll: true});}}
-  jumpGroup(id: string): void {const group = this.groups().find(group => group.id === id); if (group) {this.sectionTarget.set(id); this.jump(group.index);}}
   rowKey(event: KeyboardEvent, index: number): void {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();

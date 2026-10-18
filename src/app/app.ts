@@ -579,6 +579,7 @@ export class App {
   readonly documentCreationPrompt = signal(false);
   private documentCreationRequest = 0;
   readonly descriptionFocused = signal(false);
+  readonly taskEditorExpanded = signal(false);
   readonly formError = signal('');
   readonly categoryError = signal('');
   readonly categoryEditingId = signal('');
@@ -1139,6 +1140,7 @@ export class App {
     this.editing.set(!!task);
     this.documentCreationPrompt.set(false);
     this.descriptionFocused.set(false);
+    this.taskEditorExpanded.set(false);
     this.formError.set('');
     this.subtaskDraft = '';
     this.hasStartTime = !!this.draft.startTime;
@@ -1740,6 +1742,7 @@ export class App {
     this.introFirstUse.set(false);
     this.firstWorkspaceDialog.set(false);
     this.descriptionFocused.set(false);
+    this.taskEditorExpanded.set(false);
     this.mailPreview.set(null);
     this.externalEntry.set(null);
     this.categoryToDelete.set(null);

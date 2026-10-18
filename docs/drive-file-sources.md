@@ -35,6 +35,7 @@
 | --- | --- |
 | 首次連線或明確切換帳號 | 顯示 Google 帳號選擇流程 |
 | 重新授權既有來源 | 使用已知帳號提示及 `prompt: ''`，減少重複提示；Google 仍可能要求登入或同意 |
+| 按「重新整理」時授權已過期 | 先續接所選來源的原帳號，成功後接續原位置的更新，不需先按 G |
 | 回傳不同帳號 | 拒絕接續並提示使用原帳號，或明確按「切換帳號」 |
 | 接近到期 | 到期前五分鐘顯示「即將到期」，可由側欄或設定重新授權 |
 | 已到期 | 只停止該來源讀取，顯示續接入口；其他有效來源與任務資料保留 |
@@ -42,7 +43,7 @@
 
 Google 連線頁的檔案瀏覽也分開提供重新授權與切換帳號。頁首 G 在主要服務使用同一已知帳號時採續接流程；各主要服務使用不同帳號時，提示到設定分別重新授權。額外檔案來源由自己的入口續接，不被主要合併授權覆蓋。
 
-此階段仍由使用者按鈕觸發授權。完全無互動的憑證更新另列後端里程碑，原憑證期限不延長。參考 [Google JavaScript API](https://developers.google.com/identity/oauth2/web/reference/js-reference) 與 [Token Model](https://developers.google.com/identity/oauth2/web/guides/use-token-model)。
+2026-10-17 已加入更新入口的授權續接，詳見 [更新時續接原帳號](google-setup.md#更新時續接原帳號)。維持純前端、無後端，由使用者點擊發起授權，原憑證期限不延長；背景輪詢不彈出視窗，也不將無互動背景續期列為後端里程碑。參考 [Google JavaScript API](https://developers.google.com/identity/oauth2/web/reference/js-reference) 與 [Token Model](https://developers.google.com/identity/oauth2/web/guides/use-token-model)。
 
 ## 保存、相容性與驗收
 

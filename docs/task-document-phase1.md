@@ -6,7 +6,7 @@
 
 2026-10-15：追加[多個 Drive 檔案來源與授權續接](drive-file-sources.md)，各來源可使用不同 Client ID／帳號。側欄與選檔視窗各自保存每個來源的瀏覽狀態；來源切換、續期及移除保留既有文件身份與任務關聯。
 
-後續已交付[雙欄編輯、用途與排序](task-editor-information.md)、[檔案資訊查驗](document-information-refresh.md)及[建立文件／Colab 與來源整理](document-creation-and-cleanup.md)。本文保留第一階段的關聯與格式 6 基礎；使用用途／排序後改用看板格式 6、備份／Drive 格式 7，現行相容性見[資料儲存](data-storage.md#文件來源與關聯)。
+後續已交付[雙欄編輯、用途與排序](task-editor-information.md)、[檔案資訊查驗](document-information-refresh.md)、[建立文件／Colab 與來源整理](document-creation-and-cleanup.md)及整合於資訊連結內的[相關任務](related-tasks.md)。本文保留第一階段的關聯與格式 6 基礎；用途／排序至少需要看板 6／備份 7，完成歷史至少為看板 7／備份 8，相關任務為看板 8／備份 9，不因修改較早功能而降版。現行相容性見[資料儲存](data-storage.md#舊資料升級與備份格式)。
 
 2026-10-16 後續追加 [甘特郵件／檔案拖放](gantt.md#從郵件與檔案拖放)，右側 Gmail 列表也可查看單封郵件的相關任務數與入口。以下四種視圖的說明保留第一階段操作範圍。
 
