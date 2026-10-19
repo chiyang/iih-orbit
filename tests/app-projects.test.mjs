@@ -84,11 +84,12 @@ test('甘特日期變更不開啟編輯器並可復原重做，過期日期草�
   } finally {f.close();}
 });
 
-function application(fresh = false, providers = []) {
+function application(fresh = false, providers = [], prepareStore = () => {}) {
   const state = {version: 1, activeWorkspaceId: 'first', workspaces: [{version: 4, id: 'first', name: '學程工作', projects: [{id: 'welcome', name: '迎新活動'}, {id: 'website', name: '網站改版'}], categories: [{id: 'design', name: '設計', color: 'green'}], statuses: COLUMNS, tasks: [task, {...task, id: 'website-task', title: '網站首頁', projectId: 'website', status: 'done'}, {...task, id: 'daily', title: '日常任務', projectId: ''}]}, {version: 4, id: 'second', name: '個人生活', projects: [], categories: [], statuses: COLUMNS, tasks: []}]};
   const values = new Map(fresh ? [] : [['orbit-workspaces-v1', JSON.stringify(state)]]);
   globalThis.localStorage = {get length() {return values.size;}, key: index => [...values.keys()][index] ?? null, getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key)};
   const store = new BoardStore();
+  prepareStore(store);
   const effects = new Set();
   const scheduler = {add(effect) {effects.add(effect);}, schedule() {}, remove(effect) {effects.delete(effect);}};
   const injector = createEnvironmentInjector([DocumentTasks, {provide: BoardStore, useValue: store}, {provide: UiPreferences, useValue: {textSize: () => 'standard'}}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}, ...providers]);
@@ -493,6 +494,24 @@ test('延後建立第一個空間後，手動重看引導不改變首次進度�
     const reopened = f.reopen(); f.flush();
     assert.equal(reopened.modal(), 'workspaces'); assert.equal(reopened.firstWorkspaceDialog(), true);
   } finally {f.close();}
+});
+
+test('本機資料載入後還原實際空間的來源與提醒選擇，之後切換空間才沿用共用控制', () => {
+  for (const loadedWorkspace of ['first', 'second']) {
+    const f = application(false, [], store => {
+      store.storageLoading.set(true);
+      saveBrowseState(store.generation(), loadedWorkspace, readBrowseState({view: 'week', showGoogle: false, showOrbit: false, panel: 'reminders', reminderTab: 'this-week'}));
+    });
+    try {
+      f.flush(); assert.equal(f.app.calendarShowGoogle(), loadedWorkspace !== 'first');
+      f.store.switchWorkspace(loadedWorkspace); f.store.storageLoading.set(false); f.flush();
+      assert.equal(f.app.view(), 'week'); assert.equal(f.app.calendarShowGoogle(), false); assert.equal(f.app.calendarShowOrbit(), false);
+      assert.equal(f.app.remindersOpen(), true); assert.equal(f.app.panelTab(), 'reminders'); assert.equal(f.app.reminderTab(), 'this-week');
+      f.app.selectWorkspace(loadedWorkspace === 'first' ? 'second' : 'first'); f.flush();
+      assert.equal(f.app.calendarShowGoogle(), false); assert.equal(f.app.calendarShowOrbit(), false);
+      assert.equal(f.app.remindersOpen(), true); assert.equal(f.app.reminderTab(), 'this-week');
+    } finally {f.close();}
+  }
 });
 
 test('重新建立畫面保留視圖、月曆日期、篩選排序與右側欄；不同工作空間分開保存', () => {

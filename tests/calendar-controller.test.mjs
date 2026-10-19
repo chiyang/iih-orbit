@@ -32,7 +32,7 @@ function calendarController(tasks = [base], external = []) {
   const store = new BoardStore(), effects = new Set();
   const scheduler = {add(effect) { effects.add(effect); }, schedule() {}, remove(effect) { effects.delete(effect); }};
   const google = {store, events: signal(external), visibleSources: signal([]), setMonthRange() {}};
-  const preferences = {scale: () => .9, weekRange: signal({startHour: 8, endHour: 19}), weekRangeWarning: signal(''), calendarWidth: signal('wide'), calendarWidthWarning: signal('')};
+  const preferences = {scale: () => .9, weekRange: signal({startHour: 8, endHour: 19}), weekRangeWarning: signal(''), calendarWidth: signal('wide'), calendarWidthWarning: signal(''), setCalendarWidth(width) {UiPreferences.prototype.setCalendarWidth.call(this, width);}};
   const injector = createEnvironmentInjector([{provide: GoogleCalendarService, useValue: google}, {provide: UiPreferences, useValue: preferences}, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   // No DOM or browser: test the action controller and store using signals and pointer coordinates only.
   globalThis.ngServerMode = true;
@@ -133,20 +133,24 @@ test('本機週範圍讀取拒絕損壞及不合法時間，保存失敗保留�
   } finally {f.close();}
 });
 
-test('月週寬度共用本機選擇，舊設定保留寬版，保存時不覆蓋週時間範圍', () => {
+test('月週單一寬度切換共用本機選擇，舊設定保留寬版，保存時不覆蓋週時間範圍', () => {
   const f = calendarController();
   try {
     assert.equal(loadCalendarWidth(), 'wide');
     f.values.set(CALENDAR_DISPLAY_KEY, JSON.stringify({version: 1, range: {startHour: 6, endHour: 22}}));
     assert.equal(loadCalendarWidth(), 'wide'); assert.deepEqual(loadWeekRange(), {startHour: 6, endHour: 22});
     f.preferences.weekRange.set(loadWeekRange());
-    UiPreferences.prototype.setCalendarWidth.call(f.preferences, 'standard');
+    f.calendar.draggedTaskId.set(base.id); f.calendar.dropPosition.set({kind: 'month', day: base.startDate});
+    f.calendar.toggleWidth();
+    assert.equal(f.calendar.draggedTaskId(), ''); assert.equal(f.calendar.dropPosition(), null);
     assert.equal(f.calendar.widthMode(), 'standard'); assert.equal(loadCalendarWidth(), 'standard');
     f.calendar.mode.set('week'); assert.equal(f.calendar.widthMode(), 'standard');
+    f.calendar.toggleWidth(); assert.equal(loadCalendarWidth(), 'wide');
+    f.calendar.toggleWidth(); assert.equal(loadCalendarWidth(), 'standard');
     UiPreferences.prototype.setWeekRange.call(f.preferences, {startHour: 7, endHour: 21});
     assert.equal(loadCalendarWidth(), 'standard'); assert.deepEqual(loadWeekRange(), {startHour: 7, endHour: 21});
     const originalSet = localStorage.setItem; localStorage.setItem = () => {throw new Error('quota');};
-    try {UiPreferences.prototype.setCalendarWidth.call(f.preferences, 'wide'); assert.equal(f.calendar.widthMode(), 'wide'); assert.match(f.preferences.calendarWidthWarning(), /無法保存/);}
+    try {f.calendar.toggleWidth(); assert.equal(f.calendar.widthMode(), 'wide'); assert.match(f.preferences.calendarWidthWarning(), /無法保存/);}
     finally {localStorage.setItem = originalSet;}
     assert.equal(loadCalendarWidth(), 'standard');
     for (const value of ['broken', JSON.stringify({version: 1, width: 'invalid'}), JSON.stringify({version: 2, width: 'standard'})]) {

@@ -86,7 +86,8 @@ export class App {
   readonly store = inject(BoardStore);
   private readonly savedBrowse = loadBrowseState(this.store.generation(), this.store.currentWorkspace().id);
   private browseContext = JSON.stringify([this.store.generation(), this.store.currentWorkspace().id]);
-  private browseGeneration = this.store.generation();
+  // Initial storage hydration must restore shared controls before workspace switches preserve them.
+  private browseGeneration = this.store.storageLoading() ? undefined : this.store.generation();
   private readonly injector = inject(Injector);
   get mailTasks(): MailTasks { return this.injector.get(MailTasks); }
   get documentTasks(): DocumentTasks { return this.injector.get(DocumentTasks); }
@@ -841,10 +842,10 @@ export class App {
       if (context !== this.browseContext) untracked(() => {
         const sameGeneration = generation === this.browseGeneration;
         const fallback = sameGeneration ? readBrowseState({overviewOpen: this.overviewOpen(), view: this.view(), ganttDate: this.ganttDate(), ganttScale: this.ganttScale(), ganttZoom: this.ganttZoom(), ganttCompletion: this.ganttCompletion(), ganttOrder: this.ganttOrder(), ganttRange: this.ganttRange(), calendarDate: this.calendarDate(), calendarScrollHour: this.calendarScrollHour(), calendarExpandAll: this.calendarExpandAll()}) : undefined;
-        this.browseGeneration = generation;
         this.browseContext = context;
         this.restoreBrowse(loadBrowseState(generation, workspace, fallback), sameGeneration);
       });
+      this.browseGeneration = generation;
       const state = this.browseSnapshot();
       untracked(() => saveBrowseState(generation, workspace, state));
       if (this.store.currentWorkspace().headerCompact === undefined && state.headerCompact) untracked(() => {

@@ -50,6 +50,26 @@ function controller() {
 }
 const settle = async () => { for (let tick = 0; tick < 4; tick++) await new Promise(resolve => setImmediate(resolve)); };
 
+test('精簡提醒選單可切換六個日期範圍與歷史，保留空間及到期天數並通知主畫面保存範圍', () => {
+  storage(); const f = controller(), selected = [];
+  try {
+    f.center.tabChange.subscribe(tab => selected.push(tab));
+    f.center.workspaceScope.set('current'); f.center.dueDays.set(5);
+    for (const tab of ['today', 'tomorrow', 'this-week', 'next-week', 'due-soon', 'overdue']) {
+      f.center.selectView(tab);
+      assert.equal(f.center.viewSelection(), tab); assert.equal(f.center.historyMode(), false);
+    }
+    assert.deepEqual(selected, ['today', 'tomorrow', 'this-week', 'next-week', 'due-soon', 'overdue']);
+    f.center.selectView('history');
+    assert.equal(f.center.viewSelection(), 'history'); assert.equal(f.center.activeTab(), 'overdue');
+    f.center.selectView('invalid'); assert.equal(f.center.viewSelection(), 'history'); assert.equal(selected.length, 6);
+    f.center.selectView('due-soon');
+    assert.equal(f.center.viewSelection(), 'due-soon'); assert.equal(f.center.dueDays(), 5);
+    assert.equal(f.center.workspaceScope(), 'current'); assert.equal(f.store.reminders().dueSoonDays, 3);
+    assert.equal(f.center.tabs().find(tab => tab.id === 'due-soon').label, '5 天內到期');
+  } finally {f.close();}
+});
+
 test('跨空間提醒與徽章聚合，相同任務 ID 不互相蓋掉，目前空間只查看自己的提醒', async () => {
   storage(); const f = controller();
   try {

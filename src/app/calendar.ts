@@ -1,6 +1,7 @@
 import { afterRenderEffect, Component, computed, DestroyRef, effect, ElementRef, HostListener, inject, input, linkedSignal, output, signal, untracked, viewChild } from '@angular/core';
 import { BoardStatus, Category, COLUMNS, Task } from './models';
 import { Icon } from './icon';
+import { Tooltip } from './tooltip';
 import { ThemeColor } from './theme-color';
 import { dateKey, monthDates, parseDate, taskDateRange, validDate, weekDates } from './task-schedule';
 import { allDayRange, HOUR_HEIGHT, layoutAllDayTasks, minuteLabel, timedEventsInRange, timedEventsOnDay } from './week-layout';
@@ -21,7 +22,7 @@ export interface CalendarCreate {
 
 @Component({
   selector: 'app-calendar',
-  imports: [Icon, ThemeColor],
+  imports: [Icon, ThemeColor, Tooltip],
   templateUrl: './calendar.html',
   styleUrl: './calendar.css'
 })
@@ -276,6 +277,7 @@ export class Calendar {
   toggleAllDays(): void { const expand = !this.allDaysExpanded(); this.expandedDays.set(new Set()); this.expandAll.set(expand); this.expandAllChange.emit(expand); }
   toggleOrbit(): void { this.endDrag(); this.orbitVisibilityChange.emit(!this.showOrbit()); }
   toggleGoogle(): void { if (!this.deadlineFiltered()) this.googleVisibilityChange.emit(!this.showGoogle()); }
+  toggleWidth(): void {this.endDrag(); this.preferences.setCalendarWidth(this.widthMode() === 'wide' ? 'standard' : 'wide');}
   toggleWeekHours(): void {this.endDrag(); this.fullDayHours.update(value => !value);}
   minutePosition(minute: number): number {return (minute - this.startMinute()) / this.rangeMinutes() * 100;}
   eventHeight(start: number, end: number): number {return (end - start) / this.rangeMinutes() * 100;}

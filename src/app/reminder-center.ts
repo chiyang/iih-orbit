@@ -1,5 +1,7 @@
 import { Component, computed, effect, inject, input, linkedSignal, output, signal, untracked } from '@angular/core';
 import { Icon } from './icon';
+import { FormsModule } from '@angular/forms';
+import { Tooltip } from './tooltip';
 import { DUE_DAY_PRESETS } from './reminder-data';
 import { inReminderWorkspace, reminderItemKey, startWindow } from './reminder-items';
 import type { ReminderItem, ReminderTab } from './reminder-items';
@@ -10,7 +12,7 @@ import type {ReminderHistoryEntry} from './reminder-history';
 type ReminderSource = 'all' | 'orbit' | 'google';
 interface ReminderListFilters {source: ReminderSource; excludedCalendars: string[]}
 
-@Component({selector: 'app-reminder-center', imports: [Icon, ThemeColor], templateUrl: './reminder-center.html', styleUrl: './reminder-center.css'})
+@Component({selector: 'app-reminder-center', imports: [FormsModule, Icon, ThemeColor, Tooltip], templateUrl: './reminder-center.html', styleUrl: './reminder-center.css'})
 export class ReminderCenter {
   readonly reminders = inject(Reminders);
   readonly initialTab = input<ReminderTab>('today');
@@ -21,6 +23,7 @@ export class ReminderCenter {
   readonly presets = DUE_DAY_PRESETS;
   readonly workspaceScope = signal<'all' | 'current'>('all');
   readonly historyMode = signal(false);
+  readonly viewSelection = computed(() => this.historyMode() ? 'history' : this.activeTab());
   readonly unreadOnly = signal(false);
   readonly historyLimit = linkedSignal(() => {this.workspaceScope(); this.unreadOnly(); this.reminders.store.generation(); return 30;});
   readonly historyEntries = computed(() => this.reminders.history().filter(entry => (this.workspaceScope() === 'all' || entry.workspaceIds.includes(this.reminders.store.currentWorkspace().id)) && (!this.unreadOnly() || entry.readAt === undefined)));
@@ -94,6 +97,10 @@ export class ReminderCenter {
   }
   selectTab(tab: ReminderTab): void {
     this.historyMode.set(false); this.activeTab.set(tab); this.tabChange.emit(tab);
+  }
+  selectView(value: string): void {
+    if (value === 'history') this.historyMode.set(true);
+    else if (this.tabs().some(tab => tab.id === value)) this.selectTab(value as ReminderTab);
   }
   selectSource(source: ReminderSource): void {
     if (!this.sources.some(option => option.id === source)) return;

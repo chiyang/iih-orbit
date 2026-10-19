@@ -1,4 +1,8 @@
-<div class="reminder-navigation"><div role="group" aria-label="提醒檢視"><button type="button" [class.selected]="!historyMode()" [attr.aria-pressed]="!historyMode()" (click)="historyMode.set(false)">近期提醒</button><button type="button" [class.selected]="historyMode()" [attr.aria-pressed]="historyMode()" (click)="historyMode.set(true)">提醒歷史</button></div><div role="group" aria-label="提醒工作空間"><button type="button" [class.selected]="workspaceScope() === 'all'" [attr.aria-pressed]="workspaceScope() === 'all'" (click)="workspaceScope.set('all')">全部工作空間</button><button type="button" [class.selected]="workspaceScope() === 'current'" [attr.aria-pressed]="workspaceScope() === 'current'" (click)="workspaceScope.set('current')">目前空間</button></div></div>
+<div class="reminder-navigation">
+  <select aria-label="提醒檢視與日期範圍" [ngModel]="viewSelection()" (ngModelChange)="selectView($event)"><optgroup label="近期提醒">@for (tab of tabs(); track tab.id) {<option [value]="tab.id">{{ tab.label }} · {{ tab.count }}</option>}</optgroup><optgroup label="歷史紀錄"><option value="history">提醒歷史</option></optgroup></select>
+  <select aria-label="提醒工作空間" [ngModel]="workspaceScope()" (ngModelChange)="workspaceScope.set($event)"><option value="all">全部空間</option><option value="current">目前空間</option></select>
+  <button type="button" class="reminder-settings" aria-label="提醒設定" appTooltip="提醒設定" (click)="openSettings.emit()"><app-icon name="settings" /></button>
+</div>
 @if (historyMode()) {
   <div class="reminder-center-content">
     <div class="history-actions"><label><input type="checkbox" [checked]="unreadOnly()" (change)="unreadOnly.set($any($event.target).checked)">只看未讀</label><button type="button" [disabled]="!unreadHistory().length" (click)="reminders.markHistoryRead(unreadHistory())">全部標為已讀</button></div>
@@ -14,13 +18,12 @@
     @if (reminders.attentionWarning()) {<p class="reminder-warning" role="status">{{ reminders.attentionWarning() }}</p>}
   </div>
 } @else {
-  <div class="reminder-center-tabs" role="group" aria-label="提醒範圍">@for (tab of tabs(); track tab.id) {<button [class.selected]="activeTab() === tab.id" [attr.aria-pressed]="activeTab() === tab.id" (click)="selectTab(tab.id)"><app-icon [name]="tab.id === 'due-soon' || tab.id === 'overdue' ? 'clock' : 'calendar'" />{{ tab.label }}<small>{{ tab.count }}</small></button>}</div>
   <div class="reminder-center-content">
-    <div class="reminder-range"><p>{{ rangeLabel() }}</p><button (click)="openSettings.emit()"><app-icon name="settings" />提醒設定</button></div>
-    @if (activeTab() === 'due-soon') {<div class="reminder-presets" role="group" aria-label="到期天數">@for (days of presets; track days) {<button [class.selected]="dueDays() === days" [attr.aria-pressed]="dueDays() === days" (click)="dueDays.set(days)">{{ days }} 天</button>}<button class="deadline-list" (click)="showDeadline.emit(dueDays())"><app-icon name="list" />查看目前空間清單</button></div>}
+    <p class="reminder-range">{{ rangeLabel() }}</p>
+    @if (activeTab() === 'due-soon') {<div class="reminder-presets"><label>到期範圍<select aria-label="到期天數" [ngModel]="dueDays()" (ngModelChange)="dueDays.set($event)">@if (!presets.includes(dueDays())) {<option [ngValue]="dueDays()">{{ dueDays() }} 天內</option>}@for (days of presets; track days) {<option [ngValue]="days">{{ days }} 天內</option>}</select></label><button type="button" class="deadline-list" (click)="showDeadline.emit(dueDays())"><app-icon name="list" />目前空間清單</button></div>}
     @if (hasMixedSources() || showCalendarFilter()) {
       <div class="reminder-list-filters">
-        @if (hasMixedSources()) {<div class="reminder-source-filters" role="group" aria-label="此列表的提醒來源">@for (source of sources; track source.id) {<button [class.selected]="effectiveSource() === source.id" [attr.aria-pressed]="effectiveSource() === source.id" (click)="selectSource(source.id)">{{ source.label }}</button>}</div>}
+        @if (hasMixedSources()) {<select class="reminder-source-filter" aria-label="此列表的提醒來源" [ngModel]="effectiveSource()" (ngModelChange)="selectSource($event)">@for (source of sources; track source.id) {<option [value]="source.id">{{ source.id === 'all' ? '全部來源' : source.label }}</option>}</select>}
         @if (showCalendarFilter()) {
           <details class="reminder-calendar-filter" (keydown)="calendarFilterKeydown($event)">
             <summary><app-icon name="calendar" /><span>篩選月曆</span><small>{{ selectedCalendarIds().length }}/{{ calendars().length }}</small><app-icon name="chevron" /></summary>
