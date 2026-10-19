@@ -155,12 +155,6 @@ h1 { font-size: var(--font-26); letter-spacing: .3px; font-weight: 620; margin: 
 .search-box input:focus { outline: 0; }
 .search-box:focus-within { outline: 2px solid var(--accent-text); outline-offset: 1px; }
 .filter-actions { display: flex; flex-wrap: wrap; gap: var(--sp9); align-items: center; max-width: 100%; }
-.deadline-shortcuts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp8); margin: 0 0 var(--sp18); }
-.deadline-shortcuts button { display: inline-flex; align-items: center; gap: var(--sp6); padding: var(--sp7) var(--sp10); border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); background: var(--surface); font-size: var(--font-10); }
-.deadline-shortcuts button:hover, .deadline-shortcuts button.selected { color: var(--accent-text); border-color: var(--accent-border); background: var(--accent-soft); }
-.deadline-shortcuts app-icon { width: 13px; height: 13px; }
-.deadline-shortcuts strong { font-size: var(--font-10); }
-.deadline-shortcuts .reminder-settings { border-color: transparent; background: transparent; }
 .theme-toggle span { min-width: 2em; }
 .filter-summary { flex-wrap: wrap; }
 @media (max-width: 1250px) { .theme-toggle span { display: none; } }
@@ -194,7 +188,6 @@ h1 { font-size: var(--font-26); letter-spacing: .3px; font-weight: 620; margin: 
 .card-top .category-badge { max-width: 65%; overflow: hidden; text-overflow: ellipsis; display: block; }
 .card-top .category-badge i { display: inline-block; vertical-align: middle; margin: 0 var(--sp3) var(--sp2) 0; }
 .priority { display: inline-flex; align-items: center; gap: var(--sp3); font-size: var(--font-9); color: var(--text-soft); white-space: nowrap; }
-.priority app-icon { width: 10px; height: 10px; }
 .priority[data-priority='high'] { color: var(--danger-text); }
 .priority[data-priority='medium'] { color: var(--text-muted); }
 .priority[data-priority='low'] { color: var(--text-muted); }

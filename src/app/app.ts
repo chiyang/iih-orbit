@@ -1026,6 +1026,10 @@ export class App {
     return PRIORITIES.find(item => item.id === priority)?.label ?? '';
   }
 
+  priorityShortLabel(priority: Priority): string {
+    return {low: '低', medium: '中', high: '高'}[priority] ?? '';
+  }
+
   statusLabel(status: TaskStatus): string {
     return this.statuses().find(column => column.id === status)?.label ?? '';
   }
