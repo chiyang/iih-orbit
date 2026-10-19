@@ -1000,7 +1000,7 @@ test('清單空白處或列上 Enter 開啟任務，欄位控制與其鍵盤事�
   } finally { close(); }
 });
 
-test('多功能側欄入口切到提示對應內容，同頁可關閉；新郵件清除搜尋並顯示收件匣', () => {
+test('多功能側欄入口切到提示對應內容，同頁可關閉；新郵件保留郵件篩選', () => {
   const f = application(), calls = [];
   try {
     const {app} = f;
@@ -1011,7 +1011,7 @@ test('多功能側欄入口切到提示對應內容，同頁可關閉；新郵�
     app.activatePanel({target: 'toggle'}); assert.equal(app.tasksOpen(), true);
     app.activatePanel({target: 'reminders', tab: 'overdue'}); assert.equal(app.tasksOpen(), false); assert.equal(app.remindersOpen(), true); assert.equal(app.reminderTab(), 'overdue');
     app.activatePanel({target: 'gmail'}); assert.equal(app.mailOpen(), true); assert.equal(app.remindersOpen(), false);
-    assert.deepEqual(calls, [['search', ''], ['labels', ['INBOX']]]); assert.equal(app.query(), '主畫面篩選');
+    assert.deepEqual(calls, []); assert.equal(app.query(), '主畫面篩選');
     app.modal.set('task'); app.activatePanel({target: 'tasks'}); assert.equal(app.mailOpen(), true);
   } finally {f.close();}
 });

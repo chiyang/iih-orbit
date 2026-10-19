@@ -49,8 +49,8 @@ function fixture(saved = []) {
   const child = createEnvironmentInjector([{provide: GmailService, useValue: gmail}, {provide: GmailNotifications, useValue: notifications}, {provide: BoardStore, useValue: store}, MailTasks, MailReader, DocumentTasks], injector);
   const tasks = child.get(MailTasks), reader = child.get(MailReader);
   const flush = () => {for (let round = 0; round < 30 && [...effects].some(effect => effect.dirty); round++) for (const effect of effects) if (effect.dirty) effect.run();};
-  gmail.preferences.set({generation: store.generation(), clientId: '123-example.apps.googleusercontent.com', accountId: 'account', email: 'me@example.test', selected: ['INBOX']});
-  auth.connected.set(true); auth.account.set({id: 'account', email: 'me@example.test'}); flush();
+  if (!values.has('iih-orbit-gmail-preferences-v1')) gmail.preferences.set({generation: store.generation(), clientId: '123-example.apps.googleusercontent.com', accountId: 'account', email: 'me@example.test', selected: ['INBOX']});
+  auth.connected.set(true); auth.account.set({id: gmail.preferences().accountId, email: gmail.preferences().email}); flush();
   return {store, gmail, auth, tasks, reader, panelViews, values, child, flush, close() {child.destroy(); gmail.ngOnDestroy(); injector.destroy();}};
 }
 const event = () => {const data = new Map(); return {dataTransfer: {types: [], effectAllowed: '', dropEffect: '', setData(type, value) {data.set(type, value); this.types.push(type);}, getData: type => data.get(type) ?? ''}, prevented: false, stopped: false, preventDefault() {this.prevented = true;}, stopPropagation() {this.stopped = true;}};};
@@ -293,6 +293,49 @@ test('保存的多標籤在背景更新、授權續期與重新載入後沿用�
     assert.deepEqual(JSON.parse(f.values.get('iih-orbit-gmail-preferences-v1')).selected, []);
     await restored.load(true); assert.equal(pages.at(-1), undefined);
   } finally {panel?.ngOnDestroy(); restored?.ngOnDestroy(); f.close();}
+});
+test('重開 App 並續接同帳號授權後，新郵件入口沿用已存標籤；有效快取不讀取，過期只讀一次', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: Date.now()});
+  const labels = [{id: 'INBOX', name: 'INBOX', type: 'system'}, {id: 'Work', name: '工作', type: 'user'}, {id: 'Home', name: '家務', type: 'user'}];
+  const handler = paths => async (path, params) => {
+    paths.push([path, params?.labelIds]);
+    if (path === 'labels') return {labels};
+    if (path === 'messages') return {messages: [{id: params.labelIds || 'all'}]};
+    const id = path.startsWith('threads/') ? path.slice('threads/thread-'.length) : path.split('/')[1];
+    return path.startsWith('threads/') ? {id: 'thread-' + id, messages: [raw(id)]} : raw(id);
+  };
+  for (const selected of [['Work', 'Home'], []]) for (const age of [0, 5 * 60000]) {
+    const first = fixture(); let saved, stamp;
+    try {
+      first.gmail.applyLabels(selected); first.flush(); first.auth.api = handler([]); await first.gmail.load();
+      saved = [...first.values]; stamp = first.gmail.updatedAt();
+    } finally {first.close();}
+    t.mock.timers.tick(age);
+    const reopened = fixture(saved), paths = [];
+    const child = createEnvironmentInjector([{provide: UiPreferences, useValue: {textSize: () => 'standard'}}], reopened.child); let panel;
+    try {
+      reopened.auth.api = handler(paths); reopened.auth.connected.set(false); reopened.auth.expired.set(true); reopened.flush();
+      // The G button hands the approved account and an activation callback to GmailService.connect.
+      await reopened.gmail.connect(async () => ({id: 'account', email: 'me@example.test'}), () => {
+        reopened.auth.connected.set(true); reopened.auth.expired.set(false); reopened.auth.connectionVersion.update(version => version + 1);
+      });
+      reopened.flush(); assert.deepEqual(reopened.gmail.selected(), selected); assert.deepEqual(paths, []);
+      const app = appController(child), preferences = reopened.values.get('iih-orbit-gmail-preferences-v1');
+      app.activatePanel({target: 'gmail'});
+      panel = runInInjectionContext(reopened.child, () => new GmailPanel()); panel.active = app.mailOpen; panel.visible = signal(true); panel.visit = app.mailVisit; reopened.flush();
+      assert.deepEqual(reopened.gmail.selected(), selected); assert.deepEqual(panel.labelDraft(), selected); assert.equal(panel.labelsChanged(), false);
+      await reopened.gmail.load(); reopened.flush();
+      t.mock.timers.tick(400); await new Promise(resolve => setImmediate(resolve)); reopened.flush();
+      assert.deepEqual(paths.filter(([path]) => path === 'messages').map(([, label]) => label), age ? selected.length ? selected : [undefined] : []);
+      if (!age) {assert.deepEqual(paths, []); assert.equal(reopened.gmail.updatedAt(), stamp);}
+      assert.equal(reopened.gmail.busy(), false); assert.equal(reopened.gmail.error(), '');
+      assert.equal(reopened.values.get('iih-orbit-gmail-preferences-v1'), preferences);
+      const calls = paths.length;
+      app.closePanel(); reopened.flush(); app.activatePanel({target: 'gmail'}); reopened.flush();
+      t.mock.timers.tick(400); await new Promise(resolve => setImmediate(resolve)); reopened.flush();
+      assert.equal(paths.length, calls); assert.deepEqual(reopened.gmail.selected(), selected);
+    } finally {panel?.ngOnDestroy(); child.destroy(); reopened.close();}
+  }
 });
 test('舊 Gmail 標籤回應到達後不能啟動過期搜尋；最新讀取失敗仍可重新更新', async () => {
   const f = fixture(); let release, labelCalls = 0, fail = false; const queries = [];

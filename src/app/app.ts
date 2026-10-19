@@ -270,9 +270,7 @@ export class App {
     if (entry.target !== 'gmail' && this.panelOpen() && this.panelTab() === entry.target) {this.closePanel(); return;}
     if (entry.target === 'tasks') this.openTaskPanel();
     else if (entry.target === 'reminders') this.openReminders(entry.tab);
-    else {
-      this.mailTasks.gmail.search(''); this.mailTasks.gmail.applyLabels(['INBOX']); this.openMail();
-    }
+    else this.openMail();
   }
   openPanelTask(task: Task): void {
     if (this.modal()) return;
