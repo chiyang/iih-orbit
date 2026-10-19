@@ -1,0 +1,534 @@
+{
+  "application": "iih-orbit",
+  "formatVersion": 9,
+  "appVersion": "1.7.0",
+  "kind": "workspaces",
+  "exportedAt": "2026-10-19T01:00:00.000Z",
+  "data": {
+    "version": 1,
+    "activeWorkspaceId": "demo-lab",
+    "workspaces": [
+      {
+        "version": 8,
+        "projects": [
+          {
+            "id": "demo-workshop",
+            "name": "秋日共創工作坊"
+          },
+          {
+            "id": "demo-website",
+            "name": "課程網站改版"
+          },
+          {
+            "id": "demo-research",
+            "name": "研究交流分享"
+          }
+        ],
+        "categories": [
+          {
+            "id": "demo-planning",
+            "name": "企劃協作",
+            "color": "violet"
+          },
+          {
+            "id": "demo-design",
+            "name": "設計製作",
+            "color": "blue"
+          },
+          {
+            "id": "demo-content",
+            "name": "內容教材",
+            "color": "orange"
+          },
+          {
+            "id": "demo-research-category",
+            "name": "研究分析",
+            "color": "green"
+          }
+        ],
+        "statuses": [
+          {
+            "id": "todo",
+            "label": "待辦事項",
+            "subtitle": "準備好，下一步就出發",
+            "color": "gray",
+            "kind": "active",
+            "hidden": false
+          },
+          {
+            "id": "progress",
+            "label": "進行中",
+            "subtitle": "好點子正在成形",
+            "color": "violet",
+            "kind": "active",
+            "hidden": false
+          },
+          {
+            "id": "review",
+            "label": "待審核",
+            "subtitle": "最後確認，更靠近完成",
+            "color": "orange",
+            "kind": "active",
+            "hidden": false
+          },
+          {
+            "id": "done",
+            "label": "已完成",
+            "subtitle": "每一步，都值得記錄",
+            "color": "green",
+            "kind": "done",
+            "hidden": false
+          },
+          {
+            "id": "archived",
+            "label": "封存",
+            "subtitle": "保留紀錄，讓現在更專注",
+            "color": "blue",
+            "kind": "archived",
+            "hidden": true
+          }
+        ],
+        "tasks": [
+          {
+            "id": "demo-venue",
+            "title": "確認場地與活動流程",
+            "description": "完成空間配置、動線與活動時間表。",
+            "categoryId": "demo-planning",
+            "projectId": "demo-workshop",
+            "status": "done",
+            "priority": "medium",
+            "startDate": "2026-10-05",
+            "startTime": "",
+            "dueDate": "2026-10-07",
+            "dueTime": "",
+            "subtasks": [
+              {
+                "id": "demo-venue-1",
+                "title": "確認場地配置",
+                "done": true
+              },
+              {
+                "id": "demo-venue-2",
+                "title": "完成活動流程表",
+                "done": true
+              }
+            ],
+            "pinned": true,
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-survey",
+            "title": "整理參與者需求",
+            "description": "彙整虛構問卷與訪談摘要，作為活動設計依據。",
+            "categoryId": "demo-research-category",
+            "projectId": "demo-workshop",
+            "status": "done",
+            "priority": "medium",
+            "startDate": "2026-10-08",
+            "startTime": "",
+            "dueDate": "2026-10-10",
+            "dueTime": "",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-poster",
+            "title": "共創工作坊主視覺",
+            "description": "確認海報、報名頁與現場指示的視覺一致性。",
+            "categoryId": "demo-design",
+            "projectId": "demo-workshop",
+            "status": "review",
+            "priority": "high",
+            "startDate": "2026-10-12",
+            "startTime": "",
+            "dueDate": "2026-10-20",
+            "dueTime": "",
+            "subtasks": [
+              {
+                "id": "demo-poster-1",
+                "title": "完成主視覺草稿",
+                "done": true
+              },
+              {
+                "id": "demo-poster-2",
+                "title": "校對日期與文案",
+                "done": false
+              }
+            ],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-guide",
+            "title": "製作分組活動手冊",
+            "description": "以小組任務與引導問題，串起半天的共創體驗。",
+            "categoryId": "demo-content",
+            "projectId": "demo-workshop",
+            "status": "progress",
+            "priority": "high",
+            "startDate": "2026-10-15",
+            "startTime": "",
+            "dueDate": "2026-10-23",
+            "dueTime": "",
+            "subtasks": [
+              {
+                "id": "demo-guide-1",
+                "title": "規劃三個活動關卡",
+                "done": true
+              },
+              {
+                "id": "demo-guide-2",
+                "title": "完成工作單",
+                "done": true
+              },
+              {
+                "id": "demo-guide-3",
+                "title": "試跑活動流程",
+                "done": false
+              }
+            ],
+            "pinned": true,
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-briefing",
+            "title": "工作坊籌備會議",
+            "description": "核對分工、物料與當週進度。",
+            "categoryId": "demo-planning",
+            "projectId": "demo-workshop",
+            "status": "progress",
+            "priority": "high",
+            "startDate": "2026-10-19",
+            "startTime": "09:00",
+            "dueDate": "2026-10-19",
+            "dueTime": "10:30",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-rehearsal",
+            "title": "現場流程彩排",
+            "description": "從報到、分組到成果分享，完整走一次活動流程。",
+            "categoryId": "demo-planning",
+            "projectId": "demo-workshop",
+            "status": "todo",
+            "priority": "medium",
+            "startDate": "2026-10-23",
+            "startTime": "14:00",
+            "dueDate": "2026-10-23",
+            "dueTime": "16:00",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-launch",
+            "title": "秋日共創工作坊",
+            "description": "共創實驗室的虛構示範活動。",
+            "categoryId": "demo-planning",
+            "projectId": "demo-workshop",
+            "status": "todo",
+            "priority": "high",
+            "startDate": "2026-10-28",
+            "startTime": "09:00",
+            "dueDate": "2026-10-28",
+            "dueTime": "16:00",
+            "subtasks": [],
+            "pinned": true,
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-sitemap",
+            "title": "完成網站架構盤點",
+            "description": "整理首頁、課程介紹與學習資源的導覽層級。",
+            "categoryId": "demo-planning",
+            "projectId": "demo-website",
+            "status": "done",
+            "priority": "medium",
+            "startDate": "2026-10-06",
+            "startTime": "",
+            "dueDate": "2026-10-09",
+            "dueTime": "",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-wireframe",
+            "title": "首頁版型與互動草稿",
+            "description": "完成桌面與手機版線框稿。",
+            "categoryId": "demo-design",
+            "projectId": "demo-website",
+            "status": "done",
+            "priority": "medium",
+            "startDate": "2026-10-10",
+            "startTime": "",
+            "dueDate": "2026-10-14",
+            "dueTime": "",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-components",
+            "title": "建立共用介面元件",
+            "description": "統一按鈕、資訊卡片、表單與色彩規則。",
+            "categoryId": "demo-design",
+            "projectId": "demo-website",
+            "status": "progress",
+            "priority": "medium",
+            "startDate": "2026-10-16",
+            "startTime": "",
+            "dueDate": "2026-10-26",
+            "dueTime": "",
+            "subtasks": [
+              {
+                "id": "demo-components-1",
+                "title": "按鈕與表單",
+                "done": true
+              },
+              {
+                "id": "demo-components-2",
+                "title": "課程卡片",
+                "done": false
+              }
+            ],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-design-review",
+            "title": "網站視覺提案確認",
+            "description": "確認首頁視覺、字級與導覽體驗。",
+            "categoryId": "demo-design",
+            "projectId": "demo-website",
+            "status": "review",
+            "priority": "medium",
+            "startDate": "2026-10-20",
+            "startTime": "10:00",
+            "dueDate": "2026-10-20",
+            "dueTime": "11:30",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-copy",
+            "title": "課程介紹文案校對",
+            "description": "校對課程名稱、學習目標與閱讀順序。",
+            "categoryId": "demo-content",
+            "projectId": "demo-website",
+            "status": "review",
+            "priority": "medium",
+            "startDate": "2026-10-21",
+            "startTime": "09:30",
+            "dueDate": "2026-10-21",
+            "dueTime": "11:00",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-usability",
+            "title": "手機版易用性測試",
+            "description": "檢查導覽、閱讀與表單填寫的操作體驗。",
+            "categoryId": "demo-research-category",
+            "projectId": "demo-website",
+            "status": "todo",
+            "priority": "high",
+            "startDate": "2026-10-22",
+            "startTime": "13:30",
+            "dueDate": "2026-10-22",
+            "dueTime": "15:30",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-publish",
+            "title": "網站上線前檢查",
+            "description": "核對連結、頁面內容與備份。",
+            "categoryId": "demo-planning",
+            "projectId": "demo-website",
+            "status": "todo",
+            "priority": "low",
+            "startDate": "2026-10-29",
+            "startTime": "",
+            "dueDate": "2026-10-30",
+            "dueTime": "",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-reading",
+            "title": "彙整研究主題與文獻",
+            "description": "選定三個適合交流的研究問題。",
+            "categoryId": "demo-research-category",
+            "projectId": "demo-research",
+            "status": "done",
+            "priority": "medium",
+            "startDate": "2026-10-07",
+            "startTime": "",
+            "dueDate": "2026-10-13",
+            "dueTime": "",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-analysis",
+            "title": "整理示範分析結果",
+            "description": "以合成資料整理圖表與觀察，沒有使用真實個人資料。",
+            "categoryId": "demo-research-category",
+            "projectId": "demo-research",
+            "status": "progress",
+            "priority": "medium",
+            "startDate": "2026-10-14",
+            "startTime": "",
+            "dueDate": "2026-10-22",
+            "dueTime": "",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-discussion",
+            "title": "研究進度交流",
+            "description": "討論分析方法、目前觀察與下一步驗證。",
+            "categoryId": "demo-research-category",
+            "projectId": "demo-research",
+            "status": "progress",
+            "priority": "medium",
+            "startDate": "2026-10-19",
+            "startTime": "14:00",
+            "dueDate": "2026-10-19",
+            "dueTime": "15:30",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-slides",
+            "title": "分享簡報內容確認",
+            "description": "從研究問題到結果，調整故事線與圖表說明。",
+            "categoryId": "demo-content",
+            "projectId": "demo-research",
+            "status": "review",
+            "priority": "medium",
+            "startDate": "2026-10-21",
+            "startTime": "14:00",
+            "dueDate": "2026-10-21",
+            "dueTime": "16:00",
+            "subtasks": [
+              {
+                "id": "demo-slides-1",
+                "title": "完成簡報初稿",
+                "done": true
+              },
+              {
+                "id": "demo-slides-2",
+                "title": "檢查圖表與引用",
+                "done": false
+              }
+            ],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-demo-check",
+            "title": "示範操作與設備確認",
+            "description": "確認投影、字級與示範操作流程。",
+            "categoryId": "demo-design",
+            "projectId": "demo-research",
+            "status": "review",
+            "priority": "low",
+            "startDate": "2026-10-22",
+            "startTime": "10:00",
+            "dueDate": "2026-10-22",
+            "dueTime": "11:00",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          },
+          {
+            "id": "demo-sharing",
+            "title": "跨領域研究分享",
+            "description": "用一個具體案例，交流方法、發現與後續方向。",
+            "categoryId": "demo-content",
+            "projectId": "demo-research",
+            "status": "todo",
+            "priority": "medium",
+            "startDate": "2026-10-24",
+            "startTime": "10:00",
+            "dueDate": "2026-10-24",
+            "dueTime": "12:00",
+            "subtasks": [],
+            "updatedAt": "2026-10-19T01:00:00.000Z"
+          }
+        ],
+        "documentSources": [],
+        "documentLinks": [],
+        "documentDetails": [],
+        "documentOrders": [],
+        "completionEvents": [
+          {
+            "id": "demo-completed-demo-venue",
+            "taskId": "demo-venue",
+            "kind": "completed",
+            "at": "2026-10-07T08:00:00.000Z",
+            "day": "2026-10-07",
+            "title": "確認場地與活動流程",
+            "projectId": "demo-workshop",
+            "projectName": "秋日共創工作坊"
+          },
+          {
+            "id": "demo-completed-demo-survey",
+            "taskId": "demo-survey",
+            "kind": "completed",
+            "at": "2026-10-10T08:00:00.000Z",
+            "day": "2026-10-10",
+            "title": "整理參與者需求",
+            "projectId": "demo-workshop",
+            "projectName": "秋日共創工作坊"
+          },
+          {
+            "id": "demo-completed-demo-sitemap",
+            "taskId": "demo-sitemap",
+            "kind": "completed",
+            "at": "2026-10-09T08:00:00.000Z",
+            "day": "2026-10-09",
+            "title": "完成網站架構盤點",
+            "projectId": "demo-website",
+            "projectName": "課程網站改版"
+          },
+          {
+            "id": "demo-completed-demo-wireframe",
+            "taskId": "demo-wireframe",
+            "kind": "completed",
+            "at": "2026-10-14T08:00:00.000Z",
+            "day": "2026-10-14",
+            "title": "首頁版型與互動草稿",
+            "projectId": "demo-website",
+            "projectName": "課程網站改版"
+          },
+          {
+            "id": "demo-completed-demo-reading",
+            "taskId": "demo-reading",
+            "kind": "completed",
+            "at": "2026-10-13T08:00:00.000Z",
+            "day": "2026-10-13",
+            "title": "彙整研究主題與文獻",
+            "projectId": "demo-research",
+            "projectName": "研究交流分享"
+          }
+        ],
+        "taskLinks": [
+          {
+            "id": "demo-link-1",
+            "taskIds": [
+              "demo-guide",
+              "demo-rehearsal"
+            ]
+          },
+          {
+            "id": "demo-link-2",
+            "taskIds": [
+              "demo-analysis",
+              "demo-slides"
+            ]
+          }
+        ],
+        "id": "demo-lab",
+        "name": "共創實驗室"
+      }
+    ]
+  },
+  "calendarSources": []
+}
