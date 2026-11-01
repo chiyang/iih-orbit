@@ -145,6 +145,19 @@ export function ganttZoomScroll(axis: GanttAxis, oldWidth: number, newWidth: num
   return Math.max(0, Math.min(axis.units * newWidth - visibleWidth, ganttPosition(centerDay, axis, newWidth) - visibleWidth / 2));
 }
 
+/** Rebase near either edge while keeping the visible dates at the same pixel positions. */
+export function ganttPanWindow(axis: GanttAxis, columnWidth: number, scroll: number, visibleWidth: number): {date: string; scroll: number} | null {
+  const maxScroll = axis.units * columnWidth - visibleWidth;
+  if (visibleWidth <= 0 || maxScroll <= 0) return null;
+  const margin = Math.min(maxScroll / 4, Math.max(64, visibleWidth / 2));
+  const direction = scroll <= margin ? -1 : scroll >= maxScroll - margin ? 1 : 0;
+  if (!direction || direction < 0 && axis.start <= MIN_DAY || direction > 0 && axis.end >= MAX_DAY + 1) return null;
+  const center = ganttDayAtPosition(scroll + visibleWidth / 2, axis, columnWidth), date = civilKey(clampDay(Math.floor(center)));
+  const next = ganttAxis(date, axis.scale);
+  if (direction < 0 ? next.start >= axis.start : next.end <= axis.end) return null;
+  return {date, scroll: Math.max(0, Math.min(next.units * columnWidth - visibleWidth, ganttPosition(center, next, columnWidth) - visibleWidth / 2))};
+}
+
 /** Daily columns split into hours; weeks into days; months at real Sunday boundaries. */
 export function ganttParts(column: GanttColumn, scale: GanttScale): {start: number; end: number; label: string; weekend: boolean}[] {
   if (scale === 'day') return Array.from({length: 24}, (_, hour) => ({start: column.start + hour / 24, end: column.start + (hour + 1) / 24, label: String(hour).padStart(2, '0') + ':00', weekend: column.weekend}));

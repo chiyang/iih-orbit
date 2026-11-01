@@ -14,6 +14,8 @@ import type { TaskEditContext } from './board-store';
 import { GMAIL_MIME } from './gmail-data';
 import { DOCUMENT_DRAG_TYPE } from './document-data';
 import {readTaskLinkDrag, TASK_LINK_DRAG_TYPE} from './task-link-drag';
+import {CdkTrapFocus} from '@angular/cdk/a11y';
+import {ViewFullscreen} from './view-fullscreen';
 
 export interface CalendarCreate {
   date: string;
@@ -22,7 +24,7 @@ export interface CalendarCreate {
 
 @Component({
   selector: 'app-calendar',
-  imports: [Icon, ThemeColor, Tooltip],
+  imports: [Icon, ThemeColor, Tooltip, CdkTrapFocus, ViewFullscreen],
   templateUrl: './calendar.html',
   styleUrl: './calendar.css'
 })
@@ -51,6 +53,8 @@ export class Calendar {
   readonly readExternal = output<ExternalEvent>();
   readonly createTask = output<CalendarCreate>();
   readonly busy = input(false);
+  readonly fullscreenSuspended = input(false);
+  readonly fullscreen = viewChild(ViewFullscreen);
   readonly taskDraggingChange = output<boolean>();
   readonly taskLinkTarget = signal<TaskEditContext | null>(null);
   readonly taskLinkPointer = signal<{x: number; y: number} | null>(null);
@@ -214,7 +218,8 @@ export class Calendar {
     const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? lineHeight
       : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? page.innerHeight : 1;
     event.preventDefault();
-    page.scrollBy({top: event.deltaY * unit, behavior: 'instant'});
+    if (this.fullscreen()?.active()) scroller.scrollTop += event.deltaY * unit;
+    else page.scrollBy({top: event.deltaY * unit, behavior: 'instant'});
   }
 
   createAt(date: string, time?: string): void {

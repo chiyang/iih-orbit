@@ -277,3 +277,9 @@ h1 { font-size: var(--font-26); letter-spacing: .3px; font-weight: 620; margin: 
 
 .task-card.task-drag-source{opacity:.4}.task-open-area[draggable="true"],.card-footer[draggable="true"]{cursor:grab}
 .task-board-placeholder{display:flex;align-items:center;justify-content:center;min-height:calc(56px * var(--font-scale));box-sizing:border-box;padding:var(--sp10);border:2px dashed var(--accent-text);border-radius:9px;background:var(--accent-soft);color:var(--accent-text);font-size:var(--font-11);pointer-events:none}.task-board-placeholder>span{display:flex;align-items:center;gap:var(--sp8)}.task-board-placeholder app-icon{width:18px;height:18px;flex-shrink:0}.empty-column.task-board-empty{pointer-events:auto}
+
+@media(max-width:700px),(max-height:600px){
+  .gantt-layout .board-area{min-height:0;padding-bottom:var(--sp10)}
+  .gantt-layout app-gantt{min-height:max(360px,55dvh)}
+  .gantt-layout .board-footer{display:none}
+}

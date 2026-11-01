@@ -8,10 +8,12 @@ import {dateKey, isTaskOverdue, validDate} from './task-schedule';
 import {GMAIL_MIME} from './gmail-data';
 import {DOCUMENT_DRAG_TYPE} from './document-data';
 import type {CalendarPosition} from './calendar-move';
-import {civilDay, ganttAxis, ganttDayAtPosition, ganttDropPosition, ganttParts, ganttPosition, ganttRows, ganttSchedule, ganttSpan, ganttZoomScroll, moveGanttDate, readGanttRange, readGanttZoom, virtualRange, type GanttCompletion, type GanttDateRange, type GanttOrder, type GanttScale} from './gantt-data';
+import {civilDay, civilKey, ganttAxis, ganttDayAtPosition, ganttDropPosition, ganttPanWindow, ganttParts, ganttPosition, ganttRows, ganttSchedule, ganttSpan, ganttZoomScroll, moveGanttDate, readGanttRange, readGanttZoom, virtualRange, type GanttCompletion, type GanttDateRange, type GanttOrder, type GanttScale} from './gantt-data';
 import {editGanttSchedule, type GanttEditKind} from './gantt-edit';
+import {CdkTrapFocus} from '@angular/cdk/a11y';
+import {ViewFullscreen} from './view-fullscreen';
 
-@Component({selector: 'app-gantt', imports: [FormsModule, Icon, ThemeColor], templateUrl: './gantt.html', styleUrl: './gantt.css'})
+@Component({selector: 'app-gantt', imports: [FormsModule, Icon, ThemeColor, CdkTrapFocus, ViewFullscreen], templateUrl: './gantt.html', styleUrl: './gantt.css'})
 export class Gantt {
   readonly Math = Math;
   readonly preferences = inject(UiPreferences);
@@ -44,12 +46,15 @@ export class Gantt {
   readonly editTask = output<Task>();
   readonly scheduleChange = output<{task: Task; original: Task; context: string}>();
   readonly busy = input(false);
+  readonly fullscreenSuspended = input(false);
+  readonly scheduleDragging = signal(false);
   readonly lockedTaskIds = input<string[]>([]);
   readonly scheduleMessage = signal('');
   readonly schedulePreview = signal<Task | null>(null);
   private gesture?: {pointerId: number; element: HTMLElement; original: Task; kind: GanttEditKind; day: number; x: number; y: number; lastX: number; moved: boolean; valid: boolean; context: string; axis: string};
   private scrollFrame = 0;
   private suppressClick = false;
+  private pendingPan?: {date: string; scroll: number; scale: GanttScale};
   readonly documentDragging = input(false);
   readonly mailDragging = input(false);
   readonly documentDrop = output<{event: DragEvent; position?: CalendarPosition; taskId?: string; projectId?: string}>();
@@ -75,7 +80,7 @@ export class Gantt {
   readonly viewportWidth = signal(900);
   readonly viewportHeight = signal(480);
   readonly rowHeight = computed(() => 48 * this.preferences.scale());
-  readonly headerHeight = computed(() => 64 * this.preferences.scale());
+  readonly headerHeight = computed(() => (this.viewportWidth() <= 700 ? 56 : 64) * this.preferences.scale());
   readonly labelWidth = computed(() => Math.min(244 * this.preferences.scale(), Math.max(136, this.viewportWidth() * 0.4)));
   readonly columnWidth = computed(() => ({day: 288, week: 196, month: 196}[this.scale()] * this.preferences.scale() * readGanttZoom(this.zoom()) / 100));
   readonly hourLabelStep = computed(() => [1, 2, 3, 6, 12, 24].find(step => this.columnWidth() / 24 * step >= 40 * this.preferences.scale()) ?? 24);
@@ -83,6 +88,12 @@ export class Gantt {
   readonly axis = computed(() => ganttAxis(this.selectedDate(), this.scale(), this.range()));
   readonly axisWidth = computed(() => this.axis().units * this.columnWidth());
   readonly canvasWidth = computed(() => this.labelWidth() + this.axisWidth());
+  readonly visiblePeriod = computed(() => {
+    const axis = this.axis(), width = this.columnWidth(), extent = Math.max(1, this.viewportWidth() - this.labelWidth());
+    const first = Math.floor(ganttDayAtPosition(this.scrollLeft(), axis, width)), last = Math.max(first, Math.ceil(ganttDayAtPosition(this.scrollLeft() + extent, axis, width)) - 1);
+    const start = civilKey(first), end = civilKey(last);
+    return start === end ? start : start + ' — ' + end;
+  });
   readonly baseRows = computed(() => ganttRows(this.tasks(), this.projects(), this.statuses(), this.completion(), this.order(), this.range()));
   readonly selectedStatuses = computed(() => [...new Set(this.statusFilter().filter(id => this.statusMap().has(id)))]);
   readonly selectedCategories = computed(() => [...new Set(this.categoryFilter().filter(id => id === '' || this.categoryMap().has(id)))]);
@@ -165,7 +176,9 @@ export class Gantt {
         if (context !== nextContext) element.scrollTop = 0;
         else if (rowSize && rowSize !== size) element.scrollTop = element.scrollTop / rowSize * size;
         element.scrollTop = Math.min(element.scrollTop, Math.max(0, count * size + this.headerHeight() - element.clientHeight));
-        if (axisKey !== nextAxis || context !== nextContext || viewportSize !== width || rowSize !== size) this.centerAnchor(element);
+        const pan = this.pendingPan; this.pendingPan = undefined;
+        if (pan && pan.date === this.selectedDate() && pan.scale === this.scale() && context === nextContext && viewportSize === width && rowSize === size && columnSize === columnWidth) element.scrollLeft = pan.scroll;
+        else if (axisKey !== nextAxis || context !== nextContext || viewportSize !== width || rowSize !== size) this.centerAnchor(element);
         else if (columnSize && columnSize !== columnWidth) element.scrollLeft = ganttZoomScroll(this.axis(), columnSize, columnWidth, element.scrollLeft, element.clientWidth - this.labelWidth());
         context = nextContext; axisKey = nextAxis; rowSize = size; viewportSize = width; columnSize = columnWidth; this.scrolled();
       });
@@ -193,8 +206,10 @@ export class Gantt {
     if (event.button !== 0 || event.isPrimary === false || !this.canAdjust(task) || this.documentDragging() || this.mailDragging() || !this.viewport()) return;
     this.cancelSchedule();
     this.suppressClick = false;
+    if (event.pointerType === 'touch' && kind === 'move') return;
     const element = event.currentTarget as HTMLElement;
     this.gesture = {pointerId: event.pointerId, element, original: structuredClone(task), kind, day: this.pointerDay(event.clientX), x: event.clientX, y: event.clientY, lastX: event.clientX, moved: false, valid: true, context: this.resetKey(), axis: this.editAxis()};
+    this.scheduleDragging.set(true);
     try {element.setPointerCapture(event.pointerId);} catch { /* Document listeners still support mouse input. */ }
     this.scheduleMessage.set(''); event.stopPropagation();
   }
@@ -238,7 +253,7 @@ export class Gantt {
   pointerCancelled(event: PointerEvent): void {if (event.pointerId === this.gesture?.pointerId) this.cancelSchedule();}
   @HostListener('window:blur')
   cancelSchedule(): void {
-    const gesture = this.gesture; this.gesture = undefined;
+    const gesture = this.gesture; this.gesture = undefined; this.scheduleDragging.set(false);
     if (gesture?.moved) this.suppressClick = true;
     if (this.scrollFrame && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(this.scrollFrame);
     this.scrollFrame = 0; this.schedulePreview.set(null); this.scheduleMessage.set('');
@@ -286,9 +301,13 @@ export class Gantt {
   colorLabel(task: Task): string {return '分類：' + (this.categoryMap().get(task.categoryId)?.name ?? '未分類');}
   project(task: Task): string {return this.projectMap().get(task.projectId) ?? '未指定專案';}
   overdue(task: Task): boolean {return isTaskOverdue(task, this.now(), this.statuses());}
-  scrolled(): void {
+  scrolled(browse = false): void {
     const element = this.viewport()?.nativeElement;
-    if (element) {this.scrollTop.set(element.scrollTop); this.scrollLeft.set(element.scrollLeft);}
+    if (!element) return;
+    this.scrollTop.set(element.scrollTop); this.scrollLeft.set(element.scrollLeft);
+    if (!browse || this.range() || this.gesture || this.pendingPan) return;
+    const pan = ganttPanWindow(this.axis(), this.columnWidth(), element.scrollLeft, element.clientWidth - this.labelWidth());
+    if (pan) {this.pendingPan = {...pan, scale: this.scale()}; this.dateChange.emit(pan.date);}
   }
   selectDate(value: string): void {const range = this.range(); if (value && validDate(value) && (!range || value >= range.start && value <= range.end)) this.dateChange.emit(value);}
   selectScale(value: GanttScale): void {this.scaleChange.emit(value);}

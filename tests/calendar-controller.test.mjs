@@ -75,6 +75,19 @@ test('月週視圖往返保留選中日，跨年週導覽後返回正確月份',
   } finally {f.close();}
 });
 
+test('全螢幕週標頭的滾輪捲動時間表，普通模式保留頁面捲動且不攔截水平或縮放手勢', () => {
+  const f = calendarController(), dom = new JSDOM('<div style="line-height:20px"></div>'), scroller = dom.window.document.querySelector('div'), pageMoves = [];
+  const previous = globalThis.WheelEvent; globalThis.WheelEvent = dom.window.WheelEvent;
+  try {
+    dom.window.scrollBy = options => pageMoves.push(options);
+    f.calendar.weekScroller = () => ({nativeElement: scroller}); const active = signal(true); f.calendar.fullscreen = () => ({active});
+    const wheel = patch => new dom.window.WheelEvent('wheel', {deltaY: 3, deltaMode: 1, cancelable: true, ...patch});
+    const full = wheel(); f.calendar.scrollPageFromHeader(full); assert.equal(scroller.scrollTop, 60); assert.equal(full.defaultPrevented, true); assert.equal(pageMoves.length, 0);
+    for (const event of [wheel({ctrlKey: true}), wheel({deltaX: 10})]) {f.calendar.scrollPageFromHeader(event); assert.equal(event.defaultPrevented, false);}
+    active.set(false); f.calendar.scrollPageFromHeader(wheel()); assert.deepEqual(pageMoves, [{top: 60, behavior: 'instant'}]); assert.equal(scroller.scrollTop, 60);
+  } finally {globalThis.WheelEvent = previous; f.close(); dom.window.close();}
+});
+
 test('週視圖預設 08–19 時，調整範圍與暫時全天顯示保留所有安排及原始時間', () => {
   const tasks = [{...base, id: 'early', startTime: '06:00', dueTime: '07:00'}, {...base, id: 'cross', startTime: '07:00', dueTime: '09:00'}, {...base, id: 'late', startTime: '20:00', dueTime: '21:00'}];
   const f = calendarController(tasks);

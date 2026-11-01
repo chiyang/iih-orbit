@@ -12,8 +12,8 @@ import {JSDOM} from 'jsdom';
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/toolbar-interaction-test-')), output = resolve(directory, 'toolbar.mjs');
-await build({stdin: {contents: "export {Tooltip} from './src/app/tooltip.ts'; export {CloudLogoutConfirm} from './src/app/cloud-logout-confirm.ts'; export {GoogleConnections} from './src/app/google-connections.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const {Tooltip, CloudLogoutConfirm, GoogleConnections} = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {ViewFullscreen} from './src/app/view-fullscreen.ts'; export {Tooltip} from './src/app/tooltip.ts'; export {CloudLogoutConfirm} from './src/app/cloud-logout-confirm.ts'; export {GoogleConnections} from './src/app/google-connections.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const {ViewFullscreen, Tooltip, CloudLogoutConfirm, GoogleConnections} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 
 function environment(providers = []) {
@@ -21,6 +21,33 @@ function environment(providers = []) {
   const injector = createEnvironmentInjector([...providers, {provide: ɵEffectScheduler, useValue: scheduler}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   return {injector, flush() {for (let round = 0; round < 30 && [...effects].some(effect => effect.dirty); round++) for (const effect of effects) if (effect.dirty) effect.run();}, close() {injector.destroy();}};
 }
+
+test('全螢幕只在啟用時消耗 Esc，退出後可以再次進入', () => {
+  const dom = new JSDOM('<main><section><button>全螢幕</button></section></main>'), document = dom.window.document;
+  const f = environment([{provide: DOCUMENT, useValue: document}, {provide: ElementRef, useValue: new ElementRef(document.querySelector('section'))}]);
+  const previous = globalThis.ngServerMode; globalThis.ngServerMode = true;
+  try {
+    const screen = runInInjectionContext(f.injector, () => new ViewFullscreen()), event = () => new dom.window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true});
+    const inactive = event(); screen.escape(inactive); assert.equal(inactive.defaultPrevented, false);
+    document.querySelector('button').focus(); screen.toggle(); assert.equal(screen.active(), true);
+    const exit = event(); screen.escape(exit); assert.equal(exit.defaultPrevented, true); assert.equal(screen.active(), false);
+    screen.toggle(); assert.equal(screen.active(), true); screen.toggle(); assert.equal(screen.active(), false);
+  } finally {globalThis.ngServerMode = previous; f.close(); dom.window.close();}
+});
+
+test('任務編輯、拖曳與已處理的 Esc 不會退出全螢幕', () => {
+  const dom = new JSDOM('<section></section>'), document = dom.window.document;
+  const f = environment([{provide: DOCUMENT, useValue: document}, {provide: ElementRef, useValue: new ElementRef(document.querySelector('section'))}]);
+  const previous = globalThis.ngServerMode; globalThis.ngServerMode = true;
+  try {
+    const screen = runInInjectionContext(f.injector, () => new ViewFullscreen()); screen.suspended = signal(false); screen.interacting = signal(false); screen.toggle();
+    const event = () => new dom.window.KeyboardEvent('keydown', {key: 'Escape', cancelable: true});
+    screen.suspended.set(true); const modal = event(); screen.escape(modal); screen.toggle(); assert.equal(screen.active(), true); assert.equal(modal.defaultPrevented, false);
+    screen.suspended.set(false); screen.interacting.set(true); const drag = event(); screen.escape(drag); assert.equal(screen.active(), true); assert.equal(drag.defaultPrevented, false);
+    screen.interacting.set(false); const handled = event(); handled.preventDefault(); screen.escape(handled); assert.equal(screen.active(), true);
+    screen.escape(event()); assert.equal(screen.active(), false);
+  } finally {globalThis.ngServerMode = previous; f.close(); dom.window.close();}
+});
 
 function logoutDialog() {
   const connections = {store: {generation: signal('generation'), google: signal({clientId: 'client'}), drive: signal({accountId: 'account'}), cloudResume: signal(undefined)}, drive: {online: signal(true), auth: {connected: signal(true)}, runtime: signal({link: {datasetId: 'dataset'}})}, busy: signal(false), loggingOut: signal(false), error: signal(''), cleanupError: signal(''), message: signal('登出完成')};

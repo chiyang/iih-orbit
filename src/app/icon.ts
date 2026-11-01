@@ -29,6 +29,8 @@ const PATHS: Record<string, string> = {
   close: 'M6 6l12 12M18 6 6 18',
   expand: 'M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5',
   collapse: 'M3 8h5V3M21 8h-5V3M16 21v-5h5M8 21v-5H3',
+  maximize: 'M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7',
+  restore: 'M4 14h6v6M14 4v6h6M21 3l-7 7M3 21l7-7',
   flag: 'M4 22V3M4 3c4-3 8 3 12 0v10c-4 3-8-3-12 0',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   edit: 'm16 3 5 5M3 21l5-1L21 7a2.1 2.1 0 0 0-4-4L4 16z',

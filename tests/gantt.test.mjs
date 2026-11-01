@@ -12,7 +12,7 @@ import {ganttDropPosition} from '../src/app/gantt-data.ts';
 import {GMAIL_MIME} from '../src/app/gmail-data.ts';
 import {DOCUMENT_DRAG_TYPE} from '../src/app/document-data.ts';
 import {editGanttSchedule} from '../src/app/gantt-edit.ts';
-import {civilDay, civilKey, ganttAxis, ganttDayAtPosition, ganttParts, ganttTaskInRange, ganttPosition, ganttRows, ganttSchedule, ganttSpan, ganttZoomScroll, moveGanttDate, readGanttRange, readGanttZoom, virtualRange} from '../src/app/gantt-data.ts';
+import {civilDay, civilKey, ganttAxis, ganttDayAtPosition, ganttPanWindow, ganttParts, ganttTaskInRange, ganttPosition, ganttRows, ganttSchedule, ganttSpan, ganttZoomScroll, moveGanttDate, readGanttRange, readGanttZoom, virtualRange} from '../src/app/gantt-data.ts';
 
 const task = (id, patch = {}) => ({id, title: id, description: '', categoryId: '', projectId: '', status: 'working', priority: 'medium', startDate: '', startTime: '', dueDate: '', dueTime: '', subtasks: [], ...patch});
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -70,6 +70,61 @@ test('甘特空白落點以實際日期定位，日模式以十五分鐘建立�
     assert.equal(last.day, '2028-03-02'); if (scale === 'day') assert.equal(last.minute, 1425);
     for (const invalid of [-1, NaN, Infinity, axis.units * width]) assert.equal(ganttDropPosition(invalid, axis, width), undefined);
   }
+});
+
+test('觸控滑動任務條只瀏覽時間軸，端點仍可調整日期且點一下可編輯', () => {
+  const dom = new JSDOM('<div id="viewport"><button>task</button></div>'), injector = createEnvironmentInjector([{provide: UiPreferences, useValue: {scale: () => 1}}]);
+  globalThis.ngServerMode = true; let component;
+  try {component = runInInjectionContext(injector, () => new Gantt());} finally {delete globalThis.ngServerMode;}
+  try {
+    const source = task('touch', {startDate: '2026-10-18', dueDate: '2026-10-20'}), viewport = dom.window.document.getElementById('viewport'), changes = [], edits = [];
+    component.tasks = signal([source]); component.selectedDate = signal('2026-10-18'); component.scale = signal('week'); component.viewport = () => ({nativeElement: viewport});
+    viewport.getBoundingClientRect = () => ({left: 0, right: 900}); viewport.scrollLeft = ganttPosition(civilDay(source.startDate), component.axis(), component.columnWidth());
+    component.scheduleChange.subscribe(value => changes.push(value)); component.editTask.subscribe(value => edits.push(value));
+    const x = component.labelWidth() + 70, event = offset => ({button: 0, pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: x + offset, clientY: 100, currentTarget: viewport.querySelector('button'), preventDefault() {}, stopPropagation() {}});
+    component.beginSchedule(event(0), source, 'move'); component.moveSchedule(event(56)); component.finishSchedule(event(56));
+    assert.equal(component.schedulePreview(), null); assert.equal(changes.length, 0);
+    component.openBar(source); assert.deepEqual(edits, [source]);
+    component.beginSchedule(event(0), source, 'end'); component.moveSchedule(event(28)); component.finishSchedule(event(28));
+    assert.equal(changes.length, 1); assert.equal(changes[0].task.dueDate, '2026-10-21'); assert.equal(source.dueDate, '2026-10-20');
+  } finally {injector.destroy(); dom.window.close();}
+});
+
+test('水平捲動到邊緣可延續日週月時間窗，跨年閏月保持可見日期及像素位置', () => {
+  for (const scale of ['day', 'week', 'month']) {
+    const axis = ganttAxis('2028-02-29', scale), width = scale === 'day' ? 288 : 196, extent = 220, maximum = axis.units * width - extent;
+    assert.equal(ganttPanWindow(axis, width, maximum / 2, extent), null);
+    for (const scroll of [0, maximum]) {
+      const pan = ganttPanWindow(axis, width, scroll, extent), next = ganttAxis(pan.date, scale);
+      assert.ok(scroll === 0 ? next.start < axis.start : next.end > axis.end);
+      for (const offset of [0, extent / 2, extent]) assert.ok(Math.abs(ganttDayAtPosition(scroll + offset, axis, width) - ganttDayAtPosition(pan.scroll + offset, next, width)) < 1e-9);
+    }
+    const first = ganttAxis('1900-01-01', scale), last = ganttAxis('9999-12-31', scale);
+    assert.equal(ganttPanWindow(first, width, 0, extent), null);
+    assert.equal(ganttPanWindow(last, width, Math.max(0, last.units * width - extent), extent), null);
+    assert.equal(ganttPanWindow(axis, width, 0, axis.units * width + 100), null);
+  }
+});
+
+test('甘特滑動只更新瀏覽日期，保留列位置且不延伸指定範圍或干擾任務拖曳', () => {
+  const dom = new JSDOM('<div id="viewport"><button>task</button></div>'), injector = createEnvironmentInjector([{provide: UiPreferences, useValue: {scale: () => 1}}]);
+  globalThis.ngServerMode = true; let component;
+  try {component = runInInjectionContext(injector, () => new Gantt());} finally {delete globalThis.ngServerMode;}
+  try {
+    const source = task('pan', {startDate: '2028-02-28', dueDate: '2028-03-02'}), before = structuredClone(source), viewport = dom.window.document.getElementById('viewport'), dates = [], changes = [];
+    Object.defineProperty(viewport, 'clientWidth', {value: 390});
+    component.tasks = signal([source]); component.selectedDate = signal('2028-02-29'); component.scale = signal('week'); component.range = signal(null); component.viewport = () => ({nativeElement: viewport});
+    component.dateChange.subscribe(value => dates.push(value)); component.scheduleChange.subscribe(value => changes.push(value));
+    viewport.scrollTop = 96; viewport.scrollLeft = 0;
+    component.scrolled(); assert.equal(dates.length, 0);
+    component.range.set({start: '2028-02-01', end: '2028-03-31'}); component.scrolled(true); assert.equal(dates.length, 0);
+    component.range.set(null); viewport.getBoundingClientRect = () => ({left: 0, right: 390});
+    component.beginSchedule({button: 0, pointerId: 1, clientX: 300, clientY: 100, currentTarget: viewport.querySelector('button'), stopPropagation() {}}, source, 'move');
+    component.scrolled(true); assert.equal(dates.length, 0); component.cancelSchedule();
+    component.scrolled(true); assert.equal(dates.length, 1); assert.ok(dates[0] < '2028-02-29');
+    assert.equal(component.scrollTop(), 96); assert.equal(viewport.scrollTop, 96); assert.equal(changes.length, 0); assert.deepEqual(source, before);
+    component.scrolled(true); assert.equal(dates.length, 1);
+  } finally {injector.destroy(); dom.window.close();}
 });
 
 test('甘特來源拖放區分任務與空白日期，保留專案、清理取消提示並拒絕外部或過期拖曳', () => {
