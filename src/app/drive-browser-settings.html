@@ -5,7 +5,7 @@
     <div class="service-heading"><h4>{{ source.name() }}</h4><span [class.connected]="source.auth.connected()">{{ files.status(source) }}</span></div>
     @if (source.account().email) {<p class="service-account">{{ source.account().email }}</p>}
     @if (source.id === files.id) {<p class="google-note">使用主要 Google Client ID，可由「一次授權全部服務」連線。</p>}
-    @else {<details class="source-details"><summary>連線資料</summary><p class="source-client">{{ source.clientId() }}</p></details>}
+    @else {<details class="source-details"><summary>連線資料</summary>@if (source.usesPrimaryClientId()) {<p class="google-note">與主要 Google 連線同步 Client ID。</p>}<p class="source-client">{{ source.clientId() || '請先到 Google 連線設定保存 Client ID。' }}</p></details>}
     <div class="google-actions">
       @if (source.clientId()) {
         <button type="button" class="google-primary" [disabled]="busy() || !source.auth.ready()" (click)="connect(source)">{{ source.connecting() ? '等待授權…' : source.account().id ? '重新授權' : '連線' }}</button>
@@ -25,9 +25,10 @@
   <form class="source-editor" (ngSubmit)="save()">
     <h4>{{ editId() ? '編輯來源' : '新增檔案來源' }}</h4>
     <label class="google-field">來源名稱<input type="text" name="sourceName" maxlength="100" required [ngModel]="draftName()" (ngModelChange)="draftName.set($event)" [disabled]="busy()"></label>
-    <label class="google-field">Google OAuth Client ID<input type="text" name="sourceClient" maxlength="300" required [ngModel]="draftClient()" (ngModelChange)="draftClient.set($event)" [disabled]="busy() || editId() === files.id"></label>
-    <p class="google-note">{{ editId() === files.id ? '主要來源的 Client ID 請到 Google 連線設定修改。' : '可沿用主要 Client ID，或填入另一個允許目前網站來源的 Client ID。帳號在連線時選擇。' }}</p>
-    <div class="google-actions"><button type="button" [disabled]="busy()" (click)="editId.set(null)">取消</button><button type="submit" class="google-primary" [disabled]="busy() || !draftName().trim() || editId() !== files.id && !draftClient().trim()">{{ saving() ? '保存中…' : '保存來源' }}</button></div>
+    @if (editId() !== files.id) {<label class="source-inherit"><input type="checkbox" name="usePrimaryClientId" [ngModel]="usePrimaryClientId()" (ngModelChange)="usePrimaryClientId.set($event)" [disabled]="busy()">與主要 Google 連線同步 Client ID</label>}
+    <label class="google-field">Google OAuth Client ID<input type="text" name="sourceClient" maxlength="300" required [ngModel]="usePrimaryClientId() ? files.clientId() : draftClient()" (ngModelChange)="draftClient.set($event)" [disabled]="busy() || editId() === files.id || usePrimaryClientId()"></label>
+    <p class="google-note">{{ editId() === files.id ? '主要來源的 Client ID 請到 Google 連線設定修改。' : usePrimaryClientId() ? '主要 Client ID 變更時，此來源會自動更新並要求重新授權。帳號在連線時選擇。' : '填入另一個允許目前網站來源的 Client ID。此來源獨立保存，不跟隨主要設定變更。' }}</p>
+    <div class="google-actions"><button type="button" [disabled]="busy()" (click)="editId.set(null)">取消</button><button type="submit" class="google-primary" [disabled]="busy() || !draftName().trim() || !usePrimaryClientId() && !draftClient().trim()">{{ saving() ? '保存中…' : '保存來源' }}</button></div>
   </form>
 }
 @if (removing()) {

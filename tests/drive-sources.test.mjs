@@ -16,12 +16,12 @@ import {documentLocationLabel} from '../src/app/document-data.ts';
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/drive-sources-test-')), output = resolve(directory, 'sources.mjs');
-await build({stdin: {contents: "export {DocumentCreateService} from './src/app/document-create-service.ts'; export {DocumentMetadataService} from './src/app/document-metadata-service.ts'; export {DriveBrowser} from './src/app/drive-browser.ts'; export {DriveBrowserAuth} from './src/app/drive-browser-auth.ts'; export {DriveBrowserConnection} from './src/app/drive-browser-connection.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const {DocumentCreateService, DocumentMetadataService, DriveBrowser, DriveBrowserAuth, DriveBrowserConnection, BoardStore} = await import(pathToFileURL(output).href);
+await build({stdin: {contents: "export {DriveBrowserSettings} from './src/app/drive-browser-settings.ts'; export {GoogleConnections} from './src/app/google-connections.ts'; export {DocumentCreateService} from './src/app/document-create-service.ts'; export {DocumentMetadataService} from './src/app/document-metadata-service.ts'; export {DriveBrowser} from './src/app/drive-browser.ts'; export {DriveBrowserAuth} from './src/app/drive-browser-auth.ts'; export {DriveBrowserConnection} from './src/app/drive-browser-connection.ts'; export {BoardStore} from './src/app/board-store.ts';", resolveDir: process.cwd()}, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
+const {DriveBrowserSettings, GoogleConnections, DocumentCreateService, DocumentMetadataService, DriveBrowser, DriveBrowserAuth, DriveBrowserConnection, BoardStore} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 const clientId = '123-example.apps.googleusercontent.com', otherClient = '456-other.apps.googleusercontent.com';
 const raw = (id, folder = false) => ({id, name: id, mimeType: folder ? DRIVE_FOLDER_MIME : 'application/pdf'});
-async function fixture() {
+async function fixture(sourceSettings) {
   const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage'), previousFetch = globalThis.fetch;
   const values = new Map(), tokens = new Map(), requests = [], calls = [], effects = new Set(), dom = new JSDOM('', {url: 'https://example.test'});
   const storage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: key => values.delete(key)};
@@ -29,6 +29,7 @@ async function fixture() {
   Object.defineProperty(globalThis, 'localStorage', {value: storage, configurable: true});
   Object.defineProperty(dom.window, 'localStorage', {value: storage});
   const store = new BoardStore(); await store.updateGoogle({clientId});
+  if (sourceSettings) values.set(DRIVE_SOURCE_KEY, JSON.stringify(sourceSettings));
   const oauth = {initTokenClient(options) {return {requestAccessToken(prompt) {requests.push({options, prompt});}};}, hasGrantedAllScopes(response, scope) {return response.scope?.split(' ').includes(scope);}};
   dom.window.google = {accounts: {oauth2: oauth}};
   let fetchFiles = async (url, account) => Response.json({files: url.searchParams.get('q').includes("'folder' in parents") ? [raw('same-file')] : [raw('folder', true), raw(account + '-file')]});
@@ -42,18 +43,100 @@ async function fixture() {
   };
   const injector = createEnvironmentInjector([DocumentCreateService, DocumentMetadataService, DriveBrowserConnection, DriveBrowserAuth, {provide: BoardStore, useValue: store}, {provide: DOCUMENT, useValue: dom.window.document}, {provide: ɵEffectScheduler, useValue: {add: effect => effects.add(effect), schedule() {}, remove: effect => effects.delete(effect)}}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   const make = Type => runInInjectionContext(injector, () => new Type());
+  const makeSettings = () => {const child = createEnvironmentInjector([{provide: GoogleConnections, useValue: {files: connection, busy: () => false}}], injector); return {component: runInInjectionContext(child, () => new DriveBrowserSettings()), close: () => child.destroy()};};
   const browser = make(DriveBrowser), picker = make(DriveBrowser), connection = injector.get(DriveBrowserConnection);
   const flush = () => {for (let round = 0; round < 30 && [...effects].some(effect => effect.dirty); round++) for (const effect of effects) if (effect.dirty) effect.run();}; flush();
   const begin = async (source, selectAccount = false) => {await source.prepare(); return {pending: source.id === 'default' ? source.connect(undefined, undefined, selectAccount) : source.connect(selectAccount)};};
   const reply = async (account, scopes = DRIVE_BROWSER_SCOPE) => {const token = 'synthetic-' + crypto.randomUUID(); tokens.set(token, account); await requests.at(-1).options.callback({access_token: token, expires_in: 3600, scope: scopes});};
   const grant = async (source, account, selectAccount = false) => {const {pending} = await begin(source, selectAccount); await reply(account); const result = await pending; flush(); return result;};
-  return {store, document: dom.window.document, storage, values, requests, calls, connection, browser, picker, injector, make, flush, begin, reply, grant, setFiles: callback => fetchFiles = callback, close() {browser.ngOnDestroy(); picker.ngOnDestroy(); if (!injector.destroyed) injector.destroy(); store.ngOnDestroy(); dom.window.close(); globalThis.fetch = previousFetch; if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage); else delete globalThis.localStorage;}};
+  return {store, document: dom.window.document, storage, values, requests, calls, connection, browser, picker, injector, make, makeSettings, flush, begin, reply, grant, setFiles: callback => fetchFiles = callback, close() {browser.ngOnDestroy(); picker.ngOnDestroy(); if (!injector.destroyed) injector.destroy(); store.ngOnDestroy(); dom.window.close(); globalThis.fetch = previousFetch; if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage); else delete globalThis.localStorage;}};
 }
 test('來源設定只保存公開欄位，拒絕重複身份、無效 Client ID 及過多來源', () => {
   const source = {id: crypto.randomUUID(), name: '研究', clientId, accountId: 'account', email: 'account@example.test', token: 'never-save', secret: 'never-save'};
   const settings = {version: 1, defaultName: '主要來源', sources: [source]};
   assert.equal(JSON.stringify(readDriveSources(settings)).includes('never-save'), false);
   for (const sources of [[source, source], [{...source, clientId: 'bad'}], [{...source, name: ''}], Array.from({length: 21}, () => ({...source, id: crypto.randomUUID()}))]) assert.equal(readDriveSources({...settings, sources}), undefined);
+  assert.equal(readDriveSources({...settings, sources: [{...source, usePrimaryClientId: true, clientId: ''}]}).sources[0].usePrimaryClientId, true);
+  for (const profile of [{...source, clientId: ''}, {...source, clientId: '', usePrimaryClientId: false}, {...source, usePrimaryClientId: 'true'}]) assert.equal(readDriveSources({...settings, sources: [profile]}), undefined);
+});
+test('多個同步來源持續使用主要 Client ID，更新後清除舊授權並以新 ID 重新連線', async () => {
+  const f = await fixture();
+  try {
+    const firstId = await f.connection.addSource('研究'), secondId = await f.connection.addSource('教學'), customId = await f.connection.addSource('獨立', otherClient);
+    const first = f.connection.source(firstId), second = f.connection.source(secondId), custom = f.connection.source(customId);
+    await f.grant(first, 'research'); await f.grant(second, 'teaching'); await f.grant(custom, 'custom');
+    const customSession = f.values.get('iih-orbit-drive-source-' + customId + '-session-v1');
+    const creation = f.injector.get(DocumentCreateService); f.flush(); await creation.prepare(firstId);
+    const writer = creation.authorization(firstId), pending = writer.authorize(clientId, {expectedAccountId: 'research'});
+    await f.reply('research', 'https://www.googleapis.com/auth/drive.file'); await pending; assert.equal(writer.connected(), true);
+    await f.store.updateGoogle({clientId: '789-new.apps.googleusercontent.com'}); f.flush();
+    for (const source of [first, second]) {assert.equal(source.clientId(), f.store.google().clientId); assert.equal(source.auth.connected(), false); assert.equal(f.values.has('iih-orbit-drive-source-' + source.id + '-session-v1'), false);}
+    assert.equal(creation.authorization(firstId), undefined); assert.equal(writer.connected(), false);
+    assert.equal(custom.clientId(), otherClient); assert.equal(custom.auth.connected(), true); assert.equal(f.values.get('iih-orbit-drive-source-' + customId + '-session-v1'), customSession);
+    assert.equal(await f.grant(first, 'research'), true); assert.equal(f.requests.at(-1).options.client_id, f.store.google().clientId); assert.equal(first.account().id, 'research');
+    f.document.defaultView.dispatchEvent(new f.document.defaultView.Event('focus')); assert.equal(first.clientId(), f.store.google().clientId); assert.equal(first.auth.connected(), true);
+  } finally {f.close();}
+});
+test('舊來源中相同的 Client ID 自動轉成持續同步，不同 ID 保持獨立且重新載入仍可辨識', async () => {
+  const inheritedId = crypto.randomUUID(), customId = crypto.randomUUID();
+  const legacy = {version: 1, defaultName: '主要來源', sources: [{id: inheritedId, name: '舊共用', clientId, accountId: 'research', email: 'research@example.test'}, {id: customId, name: '舊獨立', clientId: otherClient, accountId: '', email: ''}]};
+  const f = await fixture(legacy); let peer;
+  try {
+    const inherited = f.connection.source(inheritedId), saved = JSON.parse(f.values.get(DRIVE_SOURCE_KEY));
+    assert.equal(inherited.usesPrimaryClientId(), true); assert.equal(inherited.clientId(), clientId); assert.equal(saved.sources[0].usePrimaryClientId, true); assert.equal(saved.sources[0].clientId, '');
+    assert.equal(f.connection.source(customId).usesPrimaryClientId(), false); assert.equal(f.connection.source(customId).clientId(), otherClient);
+    await f.grant(inherited, 'research'); await f.store.updateGoogle({clientId: '789-new.apps.googleusercontent.com'}); f.flush();
+    const effects = new Set();
+    peer = createEnvironmentInjector([DriveBrowserConnection, DriveBrowserAuth, {provide: BoardStore, useValue: f.store}, {provide: DOCUMENT, useValue: f.document}, {provide: ɵEffectScheduler, useValue: {add: effect => effects.add(effect), schedule() {}, remove: effect => effects.delete(effect)}}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
+    const reloaded = peer.get(DriveBrowserConnection); for (const effect of effects) if (effect.dirty) effect.run();
+    assert.equal(reloaded.source(inheritedId).clientId(), f.store.google().clientId); assert.equal(reloaded.source(inheritedId).usesPrimaryClientId(), true); assert.equal(reloaded.source(inheritedId).account().id, 'research'); assert.equal(reloaded.source(inheritedId).auth.connected(), false);
+    assert.equal(reloaded.source(customId).clientId(), otherClient);
+  } finally {peer?.destroy(); f.close();}
+});
+test('尚未設定主要 Client ID 可先保存同步來源，設定後才啟用連線', async () => {
+  const f = await fixture();
+  try {
+    await f.store.updateGoogle({clientId: ''}); f.flush();
+    const id = await f.connection.addSource('稍後連線'), source = f.connection.source(id); assert.notEqual(id, undefined);
+    await source.prepare(); assert.equal(source.clientId(), ''); assert.equal(await source.connect(), false); assert.equal(f.requests.length, 0);
+    await f.store.updateGoogle({clientId: otherClient}); f.flush();
+    assert.equal(source.clientId(), otherClient); assert.equal(await f.grant(source, 'research'), true); assert.equal(f.requests.at(-1).options.client_id, otherClient);
+  } finally {f.close();}
+});
+test('來源可在同步與自訂 Client ID 間切換，實際 ID 相同時保留連線', async () => {
+  const f = await fixture();
+  try {
+    const id = await f.connection.addSource('研究'), source = f.connection.source(id); await f.grant(source, 'research');
+    assert.equal(await f.connection.saveSource(id, '研究', clientId, false), true); assert.equal(source.usesPrimaryClientId(), false); assert.equal(source.auth.connected(), true);
+    await f.store.updateGoogle({clientId: otherClient}); f.flush(); assert.equal(source.clientId(), clientId); assert.equal(source.auth.connected(), true);
+    assert.equal(await f.connection.saveSource(id, '研究', '', true), true); assert.equal(source.clientId(), otherClient); assert.equal(source.auth.connected(), false); assert.equal(source.account().id, '');
+    await f.grant(source, 'research'); assert.equal(f.requests.at(-1).options.client_id, otherClient);
+    assert.equal(await f.connection.saveSource(id, '研究', otherClient, false), true); assert.equal(source.usesPrimaryClientId(), false); assert.equal(source.auth.connected(), true);
+  } finally {f.close();}
+});
+test('主要 Client ID 在授權或帳號保存途中改變，舊回覆不能寫回同步來源', async () => {
+  const f = await fixture();
+  try {
+    const id = await f.connection.addSource('研究'), source = f.connection.source(id);
+    let started = await f.begin(source); await f.store.updateGoogle({clientId: otherClient}); f.flush(); await f.reply('late');
+    assert.equal(await started.pending, false); assert.equal(source.account().id, ''); assert.equal(source.auth.connected(), false);
+    let release; Object.defineProperty(f.document.defaultView.navigator, 'locks', {value: {request: (_, write) => new Promise(resolve => release = () => resolve(Promise.resolve().then(write)))}});
+    started = await f.begin(source); await f.reply('late'); assert.equal(source.connecting(), true);
+    await f.store.updateGoogle({clientId}); f.flush(); release(); assert.equal(await started.pending, false);
+    assert.equal(source.account().id, ''); assert.equal(source.auth.connected(), false); assert.equal(JSON.parse(f.values.get(DRIVE_SOURCE_KEY)).sources[0].accountId, '');
+  } finally {f.close();}
+});
+test('來源設定表單預設同步主要 Client ID，編輯及保存會保留所選模式', async () => {
+  const f = await fixture(); let settings;
+  try {
+    settings = f.makeSettings(); const component = settings.component;
+    component.edit(); component.draftName.set('表單來源'); assert.equal(component.usePrimaryClientId(), true);
+    await f.store.updateGoogle({clientId: otherClient}); f.flush(); await component.save();
+    const source = f.connection.sources()[1]; assert.equal(source.clientId(), otherClient); assert.equal(source.usesPrimaryClientId(), true);
+    component.edit(source); assert.equal(component.usePrimaryClientId(), true); component.usePrimaryClientId.set(false); component.draftClient.set(clientId); await component.save();
+    component.edit(source); assert.equal(component.usePrimaryClientId(), false); assert.equal(component.draftClient(), clientId);
+    component.usePrimaryClientId.set(true); await component.save(); assert.equal(source.usesPrimaryClientId(), true); assert.equal(source.clientId(), otherClient);
+  } finally {settings?.component.ngOnDestroy(); settings?.close(); f.close();}
 });
 test('多來源使用獨立憑證及 Client ID，解除其中一個來源不影響其他連線或備份設定', async () => {
   const f = await fixture();

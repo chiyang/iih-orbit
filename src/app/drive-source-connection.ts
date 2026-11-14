@@ -12,27 +12,35 @@ export class DriveSourceConnection {
   readonly warning = signal('');
   readonly error = signal('');
   private request = 0;
+  private scope = '';
   private destroyed = false;
-  constructor(profile: DriveSourceProfile, readonly auth: DriveBrowserAuth, private readonly generation: () => string, private readonly saveAccount: (id: string, account: GoogleAccount) => Promise<boolean>) {
+  constructor(profile: DriveSourceProfile, readonly auth: DriveBrowserAuth, private readonly generation: () => string, private readonly saveAccount: (id: string, account: GoogleAccount) => Promise<boolean>, private readonly primaryClientId: () => string) {
     this.profile = signal(profile); this.synchronize(profile);
   }
   get id(): string {return this.profile().id;}
   name(): string {return this.profile().name;}
-  clientId(): string {return this.profile().clientId;}
+  usesPrimaryClientId(): boolean {return this.profile().usePrimaryClientId;}
+  clientId(): string {return this.usesPrimaryClientId() ? this.primaryClientId() : this.profile().clientId;}
   synchronize(profile = this.profile()): void {
-    const context = JSON.stringify([this.generation(), profile.clientId, profile.accountId]);
-    if (context !== this.context()) {this.cancelAuthorization(); this.account.set({id: profile.accountId, email: profile.email}); this.context.set(context);}
+    const generation = this.generation(), clientId = profile.usePrimaryClientId ? this.primaryClientId() : profile.clientId;
+    const scope = JSON.stringify([generation, clientId]), context = JSON.stringify([generation, clientId, profile.accountId]);
+    if (context !== this.context()) {
+      this.cancelAuthorization();
+      if (this.scope && scope !== this.scope) this.auth.disconnect('來源 Client ID 或工作資料已更新，請重新連線。');
+      this.account.set({id: profile.accountId, email: profile.email}); this.context.set(context);
+    }
+    this.scope = scope;
     this.profile.set(profile);
-    this.auth.useSession({generation: this.generation(), clientId: profile.clientId, accountId: profile.accountId});
+    this.auth.useSession({generation, clientId, accountId: profile.accountId});
   }
   prepare(): Promise<void> {return this.auth.prepare();}
   async connect(selectAccount = false): Promise<boolean> {
-    if (this.destroyed || !this.auth.ready() || this.connecting() || this.auth.authorizing()) return false;
+    if (this.destroyed || !this.clientId() || !this.auth.ready() || this.connecting() || this.auth.authorizing()) return false;
     const context = this.context(), generation = this.generation(), accountId = this.account().id, clientId = this.clientId(), request = ++this.request;
     this.connecting.set(true); this.error.set(''); this.warning.set('');
     try {
       const account = await this.auth.authorize(clientId, {selectAccount: selectAccount || !accountId, ...(!selectAccount && accountId ? {expectedAccountId: accountId, loginHint: accountId} : {})});
-      if (this.destroyed || request !== this.request || context !== this.context() || generation !== this.generation()) return false;
+      if (this.destroyed || request !== this.request || context !== this.context() || generation !== this.generation() || clientId !== this.clientId()) return false;
       this.auth.useSession({generation, clientId, accountId: account.id});
       if (!await this.saveAccount(this.id, account)) {this.auth.disconnect(); this.error.set('來源帳號未保存，請重試。任務中的資訊連結保留。'); return false;}
       return true;
