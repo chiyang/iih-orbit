@@ -2,7 +2,7 @@ import '@angular/compiler';
 import { DOCUMENT } from '@angular/common';
 import { createEnvironmentInjector, runInInjectionContext, signal, ɵChangeDetectionScheduler, ɵEffectScheduler } from '@angular/core';
 import assert from 'node:assert/strict';
-import { after, test } from 'node:test';
+import { after, beforeEach, test } from 'node:test';
 import { createRequire } from 'node:module';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
@@ -23,6 +23,9 @@ await build({stdin: {contents: "export {Reminders} from './src/app/reminders.ts'
 const {Reminders, ReminderCenter, ReminderPopups, GoogleCalendarService, BoardStore} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 const task = {id: 'task', title: '會議準備', description: '', projectId: '', categoryId: '', status: 'todo', priority: 'medium', startDate: '2026-10-09', startTime: '11:00', dueDate: '2026-10-09', dueTime: '12:00', subtasks: []};
+
+// Freeze the clock before construction, when saved history is checked against its 30-day expiry.
+beforeEach(t => t.mock.timers.enable({apis: ['Date'], now: new Date(2026, 9, 9, 10, 50)}));
 
 function storage(tasks = [task]) {
   const state = {version: 1, activeWorkspaceId: 'workspace', workspaces: [{version: 4, id: 'workspace', name: '工作', projects: [], categories: [], statuses: COLUMNS, tasks}]};
