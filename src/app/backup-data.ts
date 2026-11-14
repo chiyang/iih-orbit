@@ -7,6 +7,7 @@ import { DEFAULT_GOOGLE, readGoogleSettings, readSources } from './google-data.t
 import { DEFAULT_REMINDERS, type ReminderPreferences, readReminders } from './reminder-data.ts';
 import { DEFAULT_DRIVE, type DriveSettings, readDriveSettings } from './drive-settings.ts';
 import { taskFingerprint } from './calendar-transfer-data.ts';
+import {readSharedDriveSources, type SharedDriveSources} from './drive-source-data.ts';
 
 export type BackupKind = 'full' | 'workspaces';
 export type {TextSize} from './appearance-data.ts';
@@ -14,7 +15,7 @@ export {TEXT_SIZE_IDS} from './appearance-data.ts';
 
 export interface OrbitBackup {
   application: 'iih-orbit';
-  formatVersion: 5 | 6 | 7 | 8 | 9;
+  formatVersion: 5 | 6 | 7 | 8 | 9 | 10;
   appVersion: string;
   kind: BackupKind;
   exportedAt: string;
@@ -24,19 +25,23 @@ export interface OrbitBackup {
   calendarSources?: CalendarSource[];
   reminders?: ReminderPreferences;
   drive?: DriveSettings;
+  driveSources?: SharedDriveSources;
 }
 
-export function createBackup(state: WorkspaceState, kind: BackupKind, selectedIds: string[] = [], appearance: TextSize | SharedAppearancePreferences = DEFAULT_APPEARANCE, google: GoogleSettings = DEFAULT_GOOGLE, includeGoogle = false, reminders: ReminderPreferences = DEFAULT_REMINDERS, drive: DriveSettings = DEFAULT_DRIVE): OrbitBackup {
+export function createBackup(state: WorkspaceState, kind: BackupKind, selectedIds: string[] = [], appearance: TextSize | SharedAppearancePreferences = DEFAULT_APPEARANCE, google: GoogleSettings = DEFAULT_GOOGLE, includeGoogle = false, reminders: ReminderPreferences = DEFAULT_REMINDERS, drive: DriveSettings = DEFAULT_DRIVE, driveSources?: SharedDriveSources): OrbitBackup {
   const workspaces = kind === 'full' ? state.workspaces : state.workspaces.filter(workspace => selectedIds.includes(workspace.id));
   if (!workspaces.length || (kind === 'workspaces' && selectedIds.some(id => !workspaces.some(workspace => workspace.id === id)))) {
     throw new Error('請選擇至少一個仍存在的工作空間。');
   }
+  const sharedSources = (kind === 'full' || includeGoogle) && driveSources !== undefined ? readSharedDriveSources(driveSources) : undefined;
+  if ((kind === 'full' || includeGoogle) && driveSources !== undefined && !sharedSources) throw new Error('檔案來源設定不合法，尚未建立備份。');
   return {
-    application: 'iih-orbit', formatVersion: backupFormat(workspaces), appVersion: '1.7.0', kind, exportedAt: new Date().toISOString(),
+    application: 'iih-orbit', formatVersion: backupFormat(workspaces, sharedSources), appVersion: '1.7.0', kind, exportedAt: new Date().toISOString(),
     data: structuredClone({version: 1, activeWorkspaceId: workspaces.some(workspace => workspace.id === state.activeWorkspaceId) ? state.activeWorkspaceId : workspaces[0].id, workspaces}),
     ...(kind === 'full' ? {preferences: sharedAppearance(typeof appearance === 'string' ? DEFAULT_APPEARANCE : appearance), google: structuredClone(google), reminders: {...reminders}, drive: structuredClone(drive)}
       : {calendarSources: google.sources.filter(source => source.workspaceIds.some(id => selectedIds.includes(id))).map(source => ({...structuredClone(source), workspaceIds: source.workspaceIds.filter(id => selectedIds.includes(id))})),
-        ...(includeGoogle ? {google: {...structuredClone(google), sources: []}} : {})})
+        ...(includeGoogle ? {google: {...structuredClone(google), sources: []}} : {})}),
+    ...(sharedSources ? {driveSources: sharedSources} : {})
   };
 }
 
@@ -45,7 +50,7 @@ export function readBackup(value: unknown): OrbitBackup {
   if (!value || typeof value !== 'object') throw new Error('這不是有效的 IIH Orbit 備份檔。');
   const source = value as OrbitBackup;
   if (source.application !== 'iih-orbit') throw new Error('請選擇 IIH Orbit 匯出的 JSON 備份檔。');
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(source.formatVersion)) throw new Error('這個備份格式尚未支援，請使用相容版本的 IIH Orbit。');
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(source.formatVersion)) throw new Error('這個備份格式尚未支援，請使用相容版本的 IIH Orbit。');
   if (!['full', 'workspaces'].includes(source.kind) || typeof source.appVersion !== 'string'
     || typeof source.exportedAt !== 'string' || !Number.isFinite(Date.parse(source.exportedAt))) {
     throw new Error('備份的範圍、版本或匯出日期不完整。');
@@ -70,15 +75,17 @@ export function readBackup(value: unknown): OrbitBackup {
   if (reminders === null) throw new Error('備份的提醒設定不合法。原有資料未變更。');
   const drive = source.formatVersion >= 5 && source.kind === 'full' && source.drive !== undefined ? readDriveSettings(source.drive, workspaceIds) : undefined;
   if (drive === null) throw new Error('Drive 設定不合法。原有資料未變更。');
+  const driveSources = source.driveSources === undefined ? undefined : readSharedDriveSources(source.driveSources);
+  if (source.driveSources !== undefined && (source.formatVersion < 10 || !driveSources)) throw new Error('檔案來源設定不合法或需要新版備份格式，原有資料未變更。');
   return {
     application: 'iih-orbit', formatVersion: source.formatVersion >= 6 ? source.formatVersion : 5, appVersion: source.appVersion, kind: source.kind,
     exportedAt: source.exportedAt, data,
-    ...(source.kind === 'full' && preferences ? {preferences} : {}), ...(google ? {google} : {}), ...(calendarSources ? {calendarSources} : {}), ...(reminders ? {reminders} : {}), ...(drive ? {drive} : {})
+    ...(source.kind === 'full' && preferences ? {preferences} : {}), ...(google ? {google} : {}), ...(calendarSources ? {calendarSources} : {}), ...(reminders ? {reminders} : {}), ...(drive ? {drive} : {}), ...(driveSources ? {driveSources} : {})
   };
 }
 
-export function backupFormat(workspaces: readonly Workspace[]): OrbitBackup['formatVersion'] {
-  return workspaces.some(workspace => workspace.version === 8) ? 9 : workspaces.some(workspace => workspace.version === 7) ? 8 : workspaces.some(workspace => workspace.version === 6) ? 7 : workspaces.some(workspace => workspace.version === 5) ? 6 : 5;
+export function backupFormat(workspaces: readonly Workspace[], driveSources?: SharedDriveSources): OrbitBackup['formatVersion'] {
+  return driveSources ? 10 : workspaces.some(workspace => workspace.version === 8) ? 9 : workspaces.some(workspace => workspace.version === 7) ? 8 : workspaces.some(workspace => workspace.version === 6) ? 7 : workspaces.some(workspace => workspace.version === 5) ? 6 : 5;
 }
 
 function validSubtaskIds(task: Task): boolean {

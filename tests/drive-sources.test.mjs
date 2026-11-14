@@ -10,7 +10,9 @@ import {pathToFileURL} from 'node:url';
 import {JSDOM} from 'jsdom';
 import {COLUMNS} from '../src/app/models.ts';
 import {DRIVE_BROWSER_SCOPE, DRIVE_FOLDER_MIME} from '../src/app/drive-browser-data.ts';
-import {DRIVE_SOURCE_KEY, readDriveSources} from '../src/app/drive-source-data.ts';
+import {DRIVE_SOURCE_KEY, readDriveSources, readSharedDriveSources} from '../src/app/drive-source-data.ts';
+import {DriveEngine} from '../src/app/drive-engine.ts';
+import {cloud as fakeCloud} from './helpers/backup-cloud.mjs';
 import {documentLocationLabel} from '../src/app/document-data.ts';
 
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -29,7 +31,7 @@ async function fixture(sourceSettings) {
   Object.defineProperty(globalThis, 'localStorage', {value: storage, configurable: true});
   Object.defineProperty(dom.window, 'localStorage', {value: storage});
   const store = new BoardStore(); await store.updateGoogle({clientId});
-  if (sourceSettings) values.set(DRIVE_SOURCE_KEY, JSON.stringify(sourceSettings));
+  if (sourceSettings) {values.set(DRIVE_SOURCE_KEY, JSON.stringify(sourceSettings)); store.refreshFromStorage();}
   const oauth = {initTokenClient(options) {return {requestAccessToken(prompt) {requests.push({options, prompt});}};}, hasGrantedAllScopes(response, scope) {return response.scope?.split(' ').includes(scope);}};
   dom.window.google = {accounts: {oauth2: oauth}};
   let fetchFiles = async (url, account) => Response.json({files: url.searchParams.get('q').includes("'folder' in parents") ? [raw('same-file')] : [raw('folder', true), raw(account + '-file')]});
@@ -56,87 +58,123 @@ test('來源設定只保存公開欄位，拒絕重複身份、無效 Client ID 
   const settings = {version: 1, defaultName: '主要來源', sources: [source]};
   assert.equal(JSON.stringify(readDriveSources(settings)).includes('never-save'), false);
   for (const sources of [[source, source], [{...source, clientId: 'bad'}], [{...source, name: ''}], Array.from({length: 21}, () => ({...source, id: crypto.randomUUID()}))]) assert.equal(readDriveSources({...settings, sources}), undefined);
-  assert.equal(readDriveSources({...settings, sources: [{...source, usePrimaryClientId: true, clientId: ''}]}).sources[0].usePrimaryClientId, true);
-  for (const profile of [{...source, clientId: ''}, {...source, clientId: '', usePrimaryClientId: false}, {...source, usePrimaryClientId: 'true'}]) assert.equal(readDriveSources({...settings, sources: [profile]}), undefined);
+  assert.equal(readSharedDriveSources({...settings, sources: [{...source, accountId: 'private-account', email: 'private@example.test'}]}).sources[0].accountId, undefined);
 });
-test('多個同步來源持續使用主要 Client ID，更新後清除舊授權並以新 ID 重新連線', async () => {
+test('每組來源保留自己的 Client ID，主要 ID 變更不改寫其他來源或憑證', async () => {
   const f = await fixture();
   try {
-    const firstId = await f.connection.addSource('研究'), secondId = await f.connection.addSource('教學'), customId = await f.connection.addSource('獨立', otherClient);
-    const first = f.connection.source(firstId), second = f.connection.source(secondId), custom = f.connection.source(customId);
-    await f.grant(first, 'research'); await f.grant(second, 'teaching'); await f.grant(custom, 'custom');
-    const customSession = f.values.get('iih-orbit-drive-source-' + customId + '-session-v1');
-    const creation = f.injector.get(DocumentCreateService); f.flush(); await creation.prepare(firstId);
-    const writer = creation.authorization(firstId), pending = writer.authorize(clientId, {expectedAccountId: 'research'});
-    await f.reply('research', 'https://www.googleapis.com/auth/drive.file'); await pending; assert.equal(writer.connected(), true);
-    await f.store.updateGoogle({clientId: '789-new.apps.googleusercontent.com'}); f.flush();
-    for (const source of [first, second]) {assert.equal(source.clientId(), f.store.google().clientId); assert.equal(source.auth.connected(), false); assert.equal(f.values.has('iih-orbit-drive-source-' + source.id + '-session-v1'), false);}
-    assert.equal(creation.authorization(firstId), undefined); assert.equal(writer.connected(), false);
-    assert.equal(custom.clientId(), otherClient); assert.equal(custom.auth.connected(), true); assert.equal(f.values.get('iih-orbit-drive-source-' + customId + '-session-v1'), customSession);
-    assert.equal(await f.grant(first, 'research'), true); assert.equal(f.requests.at(-1).options.client_id, f.store.google().clientId); assert.equal(first.account().id, 'research');
-    f.document.defaultView.dispatchEvent(new f.document.defaultView.Event('focus')); assert.equal(first.clientId(), f.store.google().clientId); assert.equal(first.auth.connected(), true);
+    const firstId = await f.connection.addSource('研究', otherClient), secondId = await f.connection.addSource('教學', '789-teaching.apps.googleusercontent.com');
+    const first = f.connection.source(firstId), second = f.connection.source(secondId);
+    await f.grant(first, 'research'); await f.grant(second, 'teaching');
+    const sessions = [firstId, secondId].map(id => f.values.get('iih-orbit-drive-source-' + id + '-session-v1'));
+    await f.store.updateGoogle({clientId: '999-main.apps.googleusercontent.com'}); f.flush();
+    assert.deepEqual([first.clientId(), second.clientId()], [otherClient, '789-teaching.apps.googleusercontent.com']);
+    for (const [index, source] of [first, second].entries()) {assert.equal(source.auth.connected(), true); assert.equal(f.values.get('iih-orbit-drive-source-' + source.id + '-session-v1'), sessions[index]);}
+    assert.equal(f.requests[0].options.client_id, otherClient); assert.equal(f.requests[1].options.client_id, second.clientId());
   } finally {f.close();}
 });
-test('舊來源中相同的 Client ID 自動轉成持續同步，不同 ID 保持獨立且重新載入仍可辨識', async () => {
-  const inheritedId = crypto.randomUUID(), customId = crypto.randomUUID();
-  const legacy = {version: 1, defaultName: '主要來源', sources: [{id: inheritedId, name: '舊共用', clientId, accountId: 'research', email: 'research@example.test'}, {id: customId, name: '舊獨立', clientId: otherClient, accountId: '', email: ''}]};
-  const f = await fixture(legacy); let peer;
+test('舊本機來源移入同步資料，舊版沿用模式轉為固定 ID 並保留不同來源的 ID', async () => {
+  const firstId = crypto.randomUUID(), secondId = crypto.randomUUID();
+  const legacy = {version: 1, defaultName: '我的來源', sources: [{id: firstId, name: '舊沿用', clientId: '', usePrimaryClientId: true, accountId: 'research', email: 'research@example.test'}, {id: secondId, name: '獨立來源', clientId: otherClient, accountId: '', email: ''}]};
+  const f = await fixture(legacy);
   try {
-    const inherited = f.connection.source(inheritedId), saved = JSON.parse(f.values.get(DRIVE_SOURCE_KEY));
-    assert.equal(inherited.usesPrimaryClientId(), true); assert.equal(inherited.clientId(), clientId); assert.equal(saved.sources[0].usePrimaryClientId, true); assert.equal(saved.sources[0].clientId, '');
-    assert.equal(f.connection.source(customId).usesPrimaryClientId(), false); assert.equal(f.connection.source(customId).clientId(), otherClient);
-    await f.grant(inherited, 'research'); await f.store.updateGoogle({clientId: '789-new.apps.googleusercontent.com'}); f.flush();
-    const effects = new Set();
-    peer = createEnvironmentInjector([DriveBrowserConnection, DriveBrowserAuth, {provide: BoardStore, useValue: f.store}, {provide: DOCUMENT, useValue: f.document}, {provide: ɵEffectScheduler, useValue: {add: effect => effects.add(effect), schedule() {}, remove: effect => effects.delete(effect)}}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
-    const reloaded = peer.get(DriveBrowserConnection); for (const effect of effects) if (effect.dirty) effect.run();
-    assert.equal(reloaded.source(inheritedId).clientId(), f.store.google().clientId); assert.equal(reloaded.source(inheritedId).usesPrimaryClientId(), true); assert.equal(reloaded.source(inheritedId).account().id, 'research'); assert.equal(reloaded.source(inheritedId).auth.connected(), false);
-    assert.equal(reloaded.source(customId).clientId(), otherClient);
-  } finally {peer?.destroy(); f.close();}
+    const snapshot = await f.store.driveSnapshot('full', []); f.flush();
+    assert.deepEqual(snapshot.backup.driveSources.sources.map(source => source.clientId), [clientId, otherClient]);
+    assert.equal(snapshot.backup.formatVersion, 10); assert.equal(JSON.stringify(snapshot.backup.driveSources).includes('usePrimaryClientId'), false); assert.equal(JSON.stringify(snapshot.backup.driveSources).includes('research@example.test'), false);
+    assert.equal(f.connection.source(firstId).account().id, 'research');
+    await f.store.updateGoogle({clientId: '999-main.apps.googleusercontent.com'}); f.flush();
+    assert.equal(f.connection.source(firstId).clientId(), clientId); assert.equal(f.connection.source(secondId).clientId(), otherClient);
+    const restored = new BoardStore(); assert.deepEqual(restored.driveSources(), f.store.driveSources()); restored.ngOnDestroy();
+  } finally {f.close();}
 });
-test('尚未設定主要 Client ID 可先保存同步來源，設定後才啟用連線', async () => {
+test('損壞的舊來源設定不使核心任務退回舊資料，也不被新來源覆蓋', async () => {
   const f = await fixture();
   try {
-    await f.store.updateGoogle({clientId: ''}); f.flush();
-    const id = await f.connection.addSource('稍後連線'), source = f.connection.source(id); assert.notEqual(id, undefined);
-    await source.prepare(); assert.equal(source.clientId(), ''); assert.equal(await source.connect(), false); assert.equal(f.requests.length, 0);
-    await f.store.updateGoogle({clientId: otherClient}); f.flush();
-    assert.equal(source.clientId(), otherClient); assert.equal(await f.grant(source, 'research'), true); assert.equal(f.requests.at(-1).options.client_id, otherClient);
+    await f.store.saveTask({id: 'keep-task', title: '保留新任務', description: '', categoryId: '', projectId: '', status: 'todo', priority: 'medium', startDate: '', dueDate: '', startTime: '', dueTime: '', subtasks: []});
+    f.values.set(DRIVE_SOURCE_KEY, '{broken');
+    const restored = new BoardStore(); assert.equal(restored.tasks()[0].id, 'keep-task'); restored.ngOnDestroy();
+    assert.equal(await f.connection.addSource('新來源', otherClient), undefined); assert.equal(f.values.get(DRIVE_SOURCE_KEY), '{broken'); assert.equal(f.store.driveSources(), undefined);
   } finally {f.close();}
 });
-test('來源可在同步與自訂 Client ID 間切換，實際 ID 相同時保留連線', async () => {
-  const f = await fixture();
-  try {
-    const id = await f.connection.addSource('研究'), source = f.connection.source(id); await f.grant(source, 'research');
-    assert.equal(await f.connection.saveSource(id, '研究', clientId, false), true); assert.equal(source.usesPrimaryClientId(), false); assert.equal(source.auth.connected(), true);
-    await f.store.updateGoogle({clientId: otherClient}); f.flush(); assert.equal(source.clientId(), clientId); assert.equal(source.auth.connected(), true);
-    assert.equal(await f.connection.saveSource(id, '研究', '', true), true); assert.equal(source.clientId(), otherClient); assert.equal(source.auth.connected(), false); assert.equal(source.account().id, '');
-    await f.grant(source, 'research'); assert.equal(f.requests.at(-1).options.client_id, otherClient);
-    assert.equal(await f.connection.saveSource(id, '研究', otherClient, false), true); assert.equal(source.usesPrimaryClientId(), false); assert.equal(source.auth.connected(), true);
-  } finally {f.close();}
-});
-test('主要 Client ID 在授權或帳號保存途中改變，舊回覆不能寫回同步來源', async () => {
-  const f = await fixture();
-  try {
-    const id = await f.connection.addSource('研究'), source = f.connection.source(id);
-    let started = await f.begin(source); await f.store.updateGoogle({clientId: otherClient}); f.flush(); await f.reply('late');
-    assert.equal(await started.pending, false); assert.equal(source.account().id, ''); assert.equal(source.auth.connected(), false);
-    let release; Object.defineProperty(f.document.defaultView.navigator, 'locks', {value: {request: (_, write) => new Promise(resolve => release = () => resolve(Promise.resolve().then(write)))}});
-    started = await f.begin(source); await f.reply('late'); assert.equal(source.connecting(), true);
-    await f.store.updateGoogle({clientId}); f.flush(); release(); assert.equal(await started.pending, false);
-    assert.equal(source.account().id, ''); assert.equal(source.auth.connected(), false); assert.equal(JSON.parse(f.values.get(DRIVE_SOURCE_KEY)).sources[0].accountId, '');
-  } finally {f.close();}
-});
-test('來源設定表單預設同步主要 Client ID，編輯及保存會保留所選模式', async () => {
+test('新增來源表單不預填主要 ID，必須填入來源自己的 ID，編輯時保留各自設定', async () => {
   const f = await fixture(); let settings;
   try {
     settings = f.makeSettings(); const component = settings.component;
-    component.edit(); component.draftName.set('表單來源'); assert.equal(component.usePrimaryClientId(), true);
-    await f.store.updateGoogle({clientId: otherClient}); f.flush(); await component.save();
-    const source = f.connection.sources()[1]; assert.equal(source.clientId(), otherClient); assert.equal(source.usesPrimaryClientId(), true);
-    component.edit(source); assert.equal(component.usePrimaryClientId(), true); component.usePrimaryClientId.set(false); component.draftClient.set(clientId); await component.save();
-    component.edit(source); assert.equal(component.usePrimaryClientId(), false); assert.equal(component.draftClient(), clientId);
-    component.usePrimaryClientId.set(true); await component.save(); assert.equal(source.usesPrimaryClientId(), true); assert.equal(source.clientId(), otherClient);
+    component.edit(); component.draftName.set('獨立來源'); assert.equal(component.draftClient(), ''); assert.equal('usePrimaryClientId' in component, false);
+    await component.save(); assert.equal(f.connection.sources().length, 1); assert.match(f.connection.sourceError(), /自己的.*Client ID/);
+    component.draftClient.set(otherClient); await component.save(); const source = f.connection.sources()[1];
+    component.edit(source); assert.equal(component.draftClient(), otherClient); assert.equal(source.clientId(), otherClient);
+    component.draftName.set('修改名稱'); await component.save(); assert.equal(source.name(), '修改名稱'); assert.equal(source.clientId(), otherClient);
   } finally {settings?.component.ngOnDestroy(); settings?.close(); f.close();}
+});
+test('來源設定修改會產生同步修訂，授權及切換帳號不把帳號或憑證加入同步資料', async () => {
+  const f = await fixture();
+  try {
+    const revision = f.store.revision(), id = await f.connection.addSource('研究', otherClient), source = f.connection.source(id);
+    assert.notEqual(f.store.revision(), revision); const configured = f.store.revision();
+    await f.grant(source, 'research'); assert.equal(f.store.revision(), configured);
+    await f.grant(source, 'another-account', true); assert.equal(f.store.revision(), configured);
+    const snapshot = await f.store.driveSnapshot('full', []);
+    assert.deepEqual(snapshot.backup.driveSources.sources, [{id, provider: 'google-drive', name: '研究', clientId: otherClient}]);
+    assert.equal(JSON.stringify(snapshot.backup).includes('another-account'), false); assert.equal(JSON.stringify(snapshot.backup).includes('synthetic-'), false);
+  } finally {f.close();}
+});
+test('完整還原帶回各來源 ID，舊備份不刪來源，整個 Orbit 重置後不從舊帳號快取復活', async () => {
+  const a = await fixture(); let b;
+  try {
+    const id = await a.connection.addSource('研究', otherClient), exported = await a.store.backupForExport('full');
+    b = await fixture(); assert.equal((await b.store.importBackup(exported, b.store.revision())).ok, true); b.flush();
+    assert.equal(b.connection.source(id).clientId(), otherClient); assert.equal(b.connection.source(id).auth.connected(), false); assert.equal(b.connection.source(id).account().id, '');
+    const legacy = structuredClone(exported); delete legacy.driveSources; legacy.formatVersion = 5;
+    assert.equal((await b.store.applyDriveBackup(legacy, b.store.revision(), ['workspace'])).ok, true); b.flush(); assert.equal(b.connection.source(id).clientId(), otherClient);
+    await b.grant(b.connection.source(id), 'local-account'); assert.equal(b.values.has(DRIVE_SOURCE_KEY), true);
+    assert.equal((await b.store.resetData(true, b.store.revision())).ok, true); b.flush(); assert.equal(b.connection.sources().length, 1);
+    const restored = new BoardStore(); assert.deepEqual(restored.driveSources().sources, []); restored.ngOnDestroy();
+  } finally {b?.close(); a.close();}
+});
+test('完整同步流程往返雲端分塊：兩裝置各組 ID、同時新增及修改、移除與再次同步', async () => {
+  const a = await fixture(); let b;
+  try {
+    const firstId = await a.connection.addSource('研究', otherClient), secondId = await a.connection.addSource('教學', '789-teaching.apps.googleusercontent.com');
+    await a.grant(a.connection.source(firstId), 'research'); await a.grant(a.connection.source(secondId), 'teaching');
+    b = await fixture(); const cloud = fakeCloud();
+    const engine = f => {
+      let runtime = {};
+      const use = action => {Object.defineProperty(globalThis, 'localStorage', {value: f.storage, configurable: true}); return action();};
+      const board = {snapshot: (kind, ids) => use(() => f.store.driveSnapshot(kind, ids)), apply: async (backup, revision, ids) => {const result = await use(() => f.store.applyDriveBackup(backup, revision, ids)); assert.equal(result.ok, true, result.message);}};
+      return new DriveEngine(cloud.api, {read: async () => structuredClone(runtime), write: async (_, value) => {runtime = structuredClone(value);}}, board, 'device');
+    };
+    const first = engine(a), second = engine(b); await first.start('full', [], 'sync');
+    await second.join((await cloud.api.list())[0], b.store.revision()); b.flush();
+    assert.deepEqual(b.connection.sources().slice(1).map(source => [source.id, source.name(), source.clientId()]), a.connection.sources().slice(1).map(source => [source.id, source.name(), source.clientId()]));
+    for (const source of b.connection.sources().slice(1)) {assert.equal(source.auth.connected(), false); assert.equal(source.account().id, '');}
+    await b.grant(b.connection.source(firstId), 'new-device'); assert.equal(b.requests.at(-1).options.client_id, otherClient);
+    Object.defineProperty(globalThis, 'localStorage', {value: a.storage, configurable: true}); await a.connection.saveSource(firstId, '研究更新', '456-updated.apps.googleusercontent.com');
+    Object.defineProperty(globalThis, 'localStorage', {value: b.storage, configurable: true}); const thirdId = await b.connection.addSource('行政', '321-admin.apps.googleusercontent.com');
+    await first.synchronize('sync'); await second.synchronize('sync'); b.flush(); await first.synchronize('sync'); a.flush();
+    for (const f of [a, b]) {
+      assert.equal(f.connection.source(firstId).clientId(), '456-updated.apps.googleusercontent.com'); assert.equal(f.connection.source(firstId).name(), '研究更新');
+      assert.equal(f.connection.source(secondId).clientId(), '789-teaching.apps.googleusercontent.com'); assert.equal(f.connection.source(thirdId).clientId(), '321-admin.apps.googleusercontent.com');
+    }
+    assert.equal(b.connection.source(firstId).auth.connected(), false);
+    const stored = JSON.stringify([...cloud.files.values()]); assert.equal(stored.includes('synthetic-'), false); assert.equal(stored.includes('research@example.test'), false); assert.equal(stored.includes('new-device@example.test'), false);
+    Object.defineProperty(globalThis, 'localStorage', {value: b.storage, configurable: true}); await b.connection.removeSource(secondId);
+    await second.synchronize('sync'); await first.synchronize('sync'); a.flush();
+    assert.equal(a.connection.sources().some(source => source.id === secondId), false); assert.equal(a.connection.sources().length, 3);
+    const uploads = cloud.uploads.length; await first.synchronize('sync'); await second.synchronize('sync'); assert.equal(cloud.uploads.length, uploads);
+  } finally {b?.close(); a.close();}
+});
+test('遠端改動來源 ID 時取消未完成授權與帳號保存，舊回覆不寫回', async () => {
+  const f = await fixture();
+  try {
+    const id = await f.connection.addSource('研究', otherClient), source = f.connection.source(id);
+    let started = await f.begin(source);
+    await f.store.updateDriveSources(settings => {settings.sources[0].clientId = clientId;}); f.flush(); await f.reply('late'); assert.equal(await started.pending, false);
+    let release; Object.defineProperty(f.document.defaultView.navigator, 'locks', {value: {request: (_, write) => new Promise(resolve => release = () => resolve(Promise.resolve().then(write)))}});
+    started = await f.begin(source); await f.reply('late');
+    await f.store.updateDriveSources(settings => {settings.sources[0].clientId = otherClient;}); f.flush(); release(); assert.equal(await started.pending, false);
+    assert.equal(source.auth.connected(), false); assert.equal(source.account().id, ''); assert.equal(f.store.driveSources().sources[0].clientId, otherClient);
+  } finally {f.close();}
 });
 test('多來源使用獨立憑證及 Client ID，解除其中一個來源不影響其他連線或備份設定', async () => {
   const f = await fixture();
@@ -154,7 +192,7 @@ test('多來源使用獨立憑證及 Client ID，解除其中一個來源不影�
 test('側欄與選檔各自記住每個來源的目錄、搜尋與快取，同一檔案跨帳號仍只有一個身份', async () => {
   const f = await fixture();
   try {
-    await f.grant(f.connection, 'primary'); const id = await f.connection.addSource('研究'); await f.grant(f.connection.source(id), 'research');
+    await f.grant(f.connection, 'primary'); const id = await f.connection.addSource('研究', clientId); await f.grant(f.connection.source(id), 'research');
     await f.browser.activate(); await f.browser.open(f.browser.files().find(file => file.id === 'folder')); await f.browser.search('same-file');
     const primary = f.browser.source(f.browser.files()[0]); assert.equal(f.browser.pathLabel(0), 'Google Drive'); assert.equal(documentLocationLabel(primary), 'Google Drive / 我的雲端硬碟 / folder');
     await f.picker.selectSource(id); assert.equal(f.picker.pathLabel(0), '研究'); assert.equal(f.browser.sourceId(), 'default'); assert.equal(f.browser.query(), 'same-file');
@@ -167,7 +205,7 @@ test('側欄與選檔各自記住每個來源的目錄、搜尋與快取，同�
 test('重新授權使用原帳號提示，回傳不同帳號被拒絕，明確切換帳號才更新來源', async () => {
   const f = await fixture();
   try {
-    const id = await f.connection.addSource('研究'), source = f.connection.source(id); await f.grant(source, 'research');
+    const id = await f.connection.addSource('研究', clientId), source = f.connection.source(id); await f.grant(source, 'research');
     const {pending} = await f.begin(source); assert.equal(f.requests.at(-1).prompt.prompt, ''); assert.equal(f.requests.at(-1).prompt.login_hint, 'research');
     await f.reply('different'); assert.equal(await pending, false); assert.equal(source.account().id, 'research'); assert.equal(source.auth.connected(), false); assert.match(source.error(), /不同/);
     assert.equal(await f.grant(source, 'different', true), true); assert.equal(f.requests.at(-1).prompt.prompt, 'select_account'); assert.equal(f.requests.at(-1).prompt.login_hint, undefined); assert.equal(source.account().id, 'different');
@@ -177,7 +215,7 @@ test('重新授權使用原帳號提示，回傳不同帳號被拒絕，明確�
 test('來源移除或 Client ID 變更期間的授權回覆不能復活來源，保存失敗保留設定與有效連線', async () => {
   const f = await fixture();
   try {
-    const id = await f.connection.addSource('研究'), source = f.connection.source(id); await f.grant(source, 'research');
+    const id = await f.connection.addSource('研究', clientId), source = f.connection.source(id); await f.grant(source, 'research');
     const setItem = f.storage.setItem; f.storage.setItem = () => {throw new Error('disk full');};
     assert.equal(await f.connection.removeSource(id), false); assert.equal(f.connection.source(id), source); assert.equal(source.auth.connected(), true); f.storage.setItem = setItem;
     let started = await f.begin(source); assert.equal(await f.connection.saveSource(id, '研究二', otherClient), true); await f.reply('late'); assert.equal(await started.pending, false); assert.equal(source.auth.connected(), false); assert.equal(source.clientId(), otherClient);
@@ -187,7 +225,7 @@ test('來源移除或 Client ID 變更期間的授權回覆不能復活來源，
 test('來源切換與移除取消舊讀取，晚到列表不寫回目前來源', async () => {
   const f = await fixture();
   try {
-    await f.grant(f.connection, 'primary'); const id = await f.connection.addSource('研究'); await f.grant(f.connection.source(id), 'research');
+    await f.grant(f.connection, 'primary'); const id = await f.connection.addSource('研究', clientId); await f.grant(f.connection.source(id), 'research');
     let resolveOld; f.setFiles((_, account) => account === 'research' ? new Promise(resolve => resolveOld = resolve) : Promise.resolve(Response.json({files: [raw('primary-file')]})));
     const old = f.browser.selectSource(id); const current = f.browser.selectSource('default'); f.flush(); resolveOld(Response.json({files: [raw('stale-file')]})); await Promise.all([old, current]);
     assert.equal(f.browser.files()[0].id, 'primary-file'); assert.equal(f.calls[0].signal.aborted, true);
@@ -197,7 +235,7 @@ test('來源切換與移除取消舊讀取，晚到列表不寫回目前來源',
 test('新帳號已授權但設定尚在等待保存時，不讀取或選用舊帳號列表', async () => {
   const f = await fixture();
   try {
-    const id = await f.connection.addSource('研究'), source = f.connection.source(id); await f.grant(source, 'research'); await f.browser.selectSource(id);
+    const id = await f.connection.addSource('研究', clientId), source = f.connection.source(id); await f.grant(source, 'research'); await f.browser.selectSource(id);
     const file = f.browser.files()[0], count = f.calls.length; let release;
     Object.defineProperty(f.document.defaultView.navigator, 'locks', {value: {request: (_, write) => new Promise(resolve => release = () => resolve(write()))}});
     const {pending} = await f.begin(source, true); await f.reply('different');
@@ -209,7 +247,7 @@ test('新帳號已授權但設定尚在等待保存時，不讀取或選用舊�
 test('來源授權不足與到期只影響該來源，整體解除會清除所有檔案來源憑證', async () => {
   const f = await fixture();
   try {
-    await f.grant(f.connection, 'primary'); const id = await f.connection.addSource('研究'), source = f.connection.source(id);
+    await f.grant(f.connection, 'primary'); const id = await f.connection.addSource('研究', clientId), source = f.connection.source(id);
     assert.equal(await f.grant(source, 'research', false), true);
     source.auth.disconnect('到期', 'expired'); assert.equal(f.connection.status(source), '授權已到期'); assert.equal(f.connection.auth.connected(), true);
     const {pending} = await f.begin(source); await f.reply('research', 'openid'); assert.equal(await pending, false); assert.equal(source.auth.connected(), false); assert.equal(f.connection.auth.connected(), true);
@@ -234,7 +272,7 @@ test('舊單一來源及有效憑證直接沿用，新增來源後重新建立�
 test('分頁接續各來源授權，晚到的舊到期事件不刪新憑證，來源移除同步解除舊分頁', async () => {
   const f = await fixture(); let peer;
   try {
-    await f.grant(f.connection, 'primary'); const id = await f.connection.addSource('研究'); await f.grant(f.connection.source(id), 'research');
+    await f.grant(f.connection, 'primary'); const id = await f.connection.addSource('研究', clientId); await f.grant(f.connection.source(id), 'research');
     const effects = new Set();
     peer = createEnvironmentInjector([DriveBrowserConnection, DriveBrowserAuth, {provide: BoardStore, useValue: f.store}, {provide: DOCUMENT, useValue: f.document}, {provide: ɵEffectScheduler, useValue: {add: effect => effects.add(effect), schedule() {}, remove: effect => effects.delete(effect)}}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
     const connection = peer.get(DriveBrowserConnection); for (const effect of effects) if (effect.dirty) effect.run();

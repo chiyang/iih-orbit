@@ -28,7 +28,7 @@ test('頁首續期使用已知帳號提示，額外檔案來源不被合併授�
   const f = await fixture();
   try {
     let pending = f.connections.connectAll(); await f.reply(); await pending; f.flush();
-    const id = await f.files.addSource('額外來源'), source = f.files.source(id); await source.prepare();
+    const id = await f.files.addSource('額外來源', f.files.clientId()), source = f.files.source(id); await source.prepare();
     pending = source.connect(); await f.reply(DRIVE_BROWSER_SCOPE); assert.equal(await pending, true);
     const token = f.values.get('iih-orbit-drive-source-' + id + '-session-v1');
     pending = f.connections.connectAll(true); assert.equal(f.requests.at(-1).prompt.prompt, ''); assert.equal(f.requests.at(-1).prompt.login_hint, 'account');

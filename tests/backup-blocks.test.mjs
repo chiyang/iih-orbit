@@ -7,6 +7,18 @@ import {changedWorkspaceRecords, joinWorkspaceRecords, splitWorkspaceRecords} fr
 
 import {backup, cloud} from './helpers/backup-cloud.mjs';
 
+test('來源設定逐筆儲存只改核心索引，格式 10 的分塊及雲端校驗拒絕 ID 竄改', async () => {
+  const input = backup(2), sources = {version: 1, defaultName: '主要來源', sources: [{id: crypto.randomUUID(), provider: 'google-drive', name: '研究', clientId: '123-research.apps.googleusercontent.com'}]};
+  input.formatVersion = 10; input.driveSources = sources;
+  const data = {formatVersion: 2, generation: 'generation', revision: 'before', updatedAt: '2026-11-14T00:00:00.000Z', state: input.data, driveSources: sources};
+  const previous = splitWorkspaceRecords(data), next = structuredClone(data); next.revision = 'after'; next.driveSources.sources[0].clientId = '456-updated.apps.googleusercontent.com';
+  assert.deepEqual(joinWorkspaceRecords(previous).driveSources, sources); assert.deepEqual(changedWorkspaceRecords(previous, splitWorkspaceRecords(next)).put.map(record => record.key), ['root']);
+  const f = cloud(), document = await createDriveDocument(input, undefined, [], 'sync'), saved = await f.api.save(document, 'source_version');
+  assert.equal(saved.cloud.formatVersion, 10); assert.deepEqual(await f.api.read(saved), document); assert.deepEqual(readDriveFile(f.files.get(saved.id).metadata).cloud, document.cloud);
+  const corrupted = structuredClone(document); corrupted.driveSources.sources[0].clientId = '789-tampered.apps.googleusercontent.com';
+  await assert.rejects(readDriveDocument(corrupted), /校驗/);
+});
+
 test('本機紀錄拆解往返完整，修改一個任務只更新主任務紀錄及修訂索引', () => {
   const data = {formatVersion: 2, generation: 'generation', revision: 'before', updatedAt: '2026-10-13T00:00:00.000Z', state: backup(1000).data};
   const previous = splitWorkspaceRecords(data), next = structuredClone(data);

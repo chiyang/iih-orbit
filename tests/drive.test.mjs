@@ -33,7 +33,7 @@ function fixture(documents = new Map()) {
     save: async (document, id) => {uploads++; documents.set(id, structuredClone(document)); return readDriveFile(metadata(document, id));}
   };
   const board = {
-    snapshot: async (kind, ids) => ({backup: createBackup(local.data, kind, ids, local.preferences ?? DEFAULT_APPEARANCE, local.google ?? DEFAULT_GOOGLE, false, local.reminders, local.drive), revision}),
+    snapshot: async (kind, ids) => ({backup: createBackup(local.data, kind, ids, local.preferences ?? DEFAULT_APPEARANCE, local.google ?? DEFAULT_GOOGLE, false, local.reminders, local.drive, local.driveSources), revision}),
     apply: async (document, expected) => {if (expected !== revision) throw new Error('本機已更新'); local = readBackup(document); revision = crypto.randomUUID();}
   };
   const engine = new DriveEngine(api, repository, board, 'account');
@@ -614,7 +614,7 @@ test('新版雲端摘要可辨識格式且維持索引上限，舊檔原校驗�
   assert.deepEqual(readDriveFile(metadata(document)).cloud, document.cloud); assert.deepEqual(await readDriveDocument(document), document);
   const corrupted = structuredClone(document); corrupted.preferences.accent = '#3264ad'; corrupted.cloud.fileHash = await checksum(readBackup(corrupted));
   await assert.rejects(readDriveDocument(corrupted), /校驗/);
-  const unknown = metadata(document); unknown.appProperties.syncHash = 'v10:' + document.cloud.syncHash;
+  const unknown = metadata(document); unknown.appProperties.syncHash = 'v11:' + document.cloud.syncHash;
   assert.throws(() => readDriveFile(unknown));
 });
 

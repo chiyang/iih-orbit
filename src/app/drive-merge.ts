@@ -1,4 +1,5 @@
 import { backupFormat, readBackup, type OrbitBackup } from './backup-data.ts';
+import {defaultSharedDriveSources} from './drive-source-data.ts';
 import { sharedAppearance } from './appearance-data.ts';
 import { canonical, versionGraph, type DriveFile } from './drive-data.ts';
 import { DEFAULT_GOOGLE, type CalendarSource } from './google-data.ts';
@@ -44,7 +45,7 @@ function sources(backup: OrbitBackup): CalendarSource[] {
 }
 function content(backup: OrbitBackup): RecordValue {
   return {workspaces: backup.data.workspaces.map(({taskConflicts, ...workspace}) => workspace), sources: sources(backup), ...(backup.kind === 'full'
-    ? {preferences: backup.preferences ? sharedAppearance(backup.preferences) : undefined, reminders: backup.reminders, refreshMinutes: backup.google?.refreshMinutes} : {})};
+    ? {driveSources: backup.driveSources ?? defaultSharedDriveSources(), preferences: backup.preferences ? sharedAppearance(backup.preferences) : undefined, reminders: backup.reminders, refreshMinutes: backup.google?.refreshMinutes} : {})};
 }
 
 /** Dates are display metadata, never a way to decide which edit wins. */
@@ -332,7 +333,8 @@ export function mergeDriveBackups(baseInput: OrbitBackup, inputs: OrbitBackup[],
     merger.conflicts.add('data.sources.references');
     calendars = sources(selected).map(source => ({...source, id: identities.get(calendarKey(source))!, workspaceIds: source.workspaceIds.filter(id => workspaceIds.includes(id))})).filter(source => source.workspaceIds.length);
   }
-  const candidate: OrbitBackup = {...local, formatVersion: backupFormat(workspaces), data: {version: 1, activeWorkspaceId: workspaceIds.includes(local.data.activeWorkspaceId) ? local.data.activeWorkspaceId : workspaceIds[0], workspaces},
+  const driveSources = local.kind === 'full' && [base, ...backups].some(backup => backup.driveSources) ? merged['driveSources'] as OrbitBackup['driveSources'] : undefined;
+  const candidate: OrbitBackup = {...local, ...(driveSources ? {driveSources} : {}), formatVersion: backupFormat(workspaces, driveSources), data: {version: 1, activeWorkspaceId: workspaceIds.includes(local.data.activeWorkspaceId) ? local.data.activeWorkspaceId : workspaceIds[0], workspaces},
     ...(local.kind === 'full' ? {preferences: merged['preferences'] as OrbitBackup['preferences'], reminders: merged['reminders'] as OrbitBackup['reminders'],
       google: {...(local.google ?? DEFAULT_GOOGLE), refreshMinutes: merged['refreshMinutes'] as typeof DEFAULT_GOOGLE.refreshMinutes ?? DEFAULT_GOOGLE.refreshMinutes, sources: calendars},
       ...(local.drive ? {drive: {...local.drive, workspaceIds: local.drive.workspaceIds.filter(id => workspaceIds.includes(id))}} : {})}

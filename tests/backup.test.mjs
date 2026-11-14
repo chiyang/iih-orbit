@@ -7,6 +7,18 @@ const task = {id: 'task', title: '跨日任務', description: '內容', category
 const first = {...emptyWorkspace('first', '研究計畫'), projects: [{id: 'project', name: '研究專案'}], categories: [{id: 'category', name: '研究', color: 'green'}], tasks: [task]};
 const state = {version: 1, activeWorkspaceId: 'first', workspaces: [first, emptyWorkspace('second', '課程安排')]};
 
+test('多組來源的獨立 ID 隨完整備份保存，公開設定選項控制空間備份，未知憑證欄位被移除', () => {
+  const driveSources = {version: 1, defaultName: '主要來源', sources: [{id: crypto.randomUUID(), provider: 'google-drive', name: '研究', clientId: '123-research.apps.googleusercontent.com', accountId: 'device-only', token: 'never-export'}, {id: crypto.randomUUID(), provider: 'google-drive', name: '教學', clientId: '456-teaching.apps.googleusercontent.com'}]};
+  const full = createBackup(state, 'full', [], undefined, undefined, false, undefined, undefined, driveSources);
+  assert.equal(full.formatVersion, 10); assert.deepEqual(readBackup(JSON.parse(JSON.stringify(full))), full);
+  assert.deepEqual(full.driveSources.sources.map(source => source.clientId), driveSources.sources.map(source => source.clientId));
+  assert.equal(JSON.stringify(full).includes('device-only'), false); assert.equal(JSON.stringify(full).includes('never-export'), false);
+  const partial = include => createBackup(state, 'workspaces', ['first'], undefined, undefined, include, undefined, undefined, driveSources);
+  assert.equal(partial(false).driveSources, undefined); assert.equal(partial(false).formatVersion, 5); assert.deepEqual(partial(true).driveSources, full.driveSources);
+  const downgraded = {...full, formatVersion: 9}; assert.throws(() => readBackup(downgraded), /來源.*新版/);
+  for (const invalid of [{...full.driveSources, sources: [full.driveSources.sources[0], full.driveSources.sources[0]]}, {...full.driveSources, sources: [{...full.driveSources.sources[0], clientId: 'bad-id'}]}]) assert.throws(() => readBackup({...full, driveSources: invalid}));
+});
+
 test('全部備份往返保留工作資料與主題色，本機深淺主題與六種字級都不匯出', () => {
   for (const textSize of ['extra-small', 'compact', 'small', 'standard', 'large', 'extra-large']) {
     const backup = createBackup(state, 'full', [], {textSize, theme: 'dark', accent: '#3264ad'});

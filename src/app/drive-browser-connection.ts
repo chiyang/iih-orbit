@@ -4,7 +4,7 @@ import {BoardStore} from './board-store';
 import {DriveBrowserAuth} from './drive-browser-auth';
 import {GOOGLE_AUTH_SESSION, type GoogleAccount} from './google-auth';
 import {DRIVE_BROWSER_SCOPE} from './drive-browser-data';
-import {DEFAULT_DRIVE_SOURCE, DRIVE_SOURCE_KEY, defaultDriveSources, readDriveSources, type DriveSourceSettings} from './drive-source-data';
+import {DEFAULT_DRIVE_SOURCE, DRIVE_SOURCE_KEY, defaultDriveSources, readDriveSources, type DriveSourceSettings, type SharedDriveSources} from './drive-source-data';
 import {DriveSourceConnection} from './drive-source-connection';
 import {validClientId} from './google-data';
 
@@ -35,7 +35,7 @@ export class DriveBrowserConnection implements OnDestroy {
   private readonly accountChanged = (event: StorageEvent) => {if (event.key === ACCOUNT_KEY || event.key === DRIVE_SOURCE_KEY || event.key === null) {this.synchronize(); this.synchronizeSources();}};
   private readonly focused = () => {this.clock.set(Date.now()); this.synchronize(); this.synchronizeSources();};
   constructor() {
-    effect(() => {if (this.store.storageLoading()) return; const generation = this.store.generation(), clientId = this.store.google().clientId; untracked(() => {this.synchronize(generation, clientId); this.synchronizeSources();});});
+    effect(() => {if (this.store.storageLoading()) return; const generation = this.store.generation(), clientId = this.store.google().clientId; this.store.driveSources(); untracked(() => {this.synchronize(generation, clientId); this.synchronizeSources();});});
     effect(() => {
       const connected = this.auth.connected(), account = this.auth.account(), connecting = this.connecting();
       untracked(() => {if (connected && account && !connecting && account.id !== this.account().id) this.acceptAccount(account);});
@@ -44,7 +44,6 @@ export class DriveBrowserConnection implements OnDestroy {
     this.document.defaultView?.addEventListener('focus', this.focused);
   }
   clientId(): string {return this.store.google().clientId;}
-  usesPrimaryClientId(): boolean {return true;}
   source(id: string): DriveBrowserConnection | DriveSourceConnection {return this.sources().find(source => source.id === id) ?? this;}
   status(source: DriveBrowserConnection | DriveSourceConnection): string {
     const now = this.clock();
@@ -52,16 +51,15 @@ export class DriveBrowserConnection implements OnDestroy {
       ? source.auth.validUntil?.() && source.auth.validUntil() - now <= 5 * 60000 ? '即將到期' : '已連線'
       : source.auth.expired?.() ? '授權已到期' : '尚未連線';
   }
-  private readSettings(): DriveSourceSettings {
+  private readSettings(configuration = this.store.driveSources()): DriveSourceSettings {
     const raw = this.document.defaultView?.localStorage.getItem(DRIVE_SOURCE_KEY);
-    if (!raw) return defaultDriveSources();
-    const value = JSON.parse(raw), settings = readDriveSources(value, this.clientId());
-    if (!settings) throw new Error('檔案來源設定無法讀取，請保留原設定並重試。');
-    if (value.sources.some((source: {usePrimaryClientId?: boolean}) => source.usePrimaryClientId === undefined)) {
-      try {this.document.defaultView?.localStorage.setItem(DRIVE_SOURCE_KEY, JSON.stringify(settings));}
-      catch {this.sourceNotice.set('來源仍可使用，但 Client ID 同步設定未能保存，請重試保存來源設定。');}
-    }
-    return settings;
+    const local = raw ? readDriveSources(JSON.parse(raw), this.clientId()) : defaultDriveSources();
+    if (!local) throw new Error('檔案來源帳號設定無法讀取，原設定保留，請重試。');
+    if (!configuration) return local;
+    return {version: 1, defaultName: configuration.defaultName, sources: configuration.sources.map(profile => {
+      const saved = local.sources.find(item => item.id === profile.id && item.provider === profile.provider && item.clientId === profile.clientId);
+      return {...profile, accountId: saved?.accountId ?? '', email: saved?.email ?? ''};
+    })};
   }
   private synchronizeSources(): void {
     if (this.destroyed || this.store.storageLoading()) return;
@@ -78,10 +76,10 @@ export class DriveBrowserConnection implements OnDestroy {
             const generation = this.store.generation(), context = source.context(), clientId = source.clientId();
             return this.updateSettings(settings => {
               const saved = settings.sources.find(item => item.id === id);
-              if (!saved || generation !== this.store.generation() || context !== source.context() || clientId !== source.clientId() || (saved.usePrimaryClientId ? this.clientId() : saved.clientId) !== clientId || saved.accountId !== source.account().id) throw new Error('來源設定已更新，請重新連線。');
+              if (!saved || generation !== this.store.generation() || context !== source.context() || clientId !== source.clientId() || saved.clientId !== clientId || saved.accountId !== source.account().id) throw new Error('來源設定已更新，請重新連線。');
               saved.accountId = account.id; saved.email = account.email;
             });
-          }, () => this.clientId());
+          });
           entry = {source, injector}; this.extras.set(profile.id, entry);
         }
         entry.source.synchronize(profile);
@@ -106,32 +104,41 @@ export class DriveBrowserConnection implements OnDestroy {
       this.sourceError.set(''); return true;
     } catch (error) {this.sourceError.set(error instanceof Error ? error.message : '來源設定未保存，請重試。'); return false;}
   }
-  async addSource(name: string, clientId = this.clientId(), usePrimaryClientId = clientId.trim() === this.clientId()): Promise<string | undefined> {
-    const id = crypto.randomUUID();
-    return await this.updateSettings(settings => settings.sources.push({id, provider: 'google-drive', name: name.trim(), clientId: usePrimaryClientId ? '' : clientId.trim(), usePrimaryClientId, accountId: '', email: ''})) ? id : undefined;
+  private async updateSources(change: (settings: SharedDriveSources) => void): Promise<boolean> {
+    try {
+      this.readSettings();
+      const result = await this.store.updateDriveSources(change);
+      if (!result.ok) {this.sourceError.set(result.message); return false;}
+      this.sourceError.set(''); this.synchronizeSources(); return true;
+    } catch (error) {this.sourceError.set(error instanceof Error ? error.message : '來源設定未保存，原設定保留。'); return false;}
   }
-  async saveSource(id: string, name: string, clientId: string, usePrimaryClientId = clientId.trim() === this.clientId()): Promise<boolean> {
+  async addSource(name: string, clientId = ''): Promise<string | undefined> {
     clientId = clientId.trim();
-    if (id !== this.id && !usePrimaryClientId && (!clientId || !validClientId(clientId))) {this.sourceError.set('請填寫有效的 Google Client ID。'); return false;}
-    const saved = await this.updateSettings(settings => {
+    if (!clientId || !validClientId(clientId)) {this.sourceError.set('請填寫此來源自己的 Google Client ID。'); return undefined;}
+    const id = crypto.randomUUID();
+    return await this.updateSources(settings => settings.sources.push({id, provider: 'google-drive', name: name.trim(), clientId})) ? id : undefined;
+  }
+  async saveSource(id: string, name: string, clientId: string): Promise<boolean> {
+    clientId = clientId.trim();
+    if (id !== this.id && (!clientId || !validClientId(clientId))) {this.sourceError.set('請填寫此來源自己的 Google Client ID。'); return false;}
+    const saved = await this.updateSources(settings => {
       if (id === this.id) settings.defaultName = name.trim();
       else {
         const profile = settings.sources.find(source => source.id === id);
         if (!profile) throw new Error('來源已移除，請重新選擇。');
-        if ((profile.usePrimaryClientId ? this.clientId() : profile.clientId) !== (usePrimaryClientId ? this.clientId() : clientId)) {profile.accountId = ''; profile.email = '';}
-        profile.name = name.trim(); profile.clientId = usePrimaryClientId ? '' : clientId; profile.usePrimaryClientId = usePrimaryClientId;
+        profile.name = name.trim(); profile.clientId = clientId;
       }
     });
-    if (saved) this.sourceNotice.set('來源設定已保存。');
+    if (saved) this.sourceNotice.set('來源設定已保存，會隨 Drive 資料同步到其他裝置。');
     return saved;
   }
   async removeSource(id: string): Promise<boolean> {
     if (id === this.id) return false;
-    const saved = await this.updateSettings(settings => {
+    const saved = await this.updateSources(settings => {
       if (!settings.sources.some(profile => profile.id === id)) throw new Error('來源已移除，請重新選擇。');
       settings.sources = settings.sources.filter(profile => profile.id !== id);
     });
-    if (saved) this.sourceNotice.set('來源已移除，任務中的資訊連結保留。');
+    if (saved) this.sourceNotice.set('來源已移除，會隨 Drive 同步更新其他裝置。任務中的資訊連結保留。');
     return saved;
   }
   cancelAllSources(): void {this.cancelAuthorization(); for (const {source} of this.extras.values()) source.cancelAuthorization();}

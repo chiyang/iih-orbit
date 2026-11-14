@@ -25,7 +25,6 @@ export class DriveBrowserSettings implements OnDestroy {
   readonly editId = signal<string | null>(null);
   readonly draftName = signal('');
   readonly draftClient = signal('');
-  readonly usePrimaryClientId = signal(true);
   readonly removing = signal('');
   private readonly started = new Set<DriveBrowserConnection | DriveSourceConnection>();
   constructor() {
@@ -42,8 +41,7 @@ export class DriveBrowserSettings implements OnDestroy {
     finally {this.started.delete(source);}
   }
   edit(source?: DriveBrowserConnection | DriveSourceConnection): void {
-    this.editId.set(source?.id ?? ''); this.draftName.set(source?.name() ?? ''); this.draftClient.set(source?.clientId() ?? this.files.clientId());
-    this.usePrimaryClientId.set(source?.usesPrimaryClientId() ?? true);
+    this.editId.set(source?.id ?? ''); this.draftName.set(source?.name() ?? ''); this.draftClient.set(source?.clientId() ?? '');
     this.files.sourceError.set(''); this.files.sourceNotice.set('');
   }
   async save(): Promise<void> {
@@ -51,7 +49,7 @@ export class DriveBrowserSettings implements OnDestroy {
     if (id === null || this.busy()) return;
     this.saving.set(true);
     try {
-      const saved = id ? await this.files.saveSource(id, this.draftName(), this.draftClient().trim(), this.usePrimaryClientId()) : await this.files.addSource(this.draftName(), this.draftClient().trim(), this.usePrimaryClientId());
+      const saved = id ? await this.files.saveSource(id, this.draftName(), this.draftClient().trim()) : await this.files.addSource(this.draftName(), this.draftClient().trim());
       if (saved) {this.editId.set(null); this.files.sourceNotice.set(id ? '來源設定已保存。' : '來源已新增，請按「連線」選擇 Google 帳號。');}
     } finally {this.saving.set(false);}
   }

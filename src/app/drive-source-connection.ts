@@ -3,7 +3,7 @@ import type {DriveBrowserAuth} from './drive-browser-auth';
 import type {DriveSourceProfile} from './drive-source-data';
 import type {GoogleAccount} from './google-auth';
 
-/** One local source. Its account and credential never become document identity. */
+/** Shared provider configuration with device-local account and authorization. */
 export class DriveSourceConnection {
   readonly profile;
   readonly account = signal({id: '', email: ''});
@@ -14,15 +14,14 @@ export class DriveSourceConnection {
   private request = 0;
   private scope = '';
   private destroyed = false;
-  constructor(profile: DriveSourceProfile, readonly auth: DriveBrowserAuth, private readonly generation: () => string, private readonly saveAccount: (id: string, account: GoogleAccount) => Promise<boolean>, private readonly primaryClientId: () => string) {
+  constructor(profile: DriveSourceProfile, readonly auth: DriveBrowserAuth, private readonly generation: () => string, private readonly saveAccount: (id: string, account: GoogleAccount) => Promise<boolean>) {
     this.profile = signal(profile); this.synchronize(profile);
   }
   get id(): string {return this.profile().id;}
   name(): string {return this.profile().name;}
-  usesPrimaryClientId(): boolean {return this.profile().usePrimaryClientId;}
-  clientId(): string {return this.usesPrimaryClientId() ? this.primaryClientId() : this.profile().clientId;}
+  clientId(): string {return this.profile().clientId;}
   synchronize(profile = this.profile()): void {
-    const generation = this.generation(), clientId = profile.usePrimaryClientId ? this.primaryClientId() : profile.clientId;
+    const generation = this.generation(), clientId = profile.clientId;
     const scope = JSON.stringify([generation, clientId]), context = JSON.stringify([generation, clientId, profile.accountId]);
     if (context !== this.context()) {
       this.cancelAuthorization();

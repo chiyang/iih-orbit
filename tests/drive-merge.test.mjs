@@ -14,6 +14,20 @@ function versions() {
 const tasks = backup => backup.data.workspaces[0].tasks;
 const file = document => readDriveFile({id: 'drive_' + document.cloud.versionId, name: 'Orbit.json', mimeType: 'application/json', createdTime: document.exportedAt, appProperties: versionProperties(document)});
 
+test('各來源以固定識別整併，兩個不同 ID 的衝突保留選擇，不覆蓋其他來源修改', () => {
+  const {base} = versions(), first = crypto.randomUUID(), second = crypto.randomUUID();
+  base.formatVersion = 10; base.driveSources = {version: 1, defaultName: '主要來源', sources: [{id: first, provider: 'google-drive', name: '研究', clientId: '123-original.apps.googleusercontent.com'}, {id: second, provider: 'google-drive', name: '教學', clientId: '456-teaching.apps.googleusercontent.com'}]};
+  const a = structuredClone(base), b = structuredClone(base);
+  a.driveSources.sources[0].clientId = '123-device-a.apps.googleusercontent.com'; b.driveSources.sources[0].clientId = '123-device-b.apps.googleusercontent.com'; b.driveSources.sources[1].name = '教學更新';
+  assert.ok(mergeDriveBackups(base, [a, b]).conflicts.some(path => path.includes('driveSources') && path.endsWith('.clientId')));
+  const chosen = mergeDriveBackups(base, [a, b], 0).backup;
+  assert.equal(chosen.driveSources.sources[0].clientId, a.driveSources.sources[0].clientId); assert.equal(chosen.driveSources.sources[1].name, '教學更新'); assert.equal(chosen.formatVersion, 10);
+  const removed = structuredClone(base); removed.driveSources.sources = [];
+  const late = mergeDriveBackups(base, [removed, structuredClone(base)]); assert.deepEqual(late.conflicts, []); assert.deepEqual(late.backup.driveSources.sources, []);
+  const legacy = structuredClone(base); delete legacy.driveSources; legacy.formatVersion = 5;
+  const upgrade = mergeDriveBackups(legacy, [a, structuredClone(legacy)]); assert.deepEqual(upgrade.conflicts, []); assert.deepEqual(upgrade.backup.driveSources, a.driveSources);
+});
+
 test('裝置來源只是紀錄，安全欄位自動整併；各份描述原文與來源時間獨立保留', () => {
   const {base, a, b} = versions();
   tasks(a)[0] = {...tasks(a)[0], title: '工作版', editSource: {id: 'A', name: '工作電腦'}, updatedAt: '2026-10-11T01:00:00.000Z'};

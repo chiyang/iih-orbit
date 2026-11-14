@@ -11,6 +11,7 @@ import { withStorageLock } from './storage-coordinator';
 import { CalendarSource, DEFAULT_GOOGLE, GoogleSettings, readGoogleSettings } from './google-data';
 import { DEFAULT_REMINDERS, ReminderPreferences, readReminders } from './reminder-data';
 import { DEFAULT_DRIVE, DriveSettings, readDriveSettings } from './drive-settings';
+import {DRIVE_SOURCE_KEY, defaultSharedDriveSources, readDriveSources, readSharedDriveSources, sharedDriveSources, type SharedDriveSources} from './drive-source-data';
 import { projectProgress } from './project-data';
 import { recordTaskEdits } from './task-activity-data';
 import { BoardHistoryEntry, boardChangeLabel, HISTORY_LIMIT, sameBoard } from './board-history';
@@ -55,6 +56,7 @@ export class BoardStore implements OnDestroy {
   readonly google = signal<GoogleSettings>(this.snapshot.google ?? structuredClone(DEFAULT_GOOGLE));
   readonly reminders = signal<ReminderPreferences>(this.snapshot.reminders ?? {...DEFAULT_REMINDERS});
   readonly drive = signal<DriveSettings>(this.snapshot.drive ?? structuredClone(DEFAULT_DRIVE));
+  readonly driveSources = signal<SharedDriveSources | undefined>(this.snapshot.driveSources);
   readonly cloudResume = signal(this.snapshot.cloudResume);
   readonly workspaceState = signal<WorkspaceState>(this.selectedState(this.snapshot.state));
   readonly workspaces = computed(() => this.workspaceState().workspaces);
@@ -524,10 +526,10 @@ export class BoardStore implements OnDestroy {
 
   async backupForExport(kind: BackupKind, selectedIds: string[] = [], includeGoogle = false): Promise<OrbitBackup> {
     await this.ready;
-    if (this.records && (this.hasUnsavedChanges() || this.storageFailure)) return createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), includeGoogle, this.reminders(), this.drive());
+    if (this.records && (this.hasUnsavedChanges() || this.storageFailure)) return createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), includeGoogle, this.reminders(), this.drive(), this.driveSources());
     return this.readCurrent(data => {
       if (!this.hasUnsavedChanges()) this.apply(data);
-      return createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), includeGoogle, this.reminders(), this.drive());
+      return createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), includeGoogle, this.reminders(), this.drive(), this.driveSources());
     });
   }
 
@@ -535,7 +537,7 @@ export class BoardStore implements OnDestroy {
     return this.readCurrent(data => {
       if (this.hasUnsavedChanges()) throw new Error('本機有未保存的資料，請先下載備份，Drive 自動同步已暫停。');
       this.apply(data);
-      return {backup: createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), false, this.reminders(), this.drive()), revision: this.revision()};
+      return {backup: createBackup(this.workspaceState(), kind, selectedIds, this.appearance(), this.google(), false, this.reminders(), this.drive(), this.driveSources()), revision: this.revision()};
     });
   }
 
@@ -563,6 +565,15 @@ export class BoardStore implements OnDestroy {
       }
       return {...data, google: settings, ...(patch.clientId !== undefined && patch.clientId !== data.google!.clientId ? {drive: structuredClone(DEFAULT_DRIVE)} : {})};
     });
+  }
+
+  updateDriveSources(change: (settings: SharedDriveSources) => void): Promise<StoreResult> {
+    return this.transact(data => {
+      const settings = structuredClone(data.driveSources ?? defaultSharedDriveSources()); change(settings);
+      const driveSources = readSharedDriveSources(settings);
+      if (!driveSources) throw new Error('請填寫有效的來源名稱與 Client ID；最多可新增 20 個來源。');
+      return {...data, driveSources};
+    }, {requirePersistence: true, persistenceMessage: '檔案來源設定未能保存，原設定與連線保留。'});
   }
 
   updateDrive(patch: Partial<DriveSettings>): Promise<StoreResult> {
@@ -598,6 +609,7 @@ export class BoardStore implements OnDestroy {
       return {...data, onboarding: undefined, state: {...data.state, workspaces, activeWorkspaceId: incomingIds.has(data.state.activeWorkspaceId) ? data.state.activeWorkspaceId : workspaces[0].id},
         ...(backup.kind === 'full' && backup.preferences ? {preferences: {...data.preferences!, ...sharedAppearance(backup.preferences)}} : {}),
         ...(backup.kind === 'full' && backup.reminders ? {reminders: {...backup.reminders}} : {}),
+        ...(backup.kind === 'full' && backup.driveSources ? {driveSources: structuredClone(backup.driveSources)} : {}),
         google: {...data.google!, ...(backup.kind === 'full' && backup.google ? {refreshMinutes: backup.google.refreshMinutes} : {}), sources: oldSources.filter(s => s.workspaceIds.length)}};
     }, {requirePersistence: true});
   }
@@ -641,7 +653,7 @@ export class BoardStore implements OnDestroy {
       return {...data, cloudResume: undefined, generation: crypto.randomUUID(), preferences: all ? {...DEFAULT_APPEARANCE} : data.preferences,
         reminders: all ? {...DEFAULT_REMINDERS} : data.reminders,
         drive: {...(all ? DEFAULT_DRIVE : data.drive ?? DEFAULT_DRIVE), mode: 'off', workspaceIds: []},
-        google: all ? structuredClone(DEFAULT_GOOGLE) : {...data.google!, sources: []},
+        google: all ? structuredClone(DEFAULT_GOOGLE) : {...data.google!, sources: []}, driveSources: all ? defaultSharedDriveSources() : data.driveSources,
         state: {version: 1, activeWorkspaceId: workspace.id, workspaces: [workspace]}};
     }, {requirePersistence: true, select: workspace.id, afterPersist: () => {
       for (const key of ['orbit-workspaces-v1', 'orbit-board-v1', 'orbit-board-v1-backup', 'orbit-text-size-v1', 'orbit-reminder-delivery-v1', 'iih-orbit-reminder-history-v1', 'iih-orbit-system-notification-delivery-v1']) localStorage.removeItem(key);
@@ -657,7 +669,7 @@ export class BoardStore implements OnDestroy {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(datasetId)) throw new Error('雲端集合識別不合法，尚未登出。');
       return {formatVersion: 2, generation: crypto.randomUUID(), revision: data.revision, updatedAt: data.updatedAt,
         cloudResume: {datasetId, cleanupPending: true}, google: {...structuredClone(DEFAULT_GOOGLE), clientId}, preferences: {...DEFAULT_APPEARANCE},
-        reminders: {...DEFAULT_REMINDERS}, drive: structuredClone(DEFAULT_DRIVE),
+        reminders: {...DEFAULT_REMINDERS}, drive: structuredClone(DEFAULT_DRIVE), driveSources: defaultSharedDriveSources(),
         state: {version: 1, activeWorkspaceId: workspace.id, workspaces: [workspace]}};
     }, {generation, requirePersistence: true, select: workspace.id, persistenceMessage: '瀏覽器無法保存登出資訊，尚未清除本機資料。'});
   }
@@ -684,12 +696,12 @@ export class BoardStore implements OnDestroy {
     return this.transact(data => {
       if (backup.kind === 'full') {
         if (!expectedRevision || data.revision !== expectedRevision) throw new Error('確認期間資料已更新，請重新檢查覆蓋範圍後再匯入。');
-        return {...data, generation: crypto.randomUUID(), state: structuredClone(backup.data), preferences: {...data.preferences!, ...sharedAppearance(backup.preferences ?? DEFAULT_APPEARANCE)}, reminders: backup.reminders ?? {...DEFAULT_REMINDERS}, drive: {...structuredClone(backup.drive ?? DEFAULT_DRIVE), mode: 'off'}, google: {...structuredClone(backup.google ?? DEFAULT_GOOGLE), refreshMinutes: 0}};
+        return {...data, generation: crypto.randomUUID(), driveSources: structuredClone(backup.driveSources ?? data.driveSources), state: structuredClone(backup.data), preferences: {...data.preferences!, ...sharedAppearance(backup.preferences ?? DEFAULT_APPEARANCE)}, reminders: backup.reminders ?? {...DEFAULT_REMINDERS}, drive: {...structuredClone(backup.drive ?? DEFAULT_DRIVE), mode: 'off'}, google: {...structuredClone(backup.google ?? DEFAULT_GOOGLE), refreshMinutes: 0}};
       }
       const workspaceIds = new Map(backup.data.workspaces.map((workspace, index) => [workspace.id, added[index].id]));
       const sources = (backup.calendarSources ?? []).map(source => ({...structuredClone(source), id: crypto.randomUUID(), workspaceIds: source.workspaceIds.map(id => workspaceIds.get(id)!)}));
       const settings = applyGoogle && backup.google ? {...structuredClone(backup.google), refreshMinutes: 0 as const} : data.google!;
-      return {...data, google: {...settings, sources: [...data.google!.sources, ...sources]}, state: {...data.state, workspaces: [...data.state.workspaces, ...added]}};
+      return {...data, ...(applyGoogle && backup.driveSources ? {driveSources: structuredClone(backup.driveSources)} : {}), google: {...settings, sources: [...data.google!.sources, ...sources]}, state: {...data.state, workspaces: [...data.state.workspaces, ...added]}};
     }, {requirePersistence: true, select: backup.kind === 'full' ? backup.data.activeWorkspaceId : added[0].id});
   }
 
@@ -758,8 +770,10 @@ export class BoardStore implements OnDestroy {
         const workspaceIds = settings.workspaceIds.filter(id => state.workspaces.some(w => w.id === id));
         const drive = readDriveSettings({...settings, workspaceIds, ...(settings.kind === 'workspaces' && workspaceIds.length !== settings.workspaceIds.length ? {mode: 'off'} : {})}, state.workspaces.map(w => w.id));
         if (!drive) throw new Error('Drive 設定不合法，未儲存這次變更。');
+        const driveSources = changed.driveSources === undefined ? undefined : readSharedDriveSources(changed.driveSources);
+        if (changed.driveSources !== undefined && !driveSources) throw new Error('檔案來源設定不合法，未儲存這次變更。');
         const onboarding = changed.generation === latest.generation && isInitialWorkspace(state) ? changed.onboarding : undefined;
-        const next: StoredWorkspaceData = {...changed, onboarding, state, google, drive, revision: crypto.randomUUID(), updatedAt: new Date().toISOString()};
+        const next: StoredWorkspaceData = {...changed, onboarding, state, google, drive, ...(driveSources ? {driveSources} : {}), revision: crypto.randomUUID(), updatedAt: new Date().toISOString()};
         preparedBaseRevision = disk.revision; prepared = next; return next;
       };
       const unsaved = (next: StoredWorkspaceData): StoreResult => {
@@ -812,6 +826,7 @@ export class BoardStore implements OnDestroy {
     this.google.set(data.google ?? structuredClone(DEFAULT_GOOGLE));
     this.reminders.set(data.reminders ?? {...DEFAULT_REMINDERS});
     this.drive.set(data.drive ?? structuredClone(DEFAULT_DRIVE));
+    this.driveSources.set(data.driveSources);
     this.cloudResume.set(data.cloudResume);
     if (saved) this.lastSavedRevision = data.revision;
     const active = select ?? this.workspaceState().activeWorkspaceId;
@@ -845,9 +860,20 @@ export class BoardStore implements OnDestroy {
       }
       const data = readStoredData(JSON.parse(saved));
       if (!data) throw new Error('儲存資料格式不完整，請先匯出目前可讀的資料，避免覆蓋原檔。');
-      return {...data, preferences: data.preferences ?? this.legacyAppearance(), google: data.google ?? structuredClone(DEFAULT_GOOGLE)};
+      return this.withLegacyDriveSources({...data, preferences: data.preferences ?? this.legacyAppearance(), google: data.google ?? structuredClone(DEFAULT_GOOGLE)});
     }
-    return this.legacyData();
+    return this.withLegacyDriveSources(this.legacyData());
+  }
+
+  private withLegacyDriveSources(data: StoredWorkspaceData): StoredWorkspaceData {
+    if (data.driveSources) return data;
+    try {
+      const raw = localStorage.getItem(DRIVE_SOURCE_KEY);
+      if (!raw) return data;
+      const settings = readDriveSources(JSON.parse(raw), data.google?.clientId);
+      if (settings) return {...data, driveSources: sharedDriveSources(settings)};
+    } catch { /* Source settings report their own error; never replace valid workspaces with legacy tasks. */ }
+    return data;
   }
 
   private async initializeRecords(): Promise<void> {
@@ -855,7 +881,7 @@ export class BoardStore implements OnDestroy {
     if (this.storageWarning() && !migrated) throw new Error('舊本機資料無法完整驗證，尚未升級，請先匯出可讀內容。');
     const migrate = async () => {
       const data = await this.records!.update(current => {
-        if (current) return current;
+        if (current) return this.withLegacyDriveSources(current);
         if (migrated) throw new Error('本機資料索引存在，但保存紀錄遺失；請從 JSON 或雲端備份還原。');
         return this.readLatest();
       });

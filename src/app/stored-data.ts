@@ -6,6 +6,7 @@ import type { GoogleSettings } from './google-data.ts';
 import { readGoogleSettings } from './google-data.ts';
 import { type ReminderPreferences, readReminders } from './reminder-data.ts';
 import { type DriveSettings, readDriveSettings } from './drive-settings.ts';
+import {readSharedDriveSources, type SharedDriveSources} from './drive-source-data.ts';
 
 export const WORKSPACE_STORAGE_KEY = 'orbit-workspaces-v2';
 export const WORKSPACE_SELECTION_KEY = 'orbit-active-workspace-v1';
@@ -25,6 +26,7 @@ export interface StoredWorkspaceData {
   google?: GoogleSettings;
   reminders?: ReminderPreferences;
   drive?: DriveSettings;
+  driveSources?: SharedDriveSources;
 }
 
 export function readStoredData(value: unknown): StoredWorkspaceData | null {
@@ -42,8 +44,10 @@ export function readStoredData(value: unknown): StoredWorkspaceData | null {
   if (reminders === null) return null;
   const drive = source.drive === undefined ? undefined : readDriveSettings(source.drive, state.workspaces.map(workspace => workspace.id));
   if (drive === null) return null;
+  const driveSources = source.driveSources === undefined ? undefined : readSharedDriveSources(source.driveSources);
+  if (source.driveSources !== undefined && !driveSources) return null;
   const onboarding = source.onboarding === 'guide' || source.onboarding === 'workspace' ? source.onboarding : undefined;
   const cloudResume = source.cloudResume;
   if (cloudResume !== undefined && (!cloudResume || typeof cloudResume.datasetId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cloudResume.datasetId) || !google?.clientId || cloudResume.cleanupPending !== undefined && cloudResume.cleanupPending !== true)) return null;
-  return {formatVersion: 2, generation: source.generation, revision: source.revision, updatedAt: source.updatedAt, state, ...(onboarding ? {onboarding} : {}), ...(cloudResume ? {cloudResume: {datasetId: cloudResume.datasetId, ...(cloudResume.cleanupPending ? {cleanupPending: true as const} : {})}} : {}), ...(preferences ? {preferences} : {}), ...(google ? {google} : {}), ...(reminders ? {reminders} : {}), ...(drive ? {drive} : {})};
+  return {formatVersion: 2, generation: source.generation, revision: source.revision, updatedAt: source.updatedAt, state, ...(onboarding ? {onboarding} : {}), ...(cloudResume ? {cloudResume: {datasetId: cloudResume.datasetId, ...(cloudResume.cleanupPending ? {cleanupPending: true as const} : {})}} : {}), ...(preferences ? {preferences} : {}), ...(google ? {google} : {}), ...(reminders ? {reminders} : {}), ...(drive ? {drive} : {}), ...(driveSources ? {driveSources} : {})};
 }

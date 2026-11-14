@@ -1,11 +1,11 @@
 <h3>Google Drive</h3>
-<p>管理檔案側欄與任務選檔的來源。每個來源獨立連線，側欄與選檔視窗各自記住瀏覽位置。</p>
+<p>管理檔案側欄與任務選檔的來源。每組來源的名稱與 Client ID 會隨 Drive 資料跨裝置同步；各裝置分別授權連線。</p>
 @for (source of files.sources(); track source.id) {
   <section class="google-service" [attr.aria-label]="source.name()">
     <div class="service-heading"><h4>{{ source.name() }}</h4><span [class.connected]="source.auth.connected()">{{ files.status(source) }}</span></div>
     @if (source.account().email) {<p class="service-account">{{ source.account().email }}</p>}
     @if (source.id === files.id) {<p class="google-note">使用主要 Google Client ID，可由「一次授權全部服務」連線。</p>}
-    @else {<details class="source-details"><summary>連線資料</summary>@if (source.usesPrimaryClientId()) {<p class="google-note">與主要 Google 連線同步 Client ID。</p>}<p class="source-client">{{ source.clientId() || '請先到 Google 連線設定保存 Client ID。' }}</p></details>}
+    @else {<details class="source-details"><summary>連線資料</summary><p class="source-client">{{ source.clientId() || '請編輯來源，填寫此來源的 Client ID。' }}</p></details>}
     <div class="google-actions">
       @if (source.clientId()) {
         <button type="button" class="google-primary" [disabled]="busy() || !source.auth.ready()" (click)="connect(source)">{{ source.connecting() ? '等待授權…' : source.account().id ? '重新授權' : '連線' }}</button>
@@ -25,10 +25,9 @@
   <form class="source-editor" (ngSubmit)="save()">
     <h4>{{ editId() ? '編輯來源' : '新增檔案來源' }}</h4>
     <label class="google-field">來源名稱<input type="text" name="sourceName" maxlength="100" required [ngModel]="draftName()" (ngModelChange)="draftName.set($event)" [disabled]="busy()"></label>
-    @if (editId() !== files.id) {<label class="source-inherit"><input type="checkbox" name="usePrimaryClientId" [ngModel]="usePrimaryClientId()" (ngModelChange)="usePrimaryClientId.set($event)" [disabled]="busy()">與主要 Google 連線同步 Client ID</label>}
-    <label class="google-field">Google OAuth Client ID<input type="text" name="sourceClient" maxlength="300" required [ngModel]="usePrimaryClientId() ? files.clientId() : draftClient()" (ngModelChange)="draftClient.set($event)" [disabled]="busy() || editId() === files.id || usePrimaryClientId()"></label>
-    <p class="google-note">{{ editId() === files.id ? '主要來源的 Client ID 請到 Google 連線設定修改。' : usePrimaryClientId() ? '主要 Client ID 變更時，此來源會自動更新並要求重新授權。帳號在連線時選擇。' : '填入另一個允許目前網站來源的 Client ID。此來源獨立保存，不跟隨主要設定變更。' }}</p>
-    <div class="google-actions"><button type="button" [disabled]="busy()" (click)="editId.set(null)">取消</button><button type="submit" class="google-primary" [disabled]="busy() || !draftName().trim() || !usePrimaryClientId() && !draftClient().trim()">{{ saving() ? '保存中…' : '保存來源' }}</button></div>
+    <label class="google-field">Google OAuth Client ID<input type="text" name="sourceClient" maxlength="300" required [ngModel]="draftClient()" (ngModelChange)="draftClient.set($event)" [disabled]="busy() || editId() === files.id"></label>
+    <p class="google-note">{{ editId() === files.id ? '主要來源的 Client ID 請到 Google 連線設定修改。' : '填寫這組來源自己的 Client ID，會隨 Drive 資料同步到其他裝置。帳號在各裝置連線時選擇。' }}</p>
+    <div class="google-actions"><button type="button" [disabled]="busy()" (click)="editId.set(null)">取消</button><button type="submit" class="google-primary" [disabled]="busy() || !draftName().trim() || editId() !== files.id && !draftClient().trim()">{{ saving() ? '保存中…' : '保存來源' }}</button></div>
   </form>
 }
 @if (removing()) {
@@ -37,7 +36,7 @@
 @if (files.sourceError()) {<p class="google-error" role="alert">{{ files.sourceError() }}</p>}
 @if (files.sourceNotice()) {<p class="google-status" role="status">{{ files.sourceNotice() }}</p>}
 <div class="google-actions"><button type="button" [disabled]="busy() || editId() !== null" (click)="edit()">新增檔案來源</button><button type="button" [disabled]="busy()" (click)="configure.emit()">Google 連線設定</button></div>
-<p class="google-note">額外來源各自授權；檔案來源設定保存在此瀏覽器。瀏覽會排除 Orbit 備份資料夾，備份帳號仍由遠端同步設定管理。</p>
+<p class="google-note">啟用 Drive 自動儲存後，來源名稱與各自的 Client ID 會同步；登入授權與瀏覽位置由各裝置保存。瀏覽會排除 Orbit 備份資料夾。</p>
 <section class="google-service" aria-label="檔案顯示快取">
   <div class="service-heading"><h4>檔案顯示快取</h4><span>{{ metadata.stats().expired }} 筆已過期</span></div>
   <p class="google-note">檔案資訊 {{ metadata.stats().checked }} 項、目錄列表 {{ metadata.stats().lists }} 份。清除後可重新載入；任務內容、用途、順序與來源連線保留。</p>
