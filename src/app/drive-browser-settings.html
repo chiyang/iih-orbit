@@ -40,6 +40,8 @@
 <section class="google-service" aria-label="檔案顯示快取">
   <div class="service-heading"><h4>檔案顯示快取</h4><span>{{ metadata.stats().expired }} 筆已過期</span></div>
   <p class="google-note">檔案資訊 {{ metadata.stats().checked }} 項、目錄列表 {{ metadata.stats().lists }} 份。清除後可重新載入；任務內容、用途、順序與來源連線保留。</p>
+  <p class="google-note">保持頁面在前景、連線及授權有效時，每五分鐘檢查檔案變更，更新已知檔案的名稱、位置與存取狀態。</p>
+  @if (metadata.changesWarning()) {<p class="google-status" role="status">{{ metadata.changesWarning() }}</p>}
   <div class="google-actions"><button type="button" [disabled]="!metadata.stats().expired" (click)="metadata.clear(true)">清除過期快取</button><button type="button" [disabled]="!metadata.stats().checked && !metadata.stats().nodes && !metadata.stats().lists" (click)="metadata.clear()">清除全部檔案快取</button></div>
   @if (metadata.notice()) {<p class="google-status" role="status">{{ metadata.notice() }}</p>}
 </section>

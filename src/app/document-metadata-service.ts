@@ -6,8 +6,9 @@ import {DRIVE_BROWSER_SCOPE, DriveBrowserApi, type DriveBrowserEntry, type Drive
 import {DEFAULT_DRIVE_SOURCE} from './drive-source-data';
 import {DocumentMetadataManager} from './document-metadata-manager';
 import type {DocumentSource} from './models';
+import {DriveChangesTracker} from './drive-changes';
 
-interface ListCaches {stats(): {lists: number; expired: number}; clear(expiredOnly: boolean): number}
+interface ListCaches {stats(): {lists: number; expired: number}; clear(expiredOnly: boolean): number; invalidate?(connectionId: string): void}
 interface VisibleReference {element: Element; source: DocumentSource; preferred: string; visible: boolean}
 
 @Injectable({providedIn: 'root'})
@@ -19,8 +20,10 @@ export class DocumentMetadataService implements OnDestroy {
   readonly contextRevision = signal(0);
   readonly notice = signal('');
   readonly manualBusy = signal(false);
+  readonly changesWarning = signal('');
   readonly online = signal(this.document.defaultView?.navigator.onLine !== false);
   readonly manager = new DocumentMetadataManager(() => this.revision.update(value => value + 1));
+  private readonly changes: DriveChangesTracker;
   private readonly listCaches = new Set<ListCaches>();
   private readonly references = new Set<VisibleReference>();
   private readonly observed = new Map<Element, Set<VisibleReference>>();
@@ -30,7 +33,9 @@ export class DocumentMetadataService implements OnDestroy {
   private readonly wake = () => {
     this.online.set(this.document.defaultView?.navigator.onLine !== false);
     this.manager.setEnvironment(this.online(), this.document.visibilityState !== 'hidden');
+    this.changes.setEnvironment(this.online(), this.document.visibilityState !== 'hidden');
     this.requestVisible();
+    void this.changes.poll().then(() => this.requestVisible());
   };
   private readonly timer = setInterval(() => {this.revision.update(value => value + 1); this.wake();}, 60000);
   readonly stats = computed(() => {
@@ -38,12 +43,23 @@ export class DocumentMetadataService implements OnDestroy {
     return {...metadata, lists: lists.reduce((sum, cache) => sum + cache.lists, 0), expired: metadata.expired + lists.reduce((sum, cache) => sum + cache.expired, 0)};
   });
   constructor() {
+    let storage: Storage | undefined;
+    try {storage = this.document.defaultView?.localStorage;} catch { /* Tracking still works in memory when browser storage is unavailable. */ }
+    this.changes = new DriveChangesTracker({storage, warning: message => this.changesWarning.set(message),
+      reset: id => this.manager.invalidateConnection(id),
+      apply: (id, changes) => {
+        const linkedIds = new Set(this.store.workspaces().flatMap(workspace => workspace.documentSources?.filter(source => source.provider === 'google-drive' && source.fileId).map(source => source.fileId!) ?? []));
+        this.manager.observeChanges(id, changes, linkedIds);
+        if (changes.length) for (const cache of this.listCaches) cache.invalidate?.(id);
+      }
+    });
     effect(() => {
+      if (this.store.storageLoading?.()) return;
       const generation = this.store.generation();
       const connections = this.connections.sources().map(source => ({id: source.id, key: JSON.stringify([generation, source.id, source.context(), DRIVE_BROWSER_SCOPE]),
         label: source.id === DEFAULT_DRIVE_SOURCE ? 'Google Drive' : source.name(), available: source.auth.connected() && !source.connecting() && !source.auth.authorizing(),
         version: source.auth.connectionVersion(), api: new DriveBrowserApi(source.auth)}));
-      untracked(() => {this.manager.setConnections(connections); this.contextRevision.update(value => value + 1); this.requestVisible();});
+      untracked(() => {this.manager.setConnections(connections); this.changes.setConnections(connections); this.contextRevision.update(value => value + 1); this.wake();});
     });
     this.document.addEventListener('visibilitychange', this.wake);
     this.document.defaultView?.addEventListener('online', this.wake);
@@ -115,7 +131,7 @@ export class DocumentMetadataService implements OnDestroy {
     this.notice.set(`已清除 ${removed} 筆${expiredOnly ? '過期' : '可重建'}快取。任務內容與來源連線保留。`); this.touchCaches();
   }
   ngOnDestroy(): void {
-    this.destroyed = true; clearInterval(this.timer); this.manager.destroy(); this.observer?.disconnect(); this.references.clear(); this.observed.clear(); this.listCaches.clear();
+    this.destroyed = true; clearInterval(this.timer); this.changes.destroy(); this.manager.destroy(); this.observer?.disconnect(); this.references.clear(); this.observed.clear(); this.listCaches.clear();
     this.document.removeEventListener('visibilitychange', this.wake); this.document.defaultView?.removeEventListener('online', this.wake); this.document.defaultView?.removeEventListener('offline', this.wake);
   }
 }

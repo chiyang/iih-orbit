@@ -3,6 +3,32 @@ import type { MailCursor } from './gmail-api';
 
 const KEY = 'iih-orbit-gmail-cache-v1', MAX_AGE = 86400000, MAX_SCOPES = 6, MAX_BYTES = 1024 * 1024;
 export const MAIL_CACHE_TTL = 5 * 60000;
+const LABEL_KEY = 'iih-orbit-gmail-labels-v1';
+interface LabelSnapshot {version: 1; owner: string; labels: MailLabel[]; updatedAt: number}
+
+/** Last known label names outlive preview expiry and individual search filters. */
+export class GmailLabelCache {
+  private snapshot?: LabelSnapshot;
+  constructor() {
+    try {
+      const content = localStorage.getItem(LABEL_KEY) ?? 'null';
+      if (new TextEncoder().encode(content).byteLength > MAX_BYTES) return;
+      const saved = JSON.parse(content), owner = JSON.parse(saved?.owner ?? 'null');
+      if (saved?.version !== 1 || !Array.isArray(owner) || owner.length !== 3 || !owner.every(value => typeof value === 'string' && value.length <= 1000)
+        || !Number.isSafeInteger(saved.updatedAt) || saved.updatedAt <= 0 || !Array.isArray(saved.labels) || saved.labels.length > 10000) return;
+      this.snapshot = {version: 1, owner: saved.owner, labels: readMailLabels({labels: saved.labels}), updatedAt: saved.updatedAt};
+    } catch { /* A successful labels request can rebuild invalid or unavailable storage. */ }
+  }
+  get(owner: string): LabelSnapshot | undefined {return this.snapshot?.owner === owner ? structuredClone(this.snapshot) : undefined;}
+  put(owner: string, labels: MailLabel[], updatedAt = Date.now()): void {
+    const snapshot: LabelSnapshot = {version: 1, owner, labels: readMailLabels({labels}), updatedAt};
+    const content = JSON.stringify(snapshot);
+    if (labels.length > 10000 || new TextEncoder().encode(content).byteLength > MAX_BYTES) throw new Error('Gmail 標籤清單過大。');
+    this.snapshot = snapshot;
+    localStorage.setItem(LABEL_KEY, content);
+  }
+  clear(): void {this.snapshot = undefined; localStorage.removeItem(LABEL_KEY);}
+}
 export interface MailSnapshot {
   scope: string; labels: MailLabel[]; messages: MailPreview[]; summaries: MailThreadSummary[];
   updatedAt: number; hasMore: boolean; cursor?: MailCursor;

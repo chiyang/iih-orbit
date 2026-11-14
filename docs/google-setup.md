@@ -4,6 +4,14 @@
 
 Orbit 不需要 Google 帳號即可管理本機任務。要使用 Gmail、Google Calendar、Drive 檔案瀏覽或遠端同步備份時，每位使用者自行申請 OAuth Client ID，於「設定 → Google 連線」填入一次，再按需要啟用服務。
 
+## 本機使用與 Google 授權分開
+
+Orbit 的本機任務不要求先登入 Google；帳號識別及未過期的服務授權各自保存，重開同一網站可接續有效授權，不因重新整理而重新要求同意。授權到期仍可操作本機任務及查看已有快取，背景排程停止 Google API 讀取，不自行開啟授權視窗；按更新、同步或 G 才續接。
+
+目前沒有另外建立 Sign In With Google／ID Token 登入系統。保存基本使用者資訊可以延續畫面上的帳號識別，但不延長 Google API 存取權限。[Google 登入與授權的區分](https://developers.google.com/identity/gsi/web/guides/integrate)。
+
+目前任一主要 Google 服務授權到期時，頁首便顯示 G；這只是續接入口，不代表正在要求使用者授權。個別更新沿用原帳號的 `prompt: ''` 與 `login_hint`。GIS 的 `prompt: 'none'` 是不顯示登入或同意畫面，並不保證不建立彈出視窗；現行 Token Client 仍需使用者操作觸發，沒有加入定時無視窗續期。[GIS 參數](https://developers.google.com/identity/oauth2/web/reference/js-reference)、[Token Model 限制](https://developers.google.com/identity/oauth2/web/guides/use-token-model)。
+
 ## 首次設定
 
 1. 在 [Google Cloud Console](https://console.cloud.google.com/) 建立專案，啟用需要的 **Google Calendar API**、**Gmail API**、**Google Drive API**。

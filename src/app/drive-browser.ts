@@ -36,6 +36,7 @@ export class DriveBrowser implements OnDestroy {
   private context = '';
   private request = 0;
   private epoch = 0;
+  private cacheRevision = 0;
   private controller?: AbortController;
   private pendingConnection = 0;
   private destroyed = false;
@@ -46,6 +47,10 @@ export class DriveBrowser implements OnDestroy {
     let removed = 0;
     for (const cache of this.caches()) for (const [key, value] of cache) if (!expiredOnly || Date.now() - value.updatedAt >= 5 * 60000) {cache.delete(key); removed++;}
     return removed;
+  }, invalidate: connectionId => {
+    if (this.selectedConnection().id === connectionId) {this.cacheRevision++; this.cache.clear();}
+    for (const [context, state] of this.navigation) if (JSON.parse(context)[0] === connectionId) state.cache.clear();
+    this.metadata.touchCaches();
   }});
   constructor() {
     effect(() => {const context = this.sourceContext(); untracked(() => this.useSource(context));});
@@ -117,7 +122,7 @@ export class DriveBrowser implements OnDestroy {
     if (this.destroyed || !this.auth.connected() || this.selectedConnection().connecting()) return;
     this.cancel(); const request = ++this.request, identity = this.identity(), controller = new AbortController(); this.controller = controller; this.pendingConnection = this.auth.connectionVersion();
     const current = () => !this.destroyed && request === this.request && identity === this.identity() && !controller.signal.aborted;
-    const folder = path[path.length - 1], key = JSON.stringify([folder, query]), previous = this.cache.get(key), token = append ? this.nextPageToken() : '';
+    const folder = path[path.length - 1], key = JSON.stringify([folder, query]), previous = this.cache.get(key), token = append ? this.nextPageToken() : '', cacheRevision = this.cacheRevision;
     this.busy.set(true); this.error.set('');
     try {
       let page: DriveBrowserPage;
@@ -130,9 +135,12 @@ export class DriveBrowser implements OnDestroy {
       if (files.length > 1000) throw new Error('此資料夾項目較多，請用檔名搜尋縮小範圍。');
       files.sort((a, b) => Number(isDriveFolder(b)) - Number(isDriveFolder(a)) || a.name.localeCompare(b.name, 'zh-Hant', {numeric: true}));
       this.path.set(structuredClone(path)); this.query.set(query); this.files.set(files); this.nextPageToken.set(page.nextPageToken);
-      this.cache.delete(key); this.cache.set(key, {files, nextPageToken: page.nextPageToken, tokens, updatedAt: page === previous ? previous.updatedAt : Date.now()});
-      while (this.cache.size > 8) this.cache.delete(this.cache.keys().next().value!);
-      this.metadata.observeList(this.selectedConnection().id, page.files, folder, page === previous ? previous.updatedAt : Date.now(), page === previous); this.metadata.touchCaches();
+      if (cacheRevision === this.cacheRevision) {
+        this.cache.delete(key); this.cache.set(key, {files, nextPageToken: page.nextPageToken, tokens, updatedAt: page === previous ? previous.updatedAt : Date.now()});
+        while (this.cache.size > 8) this.cache.delete(this.cache.keys().next().value!);
+        this.metadata.observeList(this.selectedConnection().id, page.files, folder, page === previous ? previous.updatedAt : Date.now(), page === previous);
+      }
+      this.metadata.touchCaches();
     } catch (error) {if (current()) this.error.set(this.message(error));}
     finally {if (request === this.request) {this.busy.set(false); this.controller = undefined;}}
   }

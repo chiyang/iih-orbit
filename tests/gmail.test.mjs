@@ -202,6 +202,7 @@ test('切換 Gmail 篩選取消舊批次、停止後續讀取，保留新清單�
     f.auth.cancelRequests = () => {globalCancels++;};
     f.auth.api = async (path, params, signal) => {
       paths.push(path);
+      if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}, {id: 'Work', name: '工作', type: 'user'}]};
       if (path === 'messages/mail') return new Promise(resolve => {releaseBody = resolve;});
       if (path === 'messages') return {messages: params.labelIds === 'INBOX' ? Array.from({length: 20}, (_, i) => ({id: 'old' + i})) : [{id: 'work'}]};
       if (path.startsWith('messages/old')) return new Promise(resolve => oldDetails.push({signal, release: () => resolve(raw(path.split('/')[1]))}));
@@ -337,7 +338,8 @@ test('重開 App 並續接同帳號授權後，新郵件入口沿用已存標籤
     } finally {panel?.ngOnDestroy(); child.destroy(); reopened.close();}
   }
 });
-test('舊 Gmail 標籤回應到達後不能啟動過期搜尋；最新讀取失敗仍可重新更新', async () => {
+test('舊 Gmail 標籤回應到達後不能啟動過期搜尋；限流等待後可重新更新', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: Date.now()});
   const f = fixture(); let release, labelCalls = 0, fail = false; const queries = [];
   try {
     f.auth.api = async (path, params) => {
@@ -348,7 +350,8 @@ test('舊 Gmail 標籤回應到達後不能啟動過期搜尋；最新讀取失�
     const old = f.gmail.load(true); f.gmail.search('subject:new'); f.flush(); await f.gmail.load();
     release({labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]}); await old; assert.deepEqual(queries, ['subject:new']);
     fail = true; await f.gmail.load(true); assert.equal(f.gmail.busy(), false); assert.match(f.gmail.error(), /限制讀取次數/); assert.equal(f.gmail.messages()[0].id, 'new');
-    fail = false; await f.gmail.load(true); assert.equal(f.gmail.busy(), false); assert.equal(f.gmail.error(), ''); assert.equal(f.gmail.messages()[0].id, 'new');
+    fail = false; const count = queries.length; await f.gmail.load(true); assert.equal(queries.length, count);
+    t.mock.timers.tick(60000); await f.gmail.load(true); assert.equal(f.gmail.busy(), false); assert.equal(f.gmail.error(), ''); assert.equal(f.gmail.messages()[0].id, 'new');
   } finally {f.close();}
 });
 
@@ -475,7 +478,8 @@ test('各標籤與搜尋先顯示對應快取，五分鐘內不下載；過期�
     assert.equal(JSON.parse(f.values.get('iih-orbit-gmail-cache-v1')).entries.length, 3);
   } finally {f.close();}
 });
-test('沒有快取的新篩選失敗保留上次清單並標示，成功後才換成新結果，失敗不建立空快取', async () => {
+test('沒有快取的新篩選失敗保留上次清單並標示，成功後才換成新結果，失敗不建立空快取', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: Date.now()});
   const f = fixture(); let fail = false;
   try {
     f.auth.api = async (path, params) => {
@@ -490,7 +494,8 @@ test('沒有快取的新篩選失敗保留上次清單並標示，成功後才�
     assert.equal(f.values.get('iih-orbit-gmail-cache-v1'), original);
     f.gmail.applyLabels(['INBOX']); f.flush(); await f.gmail.load(); assert.equal(f.gmail.error(), ''); assert.equal(f.gmail.showingPrevious(), false);
     f.gmail.applyLabels(['Work']); f.flush(); assert.match(f.gmail.error(), /限制/);
-    fail = false; await f.gmail.load(true); assert.equal(f.gmail.messages()[0].id, 'Work'); assert.equal(f.gmail.showingPrevious(), false);
+    fail = false; await f.gmail.load(true); assert.equal(f.gmail.messages()[0].id, 'INBOX');
+    t.mock.timers.tick(60000); await f.gmail.load(true); assert.equal(f.gmail.messages()[0].id, 'Work'); assert.equal(f.gmail.showingPrevious(), false);
     assert.equal(JSON.parse(f.values.get('iih-orbit-gmail-cache-v1')).entries.length, 2);
   } finally {f.close();}
 });
@@ -516,6 +521,37 @@ test('重新整理保留快取時間，五分鐘內不讀取；載入更多重�
     const original = reopened.values.get('iih-orbit-gmail-cache-v1'), mails = structuredClone(reopened.gmail.messages()), time = reopened.gmail.updatedAt();
     reopened.auth.api = async () => {throw new Error('network');}; await reopened.gmail.load(true);
     assert.deepEqual(reopened.gmail.messages(), mails); assert.equal(reopened.gmail.updatedAt(), time); assert.equal(reopened.values.get('iih-orbit-gmail-cache-v1'), original);
+  } finally {reopened?.close();}
+});
+test('重開 Gmail 時標籤清單不隨郵件過期或搜尋範圍消失，失敗仍保留名稱，換帳號清除', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: Date.now()});
+  const f = fixture(); let saved, reopened;
+  try {
+    f.gmail.applyLabels(['Work']); f.gmail.search('subject:proposal'); f.flush();
+    f.auth.api = async path => path === 'labels' ? {labels: [{id: 'Work', name: '研究工作', type: 'user'}]} : {};
+    await f.gmail.load();
+    f.values.set('iih-orbit-gmail-preferences-v1', JSON.stringify(f.gmail.preferences())); saved = [...f.values];
+  } finally {f.close();}
+  t.mock.timers.tick(86400001);
+  try {
+    reopened = fixture(saved); reopened.auth.connected.set(false); reopened.flush();
+    assert.deepEqual(reopened.gmail.selected(), ['Work']); assert.deepEqual(reopened.gmail.selectedNames(), ['研究工作']);
+    assert.equal(reopened.gmail.messages().length, 0);
+    reopened.auth.connected.set(true); reopened.auth.api = async () => {throw new Error('offline');}; reopened.flush();
+    await reopened.gmail.load(true); assert.deepEqual(reopened.gmail.selectedNames(), ['研究工作']);
+    reopened.gmail.preferences.set({...reopened.gmail.preferences(), accountId: 'other'}); reopened.auth.account.set({id: 'other', email: 'other@example.test'}); reopened.flush();
+    assert.equal(reopened.gmail.labels().length, 0); assert.equal(reopened.values.has('iih-orbit-gmail-labels-v1'), false);
+  } finally {reopened?.close();}
+});
+test('標籤讀取成功但郵件失敗時仍保存清單，重新開啟可恢復名稱', async () => {
+  const f = fixture(); let saved, reopened;
+  try {
+    f.auth.api = async path => {if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}, {id: 'Work', name: '新版名稱', type: 'user'}]}; throw new Error('mail failed');};
+    await f.gmail.load(true); assert.ok(f.values.has('iih-orbit-gmail-labels-v1')); assert.equal(f.values.has('iih-orbit-gmail-cache-v1'), false);
+    f.values.set('iih-orbit-gmail-preferences-v1', JSON.stringify(f.gmail.preferences())); saved = [...f.values];
+  } finally {f.close();}
+  try {
+    reopened = fixture(saved); assert.equal(reopened.gmail.labels().find(label => label.id === 'Work').name, '新版名稱');
   } finally {reopened?.close();}
 });
 test('空郵箱的成功快取重新整理後仍有效，不因沒有郵件反覆下載', async () => {
@@ -758,7 +794,7 @@ test('右側欄切換不改動工作區視圖，郵件建立按鈕填入獨立�
   } finally {child.destroy(); f.close();}
 });
 
-test('新郵件只隨成功的列表更新檢查，沒有每分鐘、連線或焦點檢查，通知失敗不影響郵件', async t => {
+test('定期列表更新接續新郵件檢查，有效快取不重查，通知失敗不影響郵件', async t => {
   t.mock.timers.enable({apis: ['setTimeout', 'setInterval', 'Date'], now: Date.now()});
   const f = fixture(), events = new Map(), checks = []; let notifications, failList = false, failHistory = false;
   try {
@@ -779,7 +815,7 @@ test('新郵件只隨成功的列表更新檢查，沒有每分鐘、連線或�
     f.auth.connectionVersion.set(1); f.flush();
     for (const name of ['online', 'focus', 'visibilitychange']) events.get(name)?.();
     t.mock.timers.tick(3 * 60000); await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(checks, []); assert.deepEqual([...events.keys()], ['storage']);
+    assert.deepEqual(checks, ['profile']); assert.deepEqual([...events.keys()], ['storage']);
     await f.gmail.load(); f.flush(); assert.deepEqual(checks, ['profile']); assert.equal(notifications.count(), 0);
     await f.gmail.load(); await f.gmail.load(false, true); f.flush(); assert.equal(checks.length, 1);
     await f.gmail.load(true); f.flush(); assert.equal(checks.length, 2); assert.equal(notifications.count(), 1);
@@ -790,8 +826,8 @@ test('新郵件只隨成功的列表更新檢查，沒有每分鐘、連線或�
     assert.equal(f.gmail.messages()[0].id, 'mail'); assert.equal(notifications.state().historyId, baseline); assert.equal(notifications.count(), 1);
     assert.match(f.gmail.arrivalWarning(), /history unavailable/); assert.equal(f.gmail.busy(), false); assert.equal(notifications.checking(), false);
     failHistory = false; await f.gmail.load(true); f.flush(); assert.equal(checks.length, 5); assert.equal(f.gmail.arrivalWarning(), '');
-    t.mock.timers.tick(10 * 60000); await new Promise(resolve => setImmediate(resolve)); assert.equal(checks.length, 5);
-    notifications.ngOnDestroy(); await f.gmail.load(true); assert.equal(checks.length, 5);
+    t.mock.timers.tick(10 * 60000); await new Promise(resolve => setImmediate(resolve)); assert.equal(checks.length, 6);
+    notifications.ngOnDestroy(); await f.gmail.load(true); assert.equal(checks.length, 6);
   } finally {notifications?.ngOnDestroy(); f.close();}
 });
 
@@ -1361,4 +1397,103 @@ test('郵件列表依單封郵件及帳號列出跨空間相關任務，去重�
     await f.store.saveTask(f.store.tasks()[0], undefined, undefined, []); assert.equal(panel.related(preview).length, 1);
     f.gmail.preferences.update(value => ({...value, accountId: 'another', email: 'another@example.test'})); assert.equal(panel.related(preview).length, 0);
   } finally {panel?.ngOnDestroy(); f.close();}
+});
+
+test('獨立標籤名稱優先於日期較新的郵件預覽，舊版預覽在沒有獨立清單時可遷移', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'Date'], now: Date.now()});
+  const f = fixture(); let saved;
+  try {
+    f.auth.api = async path => path === 'labels' ? {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}, {id: 'Work', name: '更新名稱', type: 'user'}]} : {};
+    await f.gmail.load();
+    const cache = JSON.parse(f.values.get('iih-orbit-gmail-cache-v1'));
+    t.mock.timers.tick(1000); cache.entries[0].updatedAt = Date.now(); cache.entries[0].labels.find(label => label.id === 'Work').name = '較舊名稱';
+    f.values.set('iih-orbit-gmail-cache-v1', JSON.stringify(cache));
+    f.values.set('iih-orbit-gmail-preferences-v1', JSON.stringify(f.gmail.preferences())); saved = [...f.values];
+  } finally {f.close();}
+  const reopened = fixture(saved);
+  try {assert.equal(reopened.gmail.labels().find(label => label.id === 'Work').name, '更新名稱');} finally {reopened.close();}
+  const migrated = fixture(saved.filter(([key]) => key !== 'iih-orbit-gmail-labels-v1'));
+  try {
+    assert.equal(migrated.gmail.labels().find(label => label.id === 'Work').name, '較舊名稱');
+    assert.ok(migrated.values.has('iih-orbit-gmail-labels-v1'));
+  } finally {migrated.close();}
+});
+
+test('頁面在前景時約每五分鐘收信，側欄關閉仍更新；背景、離線與授權失效暫停且不自動授權', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'setInterval', 'Date'], now: Date.now()});
+  const f = fixture(), calls = []; let renewals = 0;
+  f.auth.renewForAction = () => {renewals++;};
+  f.auth.api = async path => {calls.push(path); return path === 'labels' ? {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]} : {};};
+  const advance = async minutes => {for (let index = 0; index < minutes; index++) {t.mock.timers.tick(60000); await new Promise(resolve => setImmediate(resolve));}};
+  try {
+    assert.equal(f.gmail.active(), false);
+    await advance(1); assert.equal(calls.filter(path => path === 'messages').length, 1);
+    await advance(4); assert.equal(calls.filter(path => path === 'messages').length, 1);
+    await advance(1); assert.equal(calls.filter(path => path === 'messages').length, 2);
+    document.visibilityState = 'hidden'; await advance(10); assert.equal(calls.filter(path => path === 'messages').length, 2);
+    document.visibilityState = 'visible'; f.gmail.wake(); await new Promise(resolve => setImmediate(resolve)); assert.equal(calls.filter(path => path === 'messages').length, 3);
+    navigator.onLine = false; f.gmail.wake(); await advance(10); assert.equal(calls.filter(path => path === 'messages').length, 3);
+    navigator.onLine = true; f.gmail.wake(); await new Promise(resolve => setImmediate(resolve)); assert.equal(calls.filter(path => path === 'messages').length, 4);
+    f.auth.connected.set(false); f.auth.expired.set(true); f.flush(); await advance(10); f.gmail.wake();
+    assert.equal(calls.filter(path => path === 'messages').length, 4); assert.equal(renewals, 0);
+    f.gmail.ngOnDestroy(); f.auth.connected.set(true); await advance(10); assert.equal(calls.filter(path => path === 'messages').length, 4);
+  } finally {f.close();}
+});
+test('手動更新每分鐘一次，重複點擊與換篩選不繞過；取消授權不占用更新間隔', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'setInterval', 'Date'], now: Date.now()});
+  const f = fixture(); let panel, reads = 0;
+  f.auth.api = async path => path === 'labels' ? {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}, {id: 'Work', name: '工作', type: 'user'}]} : {};
+  f.gmail.api.page = async () => {reads++; return {messages: [], cursor: newMailCursor(f.gmail.selected(), f.gmail.query())};};
+  try {
+    panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(false); f.flush();
+    f.auth.connected.set(false); f.auth.expired.set(true); f.auth.ready.set(true); f.flush();
+    f.auth.renewForAction = async () => {throw new Error('cancelled');};
+    await panel.refresh(); assert.equal(f.gmail.refreshWaitSeconds(), 0); assert.equal(reads, 0);
+    f.auth.connected.set(true); f.auth.expired.set(false); f.auth.renewForAction = () => {}; f.flush();
+    await panel.refresh(); assert.equal(reads, 1); assert.equal(f.gmail.refreshWaitSeconds(), 60); assert.equal(panel.canRefresh(), false);
+    await panel.refresh(); assert.equal(reads, 1); assert.equal(f.gmail.beginManualRefresh(), false);
+    f.gmail.search('subject:work'); f.flush(); await f.gmail.load(); assert.equal(reads, 2); assert.equal(panel.canRefresh(), false);
+    f.gmail.applyLabels(['Work']); f.flush(); await f.gmail.load(); assert.equal(reads, 3);
+    await f.gmail.load(false, true); assert.equal(reads, 4);
+    t.mock.timers.tick(59000); assert.equal(f.gmail.refreshWaitSeconds(), 1); await panel.refresh(); assert.equal(reads, 4);
+    t.mock.timers.tick(1000); assert.equal(f.gmail.refreshWaitSeconds(), 0); assert.equal(panel.canRefresh(), true);
+    await panel.refresh(); assert.equal(reads, 5);
+  } finally {panel?.ngOnDestroy(); f.close();}
+});
+test('Google 限流依 Retry-After 暫停自動及手動讀取，切換搜尋不重打，倒數結束可重試', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'setInterval', 'Date'], now: Date.now()});
+  const f = fixture(); let panel, reads = 0, limited = true;
+  f.auth.api = async path => {
+    if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]};
+    reads++; if (limited) throw new GoogleHttpError(429, 'Gmail', {retryAfterMs: 120000}); return {};
+  };
+  try {
+    panel = runInInjectionContext(f.child, () => new GmailPanel()); panel.active = signal(false); f.flush();
+    await panel.refresh(); assert.equal(reads, 1); assert.equal(f.gmail.refreshWaitSeconds(), 120);
+    f.gmail.search('subject:latest'); f.flush(); await f.gmail.load(); await f.gmail.load(true); await panel.refresh(); assert.equal(reads, 1);
+    t.mock.timers.tick(119000); await new Promise(resolve => setImmediate(resolve)); assert.equal(reads, 1); assert.equal(panel.canRefresh(), false);
+    limited = false; t.mock.timers.tick(1000); await new Promise(resolve => setImmediate(resolve));
+    await f.gmail.load(); assert.equal(reads, 2); assert.equal(f.gmail.error(), '');
+  } finally {panel?.ngOnDestroy(); f.close();}
+});
+test('收信尚未返回時不重複讀取，切換帳號不寫回舊結果，載入更多不延後新信檢查', async t => {
+  t.mock.timers.enable({apis: ['setTimeout', 'setInterval', 'Date'], now: Date.now()});
+  const f = fixture(); let reads = 0, release;
+  f.auth.api = async path => {
+    if (path === 'labels') return {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]};
+    reads++; return new Promise(resolve => {release = resolve;});
+  };
+  try {
+    t.mock.timers.tick(60000); await new Promise(resolve => setImmediate(resolve)); assert.equal(reads, 1);
+    t.mock.timers.tick(6 * 60000); await new Promise(resolve => setImmediate(resolve)); assert.equal(reads, 1);
+    const pending = release;
+    f.gmail.preferences.set({...f.gmail.preferences(), accountId: 'other', email: 'other@example.test'}); f.auth.account.set({id: 'other', email: 'other@example.test'}); f.flush();
+    pending({messages: [{id: 'old-account'}]}); await new Promise(resolve => setImmediate(resolve)); assert.equal(f.gmail.messages().length, 0);
+    f.auth.api = async path => path === 'labels' ? {labels: [{id: 'INBOX', name: 'INBOX', type: 'system'}]} : {};
+    f.gmail.api.page = async () => {reads++; return {messages: [], cursor: newMailCursor(f.gmail.selected(), f.gmail.query())};};
+    await f.gmail.load(); const before = reads;
+    for (let minute = 1; minute <= 4; minute++) {t.mock.timers.tick(60000); await new Promise(resolve => setImmediate(resolve)); await f.gmail.load(false, true);}
+    const afterMore = reads; assert.equal(afterMore, before + 4);
+    t.mock.timers.tick(60000); await new Promise(resolve => setImmediate(resolve)); assert.equal(reads, afterMore + 1);
+  } finally {f.close();}
 });

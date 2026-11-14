@@ -35,6 +35,8 @@ async function fixture() {
   globalThis.fetch = async (url, options) => {
     const token = new Headers(options.headers).get('Authorization').slice(7), account = tokens.get(token);
     if (String(url).includes('/userinfo')) return Response.json({sub: account, email: account + '@example.test'});
+    if (new URL(url).pathname.endsWith('/changes/startPageToken')) return Response.json({startPageToken: 'baseline-' + account});
+    if (new URL(url).pathname.endsWith('/changes')) return Response.json({changes: [], newStartPageToken: 'baseline-' + account});
     calls.push({url: new URL(url), account, signal: options.signal});
     return fetchFiles(new URL(url), account, options);
   };

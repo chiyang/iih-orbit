@@ -13,6 +13,10 @@ export const DRIVE_BROWSER_PAGE_SIZE = 100;
 export const DRIVE_METADATA_FIELDS = 'id,name,mimeType,webViewLink,parents,driveId,resourceKey,trashed,shortcutDetails(targetId,targetMimeType,targetResourceKey)';
 export const DRIVE_BROWSER_FIELDS = DRIVE_METADATA_FIELDS + ',modifiedTime,size,appProperties';
 export const DRIVE_FOLDER_FIELDS = DRIVE_METADATA_FIELDS + ',appProperties,capabilities(canAddChildren)';
+export const DRIVE_CHANGES_FIELDS = 'nextPageToken,newStartPageToken,changes(fileId,driveId,removed,changeType,file(' + DRIVE_METADATA_FIELDS + '))';
+export const validChangeToken = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 4000 && !/[\u0000-\u001f\u007f]/.test(value);
+export interface DriveFileChange {fileId: string; removed: boolean; file?: DriveBrowserEntry}
+export interface DriveChangePage {changes: DriveFileChange[]; nextPageToken: string; newStartPageToken: string}
 const ORBIT_BACKUP_FILTER = `not (mimeType = '${DRIVE_FOLDER_MIME}' and ((appProperties has { key='orbit' and value='v1' } and appProperties has { key='type' and value='folder' }) or name = 'IIH Orbit'))`;
 export const validBrowserId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(id);
 export interface DriveBrowserEntry {
@@ -65,6 +69,32 @@ export function sourceFromDriveEntry(file: DriveBrowserEntry, location = ''): Do
 export class DriveBrowserApi {
   private readonly transport: DriveBrowserTransport;
   constructor(transport: DriveBrowserTransport) {this.transport = transport;}
+  async startPageToken(signal?: AbortSignal): Promise<string> {
+    const result = await this.transport.api('changes/startPageToken', {fields: 'startPageToken', supportsAllDrives: 'true'}, signal) as {startPageToken?: unknown};
+    if (!validChangeToken(result?.startPageToken)) throw new Error('Drive 變更追蹤起點不完整。');
+    return result.startPageToken;
+  }
+  async changes(pageToken: string, signal?: AbortSignal): Promise<DriveChangePage> {
+    if (!validChangeToken(pageToken)) throw new Error('Drive 變更游標不合法。');
+    const result = await this.transport.api('changes', {pageToken, pageSize: '100', spaces: 'drive', supportsAllDrives: 'true', includeItemsFromAllDrives: 'true', includeRemoved: 'true', fields: DRIVE_CHANGES_FIELDS}, signal) as {changes?: unknown[]; nextPageToken?: unknown; newStartPageToken?: unknown};
+    if (!result || result.changes !== undefined && (!Array.isArray(result.changes) || result.changes.length > 100)
+      || result.nextPageToken !== undefined && !validChangeToken(result.nextPageToken) || result.newStartPageToken !== undefined && !validChangeToken(result.newStartPageToken)
+      || !!result.nextPageToken === !!result.newStartPageToken) throw new Error('Drive 變更清單不完整，保留原追蹤位置。');
+    const changes: DriveFileChange[] = [];
+    for (const value of result.changes ?? []) {
+      const change = value as {changeType?: unknown; fileId?: unknown; driveId?: unknown; removed?: unknown; file?: unknown};
+      if (!change || !['file', 'drive'].includes(change.changeType as string) || change.removed !== undefined && typeof change.removed !== 'boolean') throw new Error('Drive 變更格式不完整。');
+      if (change.changeType === 'drive') {
+        if (!validBrowserId(change.driveId)) throw new Error('Drive 共用硬碟變更識別不合法。');
+        changes.push({fileId: change.driveId, removed: change.removed === true}); continue;
+      }
+      if (!validBrowserId(change.fileId)) throw new Error('Drive 變更檔案識別不合法。');
+      const file = change.file === undefined ? undefined : readDriveBrowserEntry(change.file);
+      if (file && file.id !== change.fileId || !change.removed && !file) throw new Error('Drive 變更檔案資訊不完整。');
+      changes.push({fileId: change.fileId, removed: change.removed === true, ...(file ? {file} : {})});
+    }
+    return {changes, nextPageToken: result.nextPageToken as string ?? '', newStartPageToken: result.newStartPageToken as string ?? ''};
+  }
   async get(id: string, resourceKey = '', signal?: AbortSignal): Promise<DriveBrowserEntry> {
     if (!validBrowserId(id) || resourceKey && !validBrowserId(resourceKey)) throw new Error('Drive 檔案識別不合法。');
     const file = readDriveBrowserEntry(await this.transport.api('files/' + id, {fields: DRIVE_METADATA_FIELDS, supportsAllDrives: 'true'}, signal, resourceKey ? id + '/' + resourceKey : undefined));

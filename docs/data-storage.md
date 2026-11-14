@@ -123,6 +123,10 @@ IndexedDB 的 `base` 保存已確認同步基準，`mergeBase` 暫存正在整�
 
 第四階段在送出建立要求前，以本機 `iih-orbit-document-operations-v1` 保存操作識別與選項；部分成功保留結果 ID／URL，重新載入可查核，不重送不確定的 POST。建立憑證只在分頁記憶體，最後成功位置使用獨立 `iih-orbit-document-destinations-v1`；兩者均不進任務備份，正常登出清除本機紀錄。關聯必須成功持久保存，且在寫入鎖內驗證任務／來源／世代。安全來源整理只移除全部空間、垃圾桶、衝突、事件、復原／重做、草稿與未完成建立均未引用的孤立來源；本次整理會保存修訂，任務時間不變，歷史標記不壓縮，格式仍為看板 6／備份 7。[建立與清理規則](document-creation-and-cleanup.md)。
 
+## Gmail 標籤與 Drive 追蹤位置
+
+2026-11-14 新增兩份獨立的本機資訊：`iih-orbit-gmail-labels-v1` 保存目前 Gmail 帳號最後成功取得的標籤清單及時間，與郵件預覽的搜尋範圍／一天期限分開；`iih-orbit-drive-changes-v1` 保存各檔案來源的增量追蹤游標。兩者按帳號、Client ID 與資料世代隔離，不含授權憑證、不加入 JSON／Drive 備份或跨裝置同步，也不變更工作資料格式。Drive 檔案 metadata 本身仍只存在分頁記憶體。[標籤規則](gmail-design.md#設定與標籤)、[增量追蹤](document-information-refresh.md#增量變更追蹤)。
+
 ## 離線使用
 
 正式版本會在背景準備離線程式，下載完成後可在同一瀏覽器離線重開及編輯本機任務。主畫面不顯示常駐狀態列；更新等待所有分頁關閉，不打斷編輯。[離線使用、更新與驗證範圍](offline-tasks.md)。

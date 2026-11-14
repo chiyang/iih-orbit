@@ -169,3 +169,32 @@ test('快取清理可重建，過期整理保留有效紀錄，查驗不改工�
   await f.manager.refresh([source()]); assert.equal(f.manager.view(source()).status, 'available');
   assert.ok(f.manager.clear() > 0); assert.equal(f.manager.view(source()).source.name, '保存名稱'); assert.equal(await syncHash(saved), hash);
 });
+
+test('增量變更更新已知檔名與祖先位置，略過無關檔案，不改任務來源快照', async () => {
+  const f = fixture(), saved = source(), original = structuredClone(saved);
+  await f.manager.refresh([saved]); const count = f.calls.length;
+  const folder = raw('folder', '增量資料夾', ['new-parent'], DRIVE_FOLDER_MIME), renamed = raw('file', '增量檔名', ['folder']);
+  f.files.set('new-parent', raw('new-parent', '新上層', ['my-root'], DRIVE_FOLDER_MIME));
+  f.manager.observeChanges('a', [{fileId: 'unrelated', removed: false, file: raw('unrelated')}, {fileId: 'folder', removed: false, file: folder}, {fileId: 'file', removed: false, file: renamed}], new Set(['file']));
+  assert.equal(f.manager.entry('a', 'unrelated'), undefined);
+  assert.equal(f.manager.view(saved).source.name, '增量檔名'); assert.equal(f.manager.view(saved).stale, true);
+  await f.manager.refresh([saved]);
+  assert.equal(f.calls.length, count + 1); assert.equal(f.calls.at(-1).id, 'new-parent');
+  assert.match(f.manager.view(saved).source.location, /新上層 \/ 增量資料夾/);
+  assert.deepEqual(saved, original);
+  f.manager.observeChanges('a', [{fileId: 'file', removed: true}], new Set(['file']));
+  assert.equal(f.manager.view(saved).status, 'unavailable'); assert.deepEqual(saved, original);
+  f.files.set('file', new GoogleHttpError(404)); await f.manager.refresh([saved]); assert.equal(f.manager.view(saved).status, 'unavailable');
+});
+test('增量更新隔離來源，舊請求晚到或舊列表快取不覆蓋新名稱，移至垃圾桶反映可見性', async () => {
+  const f = fixture(), saved = source(); let finish;
+  f.manager.setConnections([{...f.connection, api: {get: id => id === 'file' ? new Promise(resolve => {finish = resolve;}) : f.connection.api.get(id)}}]);
+  const pending = f.manager.refresh([saved]);
+  f.manager.observeChanges('other', [{fileId: 'file', removed: false, file: raw('file', '另一來源')}], new Set(['file']));
+  assert.equal(f.manager.view(saved).source.name, '保存名稱');
+  f.manager.observeChanges('a', [{fileId: 'file', removed: false, file: raw('file', '新名稱', ['my-root'], 'application/pdf', {trashed: true})}], new Set(['file']));
+  finish(raw('file', '舊請求')); await pending;
+  f.manager.observeList('a', [raw('file', '舊列表')], {id: 'root', name: 'root'}, f.now(), true);
+  assert.equal(f.manager.view(saved).source.name, '新名稱'); assert.equal(f.manager.view(saved).status, 'trashed');
+  assert.equal(f.manager.visibleIn('a', 'file', {id: 'my-root', name: 'root'}), false);
+});

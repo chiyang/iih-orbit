@@ -2,7 +2,7 @@
   <div class="mail-toolbar">
     @if (gmail.preferences().accountId && (gmail.auth.connected() || gmail.auth.expired())) {
       @if (!gmail.online()) {<span class="mail-offline" role="status">離線</span>}
-      <button type="button" [disabled]="!canRefresh()" (click)="refresh()" [attr.title]="'更新 ' + gmail.preferences().email + ' 的郵件'"><app-icon name="sync" />{{ gmail.auth.authorizing() ? '等待授權…' : gmail.busy() || refreshing() ? '更新中…' : '更新' }}</button>
+      <button type="button" [disabled]="!canRefresh()" (click)="refresh()" [attr.title]="gmail.refreshWaitSeconds() ? '請稍候 ' + gmail.refreshWaitSeconds() + ' 秒再更新' : '更新 ' + gmail.preferences().email + ' 的郵件'"><app-icon name="sync" />{{ gmail.auth.authorizing() ? '等待授權…' : gmail.busy() || refreshing() ? '更新中…' : gmail.refreshWaitSeconds() ? '稍候 ' + gmail.refreshWaitSeconds() + ' 秒' : '更新' }}</button>
     } @else {<button type="button" (click)="configure.emit()"><app-icon name="settings" />{{ gmail.preferences().accountId ? '重新連線 Gmail' : '設定 Gmail' }}</button>}
   </div>
   @if (gmail.preferences().accountId) {

@@ -39,6 +39,7 @@ export class GmailPanel {
   readonly threadViews = signal(new Map<string, ThreadView>());
   readonly refreshing = signal(false);
   readonly canRefresh = computed(() => !this.refreshing() && !this.gmail.busy() && !this.gmail.auth.authorizing() && this.gmail.online()
+    && !this.gmail.refreshWaitSeconds()
     && (this.gmail.auth.connected() || this.gmail.auth.expired() && this.gmail.auth.ready()));
   private readonly viewedNewThreadIds = linkedSignal(() => {this.gmail.previewIdentity(); return new Set<string>();});
   readonly newThreadIds = computed(() => new Set([...this.gmail.newThreadIds(), ...this.viewedNewThreadIds()]));
@@ -95,6 +96,7 @@ export class GmailPanel {
       const renewal = this.gmail.auth.renewForAction({generation: this.gmail.store.generation(), clientId: this.gmail.clientId(), accountId: this.gmail.preferences().accountId});
       if (renewal) await renewal;
       if (this.destroyed || original !== configuration()) return;
+      if (!this.gmail.beginManualRefresh()) return;
       const context = this.context();
       await this.gmail.load(true);
       if (this.destroyed || context !== this.context() || this.gmail.error()) return;

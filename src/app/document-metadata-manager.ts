@@ -1,6 +1,6 @@
 import type {DocumentSource} from './models.ts';
 import {documentLocationSnapshot} from './document-data.ts';
-import {DRIVE_FOLDER_MIME, DriveBrowserApi, sourceFromDriveEntry, type DriveBrowserEntry, type DriveBrowserFolder} from './drive-browser-data.ts';
+import {DRIVE_FOLDER_MIME, DriveBrowserApi, sourceFromDriveEntry, type DriveBrowserEntry, type DriveBrowserFolder, type DriveFileChange} from './drive-browser-data.ts';
 import {GoogleHttpError} from './google-api.ts';
 
 export const DOCUMENT_METADATA_TTL = 15 * 60000;
@@ -265,6 +265,42 @@ export class DocumentMetadataManager {
     this.nodes.delete(identity); this.nodes.set(identity, {file: structuredClone(file), at, pass});
     this.nodeErrors.delete(key(connection.key, JSON.stringify([file.id, file.resourceKey ?? ''])));
     this.nodeErrors.delete(key(connection.key, JSON.stringify([file.id, ''])));
+  }
+  invalidateConnection(connectionId: string): void {
+    const connection = this.connections.find(item => item.id === connectionId);
+    if (!connection) return;
+    this.epoch++; for (const job of [...this.active, ...this.queue]) this.abort(job);
+    for (const [id, record] of this.checks) if (JSON.parse(id)[0] === connection.key) record.invalidated = true;
+    for (const cache of [this.nodes, this.nodeErrors]) for (const id of cache.keys()) if (JSON.parse(id)[0] === connection.key) cache.delete(id);
+    this.changed();
+  }
+  observeChanges(connectionId: string, changes: readonly DriveFileChange[], linkedIds: ReadonlySet<string>): void {
+    const connection = this.connections.find(item => item.id === connectionId);
+    if (!connection || !this.current(connection)) return;
+    const relevant = changes.filter(change => linkedIds.has(change.fileId) || this.nodes.has(key(connection.key, change.fileId))
+      || [...this.checks].some(([id, record]) => JSON.parse(id)[0] === connection.key && (record.file?.id === change.fileId || record.ancestors.includes(change.fileId))));
+    if (!relevant.length) return;
+    // Fence reads that began before this change page, including ancestors in flight.
+    this.epoch++; for (const job of [...this.active, ...this.queue]) this.abort(job);
+    for (const change of relevant) {
+      const identity = key(connection.key, change.fileId);
+      if (change.removed || !change.file) this.nodes.delete(identity);
+      else this.observeNode(connection, change.file, this.now());
+      for (const id of this.nodeErrors.keys()) if (JSON.parse(id)[0] === connection.key && JSON.parse(JSON.parse(id)[1])[0] === change.fileId) this.nodeErrors.delete(id);
+      for (const [id, record] of this.checks) if (JSON.parse(id)[0] === connection.key && (record.file?.id === change.fileId || record.ancestors.includes(change.fileId))) {
+        record.invalidated = true; record.nextCheckAt = 0;
+        if (record.file?.id === change.fileId) {
+          record.checkedAt = this.now();
+          if (change.removed) record.status = 'unavailable';
+          else if (change.file) {record.file = structuredClone(change.file); record.status = change.file.trashed ? 'trashed' : 'available';}
+        }
+      }
+      if (!change.removed && change.file) {
+        const source = sourceFromDriveEntry(change.file), id = key(connection.key, source.id);
+        if (!this.checks.has(id) && linkedIds.has(change.fileId)) this.checks.set(id, {documentId: source.id, file: structuredClone(change.file), status: change.file.trashed ? 'trashed' : 'available', checkedAt: this.now(), nextCheckAt: 0, invalidated: true, ancestors: change.file.parents ?? [], resourceKey: change.file.resourceKey ?? ''});
+      }
+    }
+    this.bound(); this.changed();
   }
   observeList(connectionId: string, files: readonly DriveBrowserEntry[], folder: DriveBrowserFolder, at: number, cached = false): void {
     const connection = this.connections.find(item => item.id === connectionId);

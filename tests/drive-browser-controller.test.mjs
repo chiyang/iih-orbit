@@ -9,7 +9,7 @@ import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {JSDOM} from 'jsdom';
 import {COLUMNS} from '../src/app/models.ts';
-import {DRIVE_FOLDER_MIME, DRIVE_METADATA_FIELDS, readDriveBrowserEntry, sourceFromDriveEntry} from '../src/app/drive-browser-data.ts';
+import {DRIVE_FOLDER_MIME, DRIVE_METADATA_FIELDS, DRIVE_CHANGES_FIELDS, readDriveBrowserEntry, sourceFromDriveEntry} from '../src/app/drive-browser-data.ts';
 import {DOCUMENT_DRAG_TYPE} from '../src/app/document-data.ts';
 
 const require = createRequire(import.meta.url), {build} = createRequire(require.resolve('@angular/build/package.json'))('esbuild');
@@ -20,11 +20,11 @@ const {GoogleHttpError, DocumentMetadataService, DriveBrowser, DriveBrowserAuth,
 after(() => rm(directory, {recursive: true, force: true}));
 const raw = (id, folder = false) => ({id, name: id, mimeType: folder ? DRIVE_FOLDER_MIME : 'application/pdf'});
 const base = {id: 'existing', title: '原任務', description: '', categoryId: '', projectId: '', status: 'todo', priority: 'medium', startDate: '', dueDate: '', startTime: '', dueTime: '', subtasks: []};
-function fixture(api = async () => ({files: [raw('folder', true), raw('file')]})) {
+function fixture(api = async () => ({files: [raw('folder', true), raw('file')]}), changesApi = async path => path === 'changes/startPageToken' ? {startPageToken: 'baseline'} : {changes: [], newStartPageToken: 'baseline'}) {
   const values = new Map([['orbit-workspaces-v1', JSON.stringify({version: 1, activeWorkspaceId: 'workspace', workspaces: [{version: 4, id: 'workspace', name: '工作', projects: [], categories: [], statuses: COLUMNS, tasks: [base]}]})]]);
   globalThis.localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: key => values.delete(key)};
   const store = new BoardStore(), dom = new JSDOM('', {url: 'https://example.test'}), effects = new Set(), calls = [];
-  const auth = {expired: signal(false), renewForAction: () => {}, connectionVersion: signal(0), connected: signal(true), authorizing: signal(false), account: signal(null), ready: signal(true), message: signal(''), useSession() {}, disconnect() {this.connected.set(false); this.authorizing.set(false); this.connectionVersion.update(v => v + 1);}, prepare: async () => {}, authorize: async () => ({id: 'new-account', email: 'new@example.test'}), api: (...args) => {calls.push(args); return api(...args);}};
+  const auth = {expired: signal(false), renewForAction: () => {}, connectionVersion: signal(0), connected: signal(true), authorizing: signal(false), account: signal(null), ready: signal(true), message: signal(''), useSession() {}, disconnect() {this.connected.set(false); this.authorizing.set(false); this.connectionVersion.update(v => v + 1);}, prepare: async () => {}, authorize: async () => ({id: 'new-account', email: 'new@example.test'}), api: (...args) => {if (args[0].startsWith('changes')) return changesApi(...args); calls.push(args); return api(...args);}};
   const injector = createEnvironmentInjector([DocumentMetadataService, DriveBrowserConnection, {provide: BoardStore, useValue: store}, {provide: DOCUMENT, useValue: dom.window.document}, {provide: DriveBrowserAuth, useValue: auth}, {provide: ɵEffectScheduler, useValue: {add: e => effects.add(e), schedule() {}, remove: e => effects.delete(e)}}, {provide: ɵChangeDetectionScheduler, useValue: {notify() {}}}]);
   globalThis.ngServerMode = true;
   let browser, documents;
@@ -197,7 +197,7 @@ test('拖曳 token 與即時來源驗證，切換工作空間、帳號與 genera
     const next = event(); f.documents.start(next, file, () => true); f.store.generation.set('new-generation'); f.flush(); assert.equal(f.documents.dragging(), false); await f.documents.drop(next, {...base, id: 'late'}); assert.equal(f.store.tasks().length, 1);
   } finally {f.close();}
 });
-test('檔案授權 API 限制為 GET files，resource keys 正確傳送，拒絕內容下載與其他端點', async () => {
+test('檔案授權 API 限制為 files 與唯讀變更 metadata，拒絕內容下載與任意端點', async () => {
   const calls = [], auth = Object.create(DriveBrowserAuth.prototype); auth.fetchJson = async (...args) => {calls.push(args); return {};};
   await auth.api('files', {fields: 'files(id,name)'}, undefined, 'folder/key'); assert.match(calls[0][0], /^https:\/\/www.googleapis.com\/drive\/v3\/files\?/); assert.equal(calls[0][1].headers['X-Goog-Drive-Resource-Keys'], 'folder/key');
   for (const args of [['files/x', {}], ['files', {alt: 'media'}], ['files', {fields: '*'}], ['files', {}, undefined, 'bad/header/value']]) assert.throws(() => auth.api(...args));
@@ -205,6 +205,11 @@ test('檔案授權 API 限制為 GET files，resource keys 正確傳送，拒絕
   assert.match(calls[1][0], /\/files\/file\?/); assert.equal(calls[1][1].headers['X-Goog-Drive-Resource-Keys'], 'file/key');
   assert.throws(() => auth.api('files/file', {fields: DRIVE_METADATA_FIELDS, alt: 'media'}));
   assert.throws(() => auth.api('files/file/export', {fields: DRIVE_METADATA_FIELDS}));
+  await auth.api('changes/startPageToken', {fields: 'startPageToken', supportsAllDrives: 'true'});
+  const parameters = {pageToken: 'cursor', pageSize: '100', spaces: 'drive', supportsAllDrives: 'true', includeItemsFromAllDrives: 'true', includeRemoved: 'true', fields: DRIVE_CHANGES_FIELDS};
+  await auth.api('changes', parameters); assert.match(calls.at(-1)[0], /\/changes\?/);
+  for (const invalid of [{...parameters, alt: 'media'}, {...parameters, fields: '*'}, {...parameters, pageToken: ''}, {...parameters, pageSize: '1000'}]) assert.throws(() => auth.api('changes', invalid));
+  assert.throws(() => auth.api('changes/startPageToken', {fields: '*', supportsAllDrives: 'true'}));
 });
 
 test('跨共用硬碟的資料夾捷徑用 target ID 導覽，不沿用捷徑所在硬碟範圍', async () => {
@@ -246,4 +251,24 @@ test('選檔的請求取消與錯誤不取消側欄讀取，也不共用錯誤�
     pending[0]({files: [raw('sidebar-file')]}); pending[1]({files: [raw('discarded-file')]}); await Promise.all([sidebarLoad, pickerLoad]);
     assert.equal(f.browser.files()[0].id, 'sidebar-file'); assert.equal(f.browser.error(), ''); assert.equal(picker.files().length, 0);
   } finally {picker?.ngOnDestroy(); f.close();}
+});
+
+test('Drive 增量排程更新共用資訊並使目錄快取失效，舊列表回覆不能覆蓋變更或取消導航', async () => {
+  let stamp = 1800000000000, release;
+  const changesCalls = [];
+  const f = fixture(async path => path.startsWith('files/') ? {...raw(path.slice(6)), parents: []} : {files: [{...raw('file'), parents: ['my-root']}]}, async (path, parameters) => {
+    changesCalls.push(path);
+    return path === 'changes/startPageToken' ? {startPageToken: 'initial'} : {changes: [], newStartPageToken: 'initial'};
+  });
+  try {
+    const metadata = f.browser.metadata; metadata.changes.now = () => stamp;
+    await metadata.changes.poll(); await f.browser.activate();
+    assert.ok(changesCalls.includes('changes/startPageToken')); assert.ok(changesCalls.includes('changes'));
+    f.auth.api = async path => path.startsWith('files/') ? {...raw(path.slice(6)), parents: []} : path === 'files' ? new Promise(resolve => {release = resolve;}) : {changes: [{changeType: 'file', removed: false, fileId: 'file', file: {...raw('file'), name: '更新後名稱', parents: ['my-root']}}], newStartPageToken: 'updated'};
+    const pending = f.browser.refresh(); await new Promise(resolve => setImmediate(resolve));
+    stamp += 5 * 60000; await metadata.changes.poll();
+    release({files: [{...raw('file'), name: '晚到舊名稱', parents: ['my-root']}]}); await pending;
+    assert.equal(f.browser.displayEntry(f.browser.files()[0]).name, '更新後名稱'); assert.equal(f.browser.cache.size, 0);
+    assert.equal(f.store.revision(), 'legacy'); assert.ok(f.dom.window.localStorage.getItem('iih-orbit-drive-changes-v1'));
+  } finally {f.close();}
 });

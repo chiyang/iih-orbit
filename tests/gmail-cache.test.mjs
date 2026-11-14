@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url), {build} = createRequire(require.
 await mkdir('.angular', {recursive: true});
 const directory = await mkdtemp(resolve('.angular/gmail-cache-test-')), output = resolve(directory, 'cache.mjs');
 await build({entryPoints: ['src/app/gmail-cache.ts'], bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile: output, tsconfig: 'tsconfig.json'});
-const {GmailPreviewCache} = await import(pathToFileURL(output).href);
+const {GmailLabelCache, GmailPreviewCache} = await import(pathToFileURL(output).href);
 after(() => rm(directory, {recursive: true, force: true}));
 const key = 'iih-orbit-gmail-cache-v1';
 const scope = (query = '', account = 'account') => JSON.stringify(['generation', 'client', account, ['INBOX'], query]);
@@ -23,6 +23,28 @@ function storage() {
   globalThis.localStorage = {getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: key => values.delete(key)};
   return values;
 }
+test('標籤清單獨立於搜尋與一天郵件期限，按帳號隔離且只保存標籤欄位', t => {
+  t.mock.timers.enable({apis: ['Date'], now: 100000000});
+  const values = storage(), cache = new GmailLabelCache(), owner = JSON.stringify(['generation', 'client', 'account']);
+  cache.put(owner, [{id: 'work', name: '工作', type: 'user', body: 'PRIVATE', token: 'PRIVATE'}]);
+  t.mock.timers.tick(86400001);
+  const reopened = new GmailLabelCache(), saved = reopened.get(owner);
+  assert.deepEqual(saved.labels, [{id: 'work', name: '工作', type: 'user'}]);
+  assert.equal(reopened.get(JSON.stringify(['generation', 'client', 'another'])), undefined);
+  saved.labels[0].name = 'changed'; assert.equal(reopened.get(owner).labels[0].name, '工作');
+  assert.equal(values.get('iih-orbit-gmail-labels-v1').includes('PRIVATE'), false);
+  reopened.clear(); assert.equal(values.has('iih-orbit-gmail-labels-v1'), false);
+});
+test('標籤快取損壞可重建，寫入失敗仍保留本次清單，容量限制不覆蓋原保存', () => {
+  const values = storage(), owner = JSON.stringify(['generation', 'client', 'account']);
+  values.set('iih-orbit-gmail-labels-v1', '{broken');
+  const cache = new GmailLabelCache(); assert.equal(cache.get(owner), undefined);
+  localStorage.setItem = () => {throw new Error('quota');};
+  assert.throws(() => cache.put(owner, [{id: 'work', name: '工作', type: 'user'}]), /quota/);
+  assert.equal(cache.get(owner).labels[0].name, '工作');
+  assert.throws(() => cache.put(owner, Array.from({length: 10001}, (_, id) => ({id: String(id), name: '工作', type: 'user'}))), /過大/);
+  assert.equal(cache.get(owner).labels[0].id, 'work');
+});
 test('Gmail 快取最多六組、每組 75 封，依使用順序清理；游標只留記憶體且另一帳號不可使用', () => {
   const values = storage(), cache = new GmailPreviewCache();
   for (let i = 0; i < 6; i++) cache.put(snapshot(String(i)));

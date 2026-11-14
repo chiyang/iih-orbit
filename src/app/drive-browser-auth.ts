@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { GoogleAuth } from './google-auth';
 import type { SessionOptions } from './google-session';
-import { DRIVE_BROWSER_SCOPE, DRIVE_METADATA_FIELDS, DRIVE_FOLDER_FIELDS, validBrowserId } from './drive-browser-data';
+import { DRIVE_BROWSER_SCOPE, DRIVE_METADATA_FIELDS, DRIVE_FOLDER_FIELDS, DRIVE_CHANGES_FIELDS, validBrowserId, validChangeToken } from './drive-browser-data';
 
 @Injectable({providedIn: 'root'})
 export class DriveBrowserAuth extends GoogleAuth {
@@ -12,6 +12,12 @@ export class DriveBrowserAuth extends GoogleAuth {
   protected override get resourceName(): string {return 'Drive 檔案資訊';}
   protected override get maxResponseBytes(): number {return 2 * 1024 * 1024;}
   api(path: string, parameters: Record<string, string>, signal?: AbortSignal, resourceKeys?: string): Promise<unknown> {
+    if (path === 'changes' || path === 'changes/startPageToken') {
+      const expected = path === 'changes' ? {pageToken: parameters['pageToken'], pageSize: '100', spaces: 'drive', supportsAllDrives: 'true', includeItemsFromAllDrives: 'true', includeRemoved: 'true', fields: DRIVE_CHANGES_FIELDS} : {fields: 'startPageToken', supportsAllDrives: 'true'};
+      if (resourceKeys || path === 'changes' && !validChangeToken(parameters['pageToken']) || Object.keys(parameters).length !== Object.keys(expected).length
+        || Object.entries(expected).some(([key, value]) => parameters[key] !== value)) throw new Error('Drive 變更追蹤只允許讀取檔案 metadata。');
+      return this.fetchJson('https://www.googleapis.com/drive/v3/' + path + '?' + new URLSearchParams(parameters), {signal});
+    }
     const file = path.startsWith('files/') ? path.slice(6) : '';
     if (path !== 'files' && (!validBrowserId(file) || ![DRIVE_METADATA_FIELDS, DRIVE_FOLDER_FIELDS].includes(parameters['fields']) || Object.keys(parameters).some(key => !['fields', 'supportsAllDrives'].includes(key)))
       || parameters['alt'] || parameters['fields']?.includes('*')) throw new Error('檔案瀏覽只允許讀取 Drive 名稱、位置與狀態資訊。');
