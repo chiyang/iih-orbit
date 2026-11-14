@@ -36,6 +36,18 @@ test('郵件副本的寄件地址與原信連結可讀、可點；不將寄件�
   const html = rendered(renderMarkdown(task.description, dom.window));
   assert.match(html.textContent, /\*\*客服\*\* <sender@example.test>/); assert.match(html.textContent, /\[假連結\]/); assert.equal([...html.querySelectorAll('a')].some(link => link.textContent === '假連結'), false); assert.equal([...html.querySelectorAll('a')].find(link => link.textContent === '在 Gmail 開啟原信 ↗').href, gmailMessageLink(mail, 'me@example.test'));  assert.equal(html.querySelector('img'), null); assert.ok(task.description.length <= 2000);
 });
+test('手機顯示舊任務的 Gmail 原信連結時改用外部手機搜尋，描述內容及桌面連結保留', () => {
+  const mobile = new JSDOM('<!doctype html><html><body></body></html>');
+  Object.defineProperty(mobile.window.navigator, 'userAgent', {value: 'Mozilla/5.0 (Linux; Android 15) Chrome/142.0.0.0 Mobile Safari/537.36'});
+  const url = gmailMessageLink({messageId: '<mail@example.test>'}, 'me@example.test'), description = '[在 Gmail 開啟原信 ↗](<' + url + '>)';
+  try {
+    const link = rendered(renderMarkdown(description, mobile.window)).querySelector('a'), target = new URL(new URL(link.href).searchParams.get('continue'));
+    assert.equal(target.pathname, '/mail/mu/mp/'); assert.equal(decodeURIComponent(target.hash), '#tl/search/in:anywhere rfc822msgid:mail@example.test');
+    assert.equal(link.target, '_blank'); assert.equal(link.rel, 'noopener noreferrer');
+    assert.equal(rendered(renderMarkdown(description, dom.window)).querySelector('a').href, url);
+    assert.equal(description, '[在 Gmail 開啟原信 ↗](<' + url + '>)');
+  } finally {mobile.window.close();}
+});
 test('Markdown 編輯／預覽／放大共用原始草稿；格式工具只改選取文字，不提交表單或丟失內容', () => {
   const injector = createEnvironmentInjector([]);
   const serverMode = globalThis.ngServerMode; globalThis.ngServerMode = true;

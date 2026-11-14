@@ -5,6 +5,7 @@ import { GmailService } from './gmail-service';
 import { GmailNotifications } from './gmail-notifications';
 import { MailTasks } from './mail-tasks';
 import { gmailMessageLink, mailLabelName, MailLabel, MailPreview } from './gmail-data';
+import { gmailBrowserLink } from './gmail-browser-link';
 import { Icon } from './icon';
 import { mapMailRequests } from './gmail-api';
 import { SourceTouchDrag } from './source-touch-drag';
@@ -123,7 +124,7 @@ export class GmailPanel {
       if (current()) this.threadViews.update(views => new Map(views).set(id, {messages: previous?.messages ?? [], busy: false, error: error instanceof Error ? error.message : '無法讀取討論串。'}));
     } finally { if (current()) this.syncExpanded(); }
   }
-  link(mail: MailPreview): string { return gmailMessageLink(mail, this.gmail.preferences().email); }
+  link(mail: MailPreview): string { return gmailBrowserLink(gmailMessageLink(mail, this.gmail.preferences().email)); }
   related(mail: MailPreview) {
     const {email, accountId} = this.gmail.preferences();
     if (!accountId) return [];

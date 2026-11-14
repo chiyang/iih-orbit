@@ -1,5 +1,6 @@
 import createDOMPurify, { type WindowLike } from 'dompurify';
 import { Marked } from 'marked';
+import { gmailBrowserLink } from './gmail-browser-link.ts';
 
 const escapeHtml = (text: string) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const markdown = new Marked({gfm: true, breaks: true, renderer: {
@@ -14,6 +15,7 @@ export function sanitizeRichHtml(source: string, browser: WindowLike = window): 
   const purifier = createDOMPurify(browser);
   purifier.addHook('afterSanitizeAttributes', node => {
     if (node.tagName === 'A' && node.hasAttribute('href')) {
+      node.setAttribute('href', gmailBrowserLink(node.getAttribute('href')!, browser.document?.defaultView?.navigator.userAgent));
       node.setAttribute('target', '_blank'); node.setAttribute('rel', 'noopener noreferrer');
     }
   });

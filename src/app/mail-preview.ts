@@ -1,6 +1,7 @@
 import { Component, computed, effect, ElementRef, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { GmailService } from './gmail-service';
 import { gmailMessageLink, type MailPreview as Mail } from './gmail-data';
+import { gmailBrowserLink } from './gmail-browser-link';
 import type { MailContent } from './gmail-content';
 import { RichContent } from './rich-content';
 import { MailReader } from './mail-reader';
@@ -23,7 +24,7 @@ export class MailPreview {
   readonly busy = signal(false);
   readonly error = signal('');
   readonly expired = computed(() => this.identity() !== this.gmail.previewIdentity());
-  readonly link = computed(() => gmailMessageLink(this.shown(), this.email()));
+  readonly link = computed(() => gmailBrowserLink(gmailMessageLink(this.shown(), this.email())));
   readonly readingPane = viewChild<ElementRef<HTMLElement>>('readingPane');
   private sequence = 0;
   private threadSequence = 0;

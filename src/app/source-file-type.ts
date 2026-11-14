@@ -1,3 +1,5 @@
+import {gmailBrowserLink} from './gmail-browser-link.ts';
+
 export type SourceFileKind = 'folder' | 'document' | 'sheet' | 'presentation' | 'notebook' | 'ecmx' | 'pdf' | 'image' | 'mail' | 'file';
 export interface SourceFileInfo {name: string; mimeType?: string; provider?: string; url?: string; shortcut?: {id?: string; mimeType: string; resourceKey?: string}}
 const GOOGLE_TYPES: Record<string, SourceFileKind> = {
@@ -37,8 +39,9 @@ export function sourceFileLabel(file: SourceFileInfo): string {
   return file.shortcut ? label + '捷徑' : file.mimeType === 'application/vnd.google-apps.shortcut' ? '檔案捷徑' : label;
 }
 
-/** Keep portable Drive URLs in saved data, and open notebooks in their editor. */
-export function sourceOpenUrl(file: SourceFileInfo): string {
+/** Keep portable URLs in saved data, and adapt the external destination only when displayed. */
+export function sourceOpenUrl(file: SourceFileInfo, userAgent?: string): string {
+  if (file.provider === 'gmail') return gmailBrowserLink(file.url ?? '', userAgent);
   if (!file.url || sourceFileKind(file) !== 'notebook' || file.provider && file.provider !== 'google-drive') return file.url ?? '';
   try {
     const url = new URL(file.url);

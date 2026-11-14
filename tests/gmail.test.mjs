@@ -367,6 +367,20 @@ test('Gmail 原信連結使用來源帳號與 Message-ID 搜尋，不依瀏覽�
   assert.equal(chooser.hostname, 'accounts.google.com'); assert.equal(chooser.searchParams.get('Email'), 'me@example.test'); assert.equal(target.searchParams.get('authuser'), 'me@example.test');
   assert.match(decodeURIComponent(target.hash), /rfc822msgid:mail@example.test/); assert.equal(target.pathname, '/mail/'); assert.equal(gmailMessageLink(preview, 'invalid'), '');
 });
+test('手機郵件側欄與預覽的原信入口都產生外部 Gmail 手機搜尋，取得連結不讀取 API', () => {
+  const f = fixture(); let calls = 0, viewer;
+  try {
+    navigator.userAgent = 'Mozilla/5.0 (Linux; Android 15) Chrome/142.0.0.0 Mobile Safari/537.36';
+    f.auth.api = async () => {calls++; throw new Error('取得連結不得讀取 API');};
+    const link = GmailPanel.prototype.link.call({gmail: f.gmail}, preview);
+    viewer = runInInjectionContext(f.child, () => new MailPreviewDialog());
+    viewer.mail = signal(preview); viewer.email = signal('me@example.test');
+    assert.equal(viewer.link(), link);
+    const target = new URL(new URL(link).searchParams.get('continue'));
+    assert.equal(target.pathname, '/mail/mu/mp/'); assert.equal(decodeURIComponent(target.hash), '#tl/search/in:anywhere rfc822msgid:mail@example.test');
+    assert.equal(calls, 0);
+  } finally {viewer?.ngOnDestroy(); f.close();}
+});
 test('郵件複製是獨立快照，月份建立全天，週時段一小時且跨午夜換日；長預覽仍保留原信連結', () => {
   const task = mailTask({...preview, snippet: '預覽'.repeat(2000)}, 'me@example.test', base, {date: '2026-10-10'});
   assert.equal(task.startDate, '2026-10-10'); assert.equal(task.dueDate, task.startDate); assert.equal(task.startTime, ''); assert.equal(task.dueTime, '');
