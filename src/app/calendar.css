@@ -118,8 +118,6 @@ h2 { margin: 0; font-size: var(--font-17); font-weight: 600; color: var(--accent
 .milestone-event { border-left-style: dotted; }
 .now-line { position: absolute; left: 0; right: 0; height: 1px; background: var(--danger-text); z-index: 4; pointer-events: none; }
 .now-line span { position: absolute; left: -4px; top: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--danger-text); }
-.calendar-note { display: flex; align-items: center; gap: var(--sp5); color: var(--text-muted); background: var(--footer-bg); font-size: var(--font-9); margin: 0; padding: var(--sp14) var(--sp22); line-height: 1.7; }
-.calendar-note app-icon { width: 12px; height: 12px; flex-shrink: 0; }
 .external-event { border-left-style: dashed; }
 .external-mark { font-size: var(--font-8); font-weight: 700; flex-shrink: 0; }
 .unscheduled-tasks { padding: var(--sp19) var(--sp22) var(--sp22); border-top: 1px solid var(--border); background: var(--footer-bg); }
@@ -142,7 +140,7 @@ h3 span { border-radius: 4px; background: var(--accent-soft); color: var(--text-
 .calendar-move-notice, .calendar-move-error { margin: 0; padding: var(--sp12) var(--sp22); font-size: var(--font-10); line-height: 1.6; background: var(--footer-bg); color: var(--accent-text); border-top: 1px solid var(--border); }
 .calendar-move-error { color: var(--danger-text); }
 @media (max-width: 900px) { .calendar-toolbar { padding: var(--sp17); } h2 { font-size: var(--font-14); } .calendar-icon { width: 31px; height: 31px; } }
-@media (max-width: 700px) { .calendar-toolbar { flex-wrap: wrap; padding: var(--sp15); gap: var(--sp12); } .calendar-heading { gap: var(--sp9); } h2 { font-size: var(--font-13); } .calendar-heading p { font-size: var(--font-9); } .week-view .calendar-navigation { margin-left: auto; } .week-scroll { height: clamp(440px, calc(100dvh - 180px), 680px); } .week-timetable { min-width: calc(910px * var(--font-scale)); --time-gutter: calc(58px * var(--font-scale)); } .calendar-note { padding: var(--sp12) var(--sp15); font-size: var(--font-8); } .unscheduled-tasks { padding: var(--sp16) var(--sp15); } .unscheduled-heading { gap: var(--sp8); } }
+@media (max-width: 700px) { .calendar-toolbar { flex-wrap: wrap; padding: var(--sp15); gap: var(--sp12); } .calendar-heading { gap: var(--sp9); } h2 { font-size: var(--font-13); } .calendar-heading p { font-size: var(--font-9); } .week-view .calendar-navigation { margin-left: auto; } .week-timetable { min-width: calc(910px * var(--font-scale)); --time-gutter: calc(58px * var(--font-scale)); } .unscheduled-tasks { padding: var(--sp16) var(--sp15); } .unscheduled-heading { gap: var(--sp8); } }
 .calendar-wide .calendar-grid {grid-template-columns: repeat(7, minmax(calc(220px * var(--font-scale)), 1fr)); min-width: calc(1540px * var(--font-scale));}
 .calendar-wide .week-timetable {min-width: calc(1540px * var(--font-scale) + var(--time-gutter));}
 /* Hide the choice when all seven wide columns fit, including the week's time gutter.
@@ -159,6 +157,7 @@ h3 span { border-radius: 4px; background: var(--accent-soft); color: var(--text-
   .month-timed small {max-width: 45%;}
 }
 @container orbit-calendar (max-width: 700px) {
+  .week-scroll {height: max(480px, calc(100dvh - 140px));}
   .source-label {display: none;}
   .calendar-source-toggles button {justify-content: center; width: max(30px, calc(34px * var(--font-scale))); height: max(30px, calc(34px * var(--font-scale))); padding: var(--sp6);}
 }
@@ -185,6 +184,6 @@ h3 span { border-radius: 4px; background: var(--accent-soft); color: var(--text-
 .chart-fullscreen .calendar-grid{min-height:100%;grid-template-rows:auto repeat(var(--month-weeks),minmax(min-content,1fr))}
 .chart-fullscreen .calendar-day{min-height:88px}
 .chart-fullscreen .weekday-heading{position:sticky;top:0;z-index:2}
-.chart-fullscreen .calendar-note,.chart-fullscreen .unscheduled-tasks:has(.no-unscheduled){display:none}
+.chart-fullscreen .unscheduled-tasks:has(.no-unscheduled){display:none}
 .chart-fullscreen .unscheduled-tasks{max-height:20dvh;overflow:auto;padding:var(--sp10) var(--sp15);overscroll-behavior:contain}
 .chart-fullscreen .unscheduled-heading{margin-bottom:var(--sp8)}

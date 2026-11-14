@@ -75,6 +75,44 @@ test('月週視圖往返保留選中日，跨年週導覽後返回正確月份',
   } finally {f.close();}
 });
 
+test('今天將月週的當日欄位置中，避開週時間軸、限制捲動邊界且不改垂直位置', t => {
+  t.mock.timers.enable({apis: ['Date'], now: new Date(2026, 10, 12, 10, 30)});
+  for (const mode of ['month', 'week']) {
+    const f = calendarController(), dom = new JSDOM('<div id="scroll"><div class="week-timezone"></div><div class="calendar-day today week-date week-today"></div></div>');
+    const scroller = dom.window.document.querySelector('#scroll'), day = scroller.querySelector('.today'), moves = [], gutter = mode === 'week' ? 58 : 0;
+    let column = 4;
+    try {
+      f.calendar.mode.set(mode); f.calendar[mode + 'Scroller'] = () => ({nativeElement: scroller});
+      Object.defineProperties(scroller, {clientWidth: {value: 320}, scrollWidth: {value: 1540 + gutter}});
+      scroller.scrollLeft = 100; scroller.scrollTop = 216;
+      scroller.getBoundingClientRect = () => ({left: 50});
+      scroller.querySelector('.week-timezone').getBoundingClientRect = () => ({width: gutter});
+      day.getBoundingClientRect = () => ({left: 50 + gutter + column * 220 - scroller.scrollLeft, width: 220});
+      scroller.scrollTo = options => {moves.push(options); scroller.scrollLeft = options.left;};
+      f.calendar.goToday();
+      assert.equal(f.calendar.today(), '2026-11-12'); assert.equal(f.calendar.anchor().getDate(), 12);
+      f.calendar.scrollToToday();
+      assert.deepEqual(moves.at(-1), {left: mode === 'week' ? 859 : 830, top: 216, behavior: 'smooth'});
+      column = 0; f.calendar.scrollToToday(); assert.equal(moves.at(-1).left, 0);
+      column = 6; f.calendar.scrollToToday(); assert.equal(moves.at(-1).left, mode === 'week' ? 1278 : 1220);
+      dom.window.matchMedia = () => ({matches: true}); f.calendar.scrollToToday(); assert.equal(moves.at(-1).behavior, 'instant');
+      assert.equal(scroller.scrollTop, 216);
+    } finally {f.close(); dom.window.close();}
+  }
+});
+
+test('當日不在目前格線或全部日期已可見時，今天定位不移動頁面或時間表', () => {
+  const f = calendarController(), dom = new JSDOM('<div></div>'), scroller = dom.window.document.querySelector('div');
+  let moves = 0;
+  try {
+    f.calendar.monthScroller = () => ({nativeElement: scroller}); scroller.scrollTo = () => {moves++;};
+    Object.defineProperties(scroller, {clientWidth: {value: 1600}, scrollWidth: {value: 1540, configurable: true}});
+    f.calendar.scrollToToday(); assert.equal(moves, 0);
+    Object.defineProperty(scroller, 'scrollWidth', {value: 2000});
+    f.calendar.scrollToToday(); assert.equal(moves, 0);
+  } finally {f.close(); dom.window.close();}
+});
+
 test('全螢幕週標頭的滾輪捲動時間表，普通模式保留頁面捲動且不攔截水平或縮放手勢', () => {
   const f = calendarController(), dom = new JSDOM('<div style="line-height:20px"></div>'), scroller = dom.window.document.querySelector('div'), pageMoves = [];
   const previous = globalThis.WheelEvent; globalThis.WheelEvent = dom.window.WheelEvent;

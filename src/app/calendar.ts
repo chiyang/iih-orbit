@@ -79,6 +79,9 @@ export class Calendar {
   readonly now = signal(new Date());
   readonly today = computed(() => dateKey(this.now()));
   readonly weekScroller = viewChild<ElementRef<HTMLDivElement>>('weekScroller');
+  readonly monthScroller = viewChild<ElementRef<HTMLDivElement>>('monthScroller');
+  // Resetting this flag must not rerun the render effect and interrupt horizontal smooth scrolling.
+  private todayScrollRequested = false;
   readonly fullDayHours = signal(false);
   readonly widthMode = computed(() => this.preferences.calendarWidth?.() ?? 'wide');
   readonly weekRange = computed(() => this.fullDayHours() ? {startHour: 0, endHour: 24} : this.preferences.weekRange?.() ?? DEFAULT_WEEK_RANGE);
@@ -187,8 +190,10 @@ export class Calendar {
       const hourHeight = this.hourHeight();
       const startHour = this.weekRange().startHour;
       const scroller = this.weekScroller()?.nativeElement;
+      const monthScroller = this.monthScroller()?.nativeElement;
+      const scrollToday = this.todayScrollRequested;
       if (scroller) {
-        const samePeriod = this.previousScroller === scroller && this.previousAnchor === anchor;
+        const samePeriod = this.previousScroller === scroller && (this.previousAnchor === anchor || scrollToday);
         const initialHour = this.previousScroller === scroller ? startHour : untracked(() => this.savedScrollHour());
         scroller.scrollTop = Math.max(0, (samePeriod ? this.scrollHour : initialHour) - startHour) * hourHeight;
         this.scrollHour = startHour + scroller.scrollTop / hourHeight;
@@ -198,7 +203,23 @@ export class Calendar {
       this.previousAnchor = anchor;
       this.previousHourHeight = hourHeight;
       this.previousStartHour = startHour;
+      if (scrollToday && (scroller || monthScroller)) untracked(() => {
+        this.scrollToToday();
+        this.todayScrollRequested = false;
+      });
     });
+  }
+
+  private scrollToToday(): void {
+    const week = this.mode() === 'week', scroller = (week ? this.weekScroller() : this.monthScroller())?.nativeElement;
+    if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return;
+    const day = scroller.querySelector<HTMLElement>(week ? '.week-date.week-today' : '.calendar-day.today');
+    if (!day) return;
+    const gutter = week ? scroller.querySelector<HTMLElement>('.week-timezone')?.getBoundingClientRect().width ?? 0 : 0;
+    const bounds = day.getBoundingClientRect(), viewport = scroller.getBoundingClientRect();
+    const left = scroller.scrollLeft + bounds.left - viewport.left - scroller.clientLeft - gutter - (scroller.clientWidth - gutter - bounds.width) / 2;
+    const reducedMotion = scroller.ownerDocument.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    scroller.scrollTo({left: Math.max(0, Math.min(left, scroller.scrollWidth - scroller.clientWidth)), top: scroller.scrollTop, behavior: reducedMotion ? 'instant' : 'smooth'});
   }
 
   rememberScroll(): void {
@@ -238,6 +259,7 @@ export class Calendar {
   }
 
   navigate(direction: number): void {
+    this.todayScrollRequested = false;
     const current = this.anchor();
     if (this.mode() === 'month') this.anchor.set(new Date(current.getFullYear(), current.getMonth() + direction, 1));
     else {
@@ -249,7 +271,9 @@ export class Calendar {
   }
 
   goToday(): void {
-    this.anchor.set(new Date());
+    const today = new Date();
+    this.todayScrollRequested = true;
+    this.now.set(today); this.anchor.set(today);
     this.expandedDays.set(new Set());
   }
 

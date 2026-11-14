@@ -68,7 +68,7 @@
       </div>
     </div>
   } @else {
-    <div class="calendar-scroll">
+    <div class="calendar-scroll" #monthScroller>
     <div class="calendar-grid" [style.--month-weeks]="days().length / 7">
       @for (weekday of weekdays; track weekday) {<div class="weekday-heading">{{ weekday }}</div>}
       @for (day of days(); track day.key) {
@@ -94,7 +94,6 @@
   @if (moveNotice() || savingMove()) {<p class="calendar-move-notice" role="status">{{ savingMove() ? '正在儲存任務變更…' : moveNotice() }}</p>}
   @if (moveError()) {<p class="calendar-move-error" role="alert">{{ moveError() }}</p>}
   @if ((documentDragging() || mailDragging()) && (documentLinkTaskId() || documentBlocked() || dropPosition())) {<p class="calendar-document-feedback" role="status">{{ documentBlocked() ? 'Google 月曆活動無法加入資訊連結，請拖到 Orbit 任務或空白日期。' : documentLinkTaskId() ? '放開以加入資訊連結' : '放開以在此日期／時間建立帶資訊連結的任務' }}</p>}
-  <p class="calendar-note"><app-icon name="clock" />{{ mode() === 'week' ? '拖到任務建立連結；空白時段改期（每 15 分鐘），全天區可改為全天。' : '拖到任務建立連結；空白日期改期並保留時間與跨度。每天預覽四項，可展開全部。' }} Google 活動為唯讀。</p>
   @if (showOrbit()) {<section class="unscheduled-tasks" aria-label="未排程任務">
     <div class="unscheduled-heading"><h3><app-icon name="list" />未排程<span>{{ unscheduled().length }}</span></h3><p>可拖曳至日期或時段，安排任務。</p></div>
     <div class="unscheduled-list">@for (task of unscheduled(); track task.id) {<button [class.document-link-target]="documentLinkTaskId() === task.id || taskLinkTarget()?.original?.id === task.id" [attr.data-orbit-task-id]="isExternal(task) ? null : task.id" [class.document-blocked-target]="(documentDragging() || mailDragging() || !!draggedTaskId()) && documentBlocked() && (isExternal(task) || draggedTaskId() === task.id)" (dragenter)="documentEntryOver($event, task)" (dragover)="documentEntryOver($event, task)" (drop)="documentEntryDrop($event, task)" [orbitColor]="category(task.categoryId).color" (click)="openEntry(task)" [attr.draggable]="canDrag(task)" [class.task-drag-source]="draggedTaskId() === task.id" (dragstart)="startDrag($event, task, {kind: 'all-day', day: today()})" (dragend)="endDrag()"><i></i>{{ task.title }}<app-icon name="edit" /></button>} @empty {<span class="no-unscheduled">每個任務都已有日期安排。</span>}</div>
